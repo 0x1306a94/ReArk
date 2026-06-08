@@ -22,12 +22,12 @@ ApplicationWindow {
 
     property string currentTheme: "dark"
     property string currentHighlightTheme: "GitHub Dark"
-    property url currentFileUrl: ""
     readonly property bool effectiveDarkTheme: currentTheme === "system"
                                                ? Qt.styleHints.colorScheme === Qt.Dark
                                                : currentTheme === "dark"
     readonly property color windowBackgroundColor: effectiveDarkTheme ? "#171a1f" : "#f5f7f8"
-    readonly property string currentFilePath: decodeURIComponent(currentFileUrl.toString().replace(/^file:\/+/, ""))
+    readonly property bool hasPackage: decompilerController.hasPackage
+    readonly property string currentFilePath: decompilerController.packagePath
     readonly property string currentFileName: currentFilePath.length > 0 ? currentFilePath.split(/[\\/]/).pop() : ""
 
     color: windowBackgroundColor
@@ -53,6 +53,7 @@ ApplicationWindow {
             currentTheme: mainWindow.currentTheme
             currentHighlightTheme: mainWindow.currentHighlightTheme
             onOpenRequested: openFileDialog.open()
+            onRecentFileRequested: function(filePath) { mainWindow.openRecentFilePath(filePath) }
             onThemeRequested: function(theme) { mainWindow.applyTheme(theme) }
             onHighlightThemeRequested: function(theme) { mainWindow.currentHighlightTheme = theme }
             onSystemMenuRequested: function(globalPosition) {
@@ -60,14 +61,29 @@ ApplicationWindow {
             }
         }
 
-        RK.MainWorkspace {
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            fileName: mainWindow.currentFileName
-            filePath: mainWindow.currentFilePath
-            highlightTheme: mainWindow.currentHighlightTheme
-            onOpenRequested: openFileDialog.open()
-            onFileDropped: function(url) { mainWindow.currentFileUrl = url }
+
+            RK.StartPage {
+                anchors.fill: parent
+                visible: !mainWindow.hasPackage
+                busy: decompilerController.busy
+                status: decompilerController.status
+                onOpenRequested: openFileDialog.open()
+                onFileDropped: function(fileUrl) { mainWindow.openFileUrl(fileUrl) }
+                onRecentFileRequested: function(filePath) { mainWindow.openRecentFilePath(filePath) }
+            }
+
+            RK.MainWorkspace {
+                anchors.fill: parent
+                visible: mainWindow.hasPackage
+                fileName: mainWindow.currentFileName
+                filePath: mainWindow.currentFilePath
+                highlightTheme: mainWindow.currentHighlightTheme
+                onOpenRequested: openFileDialog.open()
+                onFileDropped: function(fileUrl) { mainWindow.openFileUrl(fileUrl) }
+            }
         }
     }
 
@@ -174,7 +190,15 @@ ApplicationWindow {
             qsTr("HarmonyOS packages (*.hap *.app *.abc)"),
             qsTr("All files (*)")
         ]
-        onAccepted: mainWindow.currentFileUrl = selectedFile
+        onAccepted: mainWindow.openFileUrl(selectedFile)
+    }
+
+    Connections {
+        target: decompilerController
+
+        function onPackageOpened(filePath) {
+            recentFilesModel.addFile(filePath)
+        }
     }
 
     Timer {
@@ -186,7 +210,7 @@ ApplicationWindow {
 
     Component.onCompleted: {
         if (initialFileUrl && initialFileUrl.length > 0) {
-            currentFileUrl = initialFileUrl
+            openFileUrl(initialFileUrl)
         }
         automaticUpdateCheckTimer.start()
         show()
@@ -203,5 +227,36 @@ ApplicationWindow {
         if (shouldFollowTheme) {
             currentHighlightTheme = effectiveDarkTheme ? "GitHub Dark" : "GitHub Light"
         }
+    }
+
+    function openFileUrl(fileUrl) {
+        openFilePath(filePathFromUrl(fileUrl))
+    }
+
+    function openFilePath(filePath) {
+        if (!filePath || filePath.length <= 0) {
+            return
+        }
+        decompilerController.decompileFile(filePath)
+    }
+
+    function openRecentFilePath(filePath) {
+        if (!filePath || filePath.length <= 0) {
+            return
+        }
+        if (!recentFilesModel.fileExists(filePath)) {
+            recentFilesModel.removeFile(filePath)
+            decompilerController.showStatusMessage(qsTr("Recent file no longer exists: %1").arg(filePath))
+            return
+        }
+        openFilePath(filePath)
+    }
+
+    function filePathFromUrl(fileUrl) {
+        const text = fileUrl && fileUrl.toString ? fileUrl.toString() : String(fileUrl)
+        if (text.indexOf("file:") === 0) {
+            return decodeURIComponent(text.replace(/^file:\/+/, ""))
+        }
+        return text
     }
 }

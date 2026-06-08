@@ -15,6 +15,7 @@ Rectangle {
     readonly property bool windowActive: !targetWindow || targetWindow.active
 
     signal openRequested()
+    signal recentFileRequested(string filePath)
     signal themeRequested(string theme)
     signal highlightThemeRequested(string theme)
     signal systemMenuRequested(point globalPosition)
@@ -109,6 +110,7 @@ Rectangle {
             currentTheme: root.currentTheme
             currentHighlightTheme: root.currentHighlightTheme
             onOpenRequested: root.openRequested()
+            onRecentFileRequested: function(filePath) { root.recentFileRequested(filePath) }
             onThemeRequested: function(theme) { root.themeRequested(theme) }
             onHighlightThemeRequested: function(theme) { root.highlightThemeRequested(theme) }
         }

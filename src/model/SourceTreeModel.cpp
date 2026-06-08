@@ -43,6 +43,11 @@ QString documentDiagnostics(const std::shared_ptr<DocumentContent>& document)
     return document ? document->diagnostics : QString{};
 }
 
+QString documentDisassembly(const std::shared_ptr<DocumentContent>& document)
+{
+    return document ? document->disassembly : QString{};
+}
+
 bool containsAllTerms(const QString& haystack, const QStringList& terms)
 {
     return std::ranges::all_of(terms, [&haystack](const QString& term) {
@@ -284,6 +289,41 @@ bool SourceTreeModel::nodeEligibleForBackgroundLoad(int nodeIndex) const
         && node.contentMode == QStringLiteral("text");
 }
 
+bool SourceTreeModel::nodeHasDisassembly(int nodeIndex) const
+{
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int>(nodes_.size())) {
+        return false;
+    }
+    const auto& node = nodes_.at(static_cast<std::size_t>(nodeIndex));
+    return node.section == QStringLiteral("source") && node.moduleId.has_value();
+}
+
+bool SourceTreeModel::nodeDisassemblyLoaded(int nodeIndex) const
+{
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int>(nodes_.size())) {
+        return false;
+    }
+    const auto& node = nodes_.at(static_cast<std::size_t>(nodeIndex));
+    return node.document && node.document->disassemblyLoaded;
+}
+
+QString SourceTreeModel::nodeDisassembly(int nodeIndex) const
+{
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int>(nodes_.size())) {
+        return {};
+    }
+    return documentDisassembly(nodes_.at(static_cast<std::size_t>(nodeIndex)).document);
+}
+
+std::size_t SourceTreeModel::nodeModuleId(int nodeIndex) const
+{
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int>(nodes_.size())) {
+        return 0;
+    }
+    const auto& node = nodes_.at(static_cast<std::size_t>(nodeIndex));
+    return node.moduleId.value_or(0);
+}
+
 QVariantList SourceTreeModel::navigationCandidates(const QString& query, int limit) const
 {
     struct Match {
@@ -496,9 +536,6 @@ void SourceTreeModel::replaceFiles(std::vector<DecompiledSourceFile> files)
     selectedNode_ = firstFileNode();
     endResetModel();
     emitSelectedChanged(previousRow, previousNode);
-    if (selectedNeedsLoad()) {
-        emit fileActivated(selectedNode_);
-    }
 }
 
 void SourceTreeModel::setNodeContent(int nodeIndex, std::shared_ptr<DocumentContent> document)
@@ -507,6 +544,10 @@ void SourceTreeModel::setNodeContent(int nodeIndex, std::shared_ptr<DocumentCont
         return;
     }
     auto& node = nodes_.at(static_cast<std::size_t>(nodeIndex));
+    if (node.document && node.document->disassemblyLoaded && document && !document->disassemblyLoaded) {
+        document->disassembly = node.document->disassembly;
+        document->disassemblyLoaded = true;
+    }
     node.document = std::move(document);
     if (node.document && !node.document->kind.isEmpty()) {
         node.kind = node.document->kind;
@@ -525,6 +566,20 @@ void SourceTreeModel::setNodeContent(int nodeIndex, std::shared_ptr<DocumentCont
         emit selectedContentChanged();
         emit diagnosticsChanged();
     }
+}
+
+void SourceTreeModel::setNodeDisassembly(int nodeIndex, QString disassembly)
+{
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int>(nodes_.size())) {
+        return;
+    }
+
+    auto& node = nodes_.at(static_cast<std::size_t>(nodeIndex));
+    if (!node.document) {
+        node.document = makeDocument({}, {}, {}, node.kind, node.contentMode);
+    }
+    node.document->disassembly = std::move(disassembly);
+    node.document->disassemblyLoaded = true;
 }
 
 bool SourceTreeModel::activateNode(int nodeIndex)
@@ -783,6 +838,7 @@ void SourceTreeModel::rebuildTree(std::vector<DecompiledSourceFile> files)
             source.document = makeDocument(std::move(file.content), std::move(file.binaryContent), {}, file.kind, file.contentMode);
         }
         source.hyleId = file.hyleId;
+        source.moduleId = file.moduleId;
         source.lazy = file.lazy;
         source.directory = false;
         source.depth = parts.empty() ? 1 : parts.size();

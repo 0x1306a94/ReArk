@@ -7,9 +7,9 @@ import QtQuick.Layouts
 ApplicationWindow {
     id: aboutWindow
     width: 500
-    height: 380
+    height: 420
     minimumWidth: 450
-    minimumHeight: 340
+    minimumHeight: 400
     visible: false
     title: qsTr("About ReArk")
     modality: Qt.ApplicationModal
@@ -22,8 +22,17 @@ ApplicationWindow {
     readonly property color backgroundColor: darkTheme ? "#15171d" : "#ffffff"
     readonly property color dividerColor: darkTheme ? "#3a404a" : "#d5dcdf"
     readonly property color secondaryTextColor: darkTheme ? "#aab2bd" : "#5f6872"
+    readonly property color buttonColor: darkTheme ? "#151b24" : "#ffffff"
+    readonly property color buttonHoverColor: darkTheme ? "#1d2530" : "#edf3f5"
+    readonly property color buttonBorderColor: darkTheme ? "#2a3542" : "#d8e0e5"
+    readonly property color buttonHoverBorderColor: darkTheme ? "#344353" : "#cbd8de"
     readonly property string githubUrl: "https://github.com/lkimuk/ReArk"
-    readonly property string emailAddress: "lkimuk@cppmore.com"
+    readonly property string issuesUrl: githubUrl + "/issues"
+    readonly property int copyrightStartYear: 2026
+    readonly property int copyrightCurrentYear: new Date().getFullYear()
+    readonly property string copyrightYearRange: copyrightCurrentYear <= copyrightStartYear
+                                                ? String(copyrightStartYear)
+                                                : copyrightStartYear + "-" + copyrightCurrentYear
 
     color: backgroundColor
     Material.theme: darkTheme ? Material.Dark : Material.Light
@@ -35,16 +44,19 @@ ApplicationWindow {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 30
-            spacing: 20
+            anchors.leftMargin: 30
+            anchors.rightMargin: 30
+            anchors.topMargin: 30
+            anchors.bottomMargin: 20
+            spacing: 16
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 16
 
                 Image {
-                    Layout.preferredWidth: 64
-                    Layout.preferredHeight: 64
+                    Layout.preferredWidth: 58
+                    Layout.preferredHeight: 58
                     source: "qrc:/images/app_icon.png"
                     fillMode: Image.PreserveAspectFit
                     smooth: true
@@ -58,14 +70,14 @@ ApplicationWindow {
                     Text {
                         Layout.fillWidth: true
                         text: qsTr("ReArk")
-                        font.pointSize: 24
+                        font.pointSize: 25
                         font.bold: true
                         color: Material.foreground
                     }
 
                     Text {
                         Layout.fillWidth: true
-                        text: qsTr("HarmonyOS Ark Decompiler GUI")
+                        text: qsTr("Reverse the Ark, Reveal the Flow")
                         font.pointSize: 12
                         color: aboutWindow.secondaryTextColor
                     }
@@ -81,8 +93,8 @@ ApplicationWindow {
             GridLayout {
                 Layout.fillWidth: true
                 columns: 2
-                columnSpacing: 20
-                rowSpacing: 10
+                columnSpacing: 22
+                rowSpacing: 9
 
                 Text {
                     text: qsTr("Version")
@@ -104,7 +116,7 @@ ApplicationWindow {
                 }
 
                 Text {
-                    text: Qt.formatDateTime(new Date(), "yyyy-MM-dd")
+                    text: buildInfo.buildTimestamp
                     font.pointSize: 10
                     color: Material.foreground
                 }
@@ -120,11 +132,24 @@ ApplicationWindow {
                     font.pointSize: 10
                     color: Material.foreground
                 }
+
+                Text {
+                    text: qsTr("License")
+                    font.pointSize: 10
+                    color: aboutWindow.secondaryTextColor
+                }
+
+                Text {
+                    text: qsTr("Apache-2.0")
+                    font.pointSize: 10
+                    color: Material.foreground
+                }
             }
 
             Text {
                 Layout.fillWidth: true
-                text: qsTr("A lightweight desktop shell for browsing HarmonyOS package decompilation output. Hyle integration will provide the file tree and source content.")
+                Layout.topMargin: 4
+                text: qsTr("Professional reverse engineering tool for HarmonyOS NEXT HAP/ABC. Supports disassembly, decompilation, signature identification, and file structure browsing.")
                 font.pointSize: 10
                 wrapMode: Text.WordWrap
                 lineHeight: 1.35
@@ -133,54 +158,79 @@ ApplicationWindow {
 
             Item {
                 Layout.fillHeight: true
+                Layout.maximumHeight: 18
             }
 
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
-                spacing: 10
+                Layout.topMargin: 2
+                Layout.bottomMargin: 2
+                spacing: 12
 
                 Repeater {
                     model: [
                         {
                             "kind": "github",
-                            "tooltip": qsTr("GitHub"),
+                            "label": qsTr("GitHub"),
                             "url": aboutWindow.githubUrl
                         },
                         {
-                            "kind": "email",
-                            "tooltip": qsTr("Email"),
-                            "url": "mailto:" + aboutWindow.emailAddress
+                            "kind": "issue",
+                            "label": qsTr("Report Issue"),
+                            "url": aboutWindow.issuesUrl
                         }
                     ]
 
-                    delegate: ToolButton {
+                    delegate: Item {
                         id: contactButton
 
                         required property var modelData
                         readonly property string iconKind: modelData.kind
                         readonly property string targetUrl: modelData.url
+                        readonly property string iconSource: contactButton.iconKind === "github"
+                                                             ? (aboutWindow.darkTheme ? "qrc:/icons/github-white.svg" : "qrc:/icons/github.svg")
+                                                             : (aboutWindow.darkTheme ? "qrc:/icons/issue-white.svg" : "qrc:/icons/issue.svg")
+                        readonly property bool hovered: contactMouse.containsMouse
 
-                        Layout.preferredWidth: 32
-                        Layout.preferredHeight: 32
-                        padding: 0
-                        display: AbstractButton.IconOnly
-                        icon.source: contactButton.iconKind === "github"
-                                     ? "qrc:/icons/github.svg"
-                                     : "qrc:/icons/email.svg"
-                        icon.width: 22
-                        icon.height: 22
-                        icon.color: aboutWindow.darkTheme ? "#f2f4f8" : "#20242b"
-                        hoverEnabled: true
-                        ToolTip.text: modelData.tooltip
-                        ToolTip.visible: hovered
+                        Layout.preferredWidth: 42
+                        Layout.preferredHeight: 42
+                        ToolTip.text: modelData.label
+                        ToolTip.visible: contactButton.hovered
                         ToolTip.delay: 400
-                        onClicked: Qt.openUrlExternally(targetUrl)
 
-                        background: Rectangle {
-                            radius: 4
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: width / 2
                             color: contactButton.hovered
-                                   ? (aboutWindow.darkTheme ? "#2b313a" : "#e8eef0")
-                                   : "transparent"
+                                   ? aboutWindow.buttonHoverColor
+                                   : aboutWindow.buttonColor
+                            border.width: 1
+                            border.color: contactButton.hovered
+                                          ? aboutWindow.buttonHoverBorderColor
+                                          : aboutWindow.buttonBorderColor
+                        }
+
+                        Row {
+                            anchors.centerIn: parent
+
+                            Image {
+                                width: 20
+                                height: width
+                                source: contactButton.iconSource
+                                sourceSize.width: width * 2
+                                sourceSize.height: height * 2
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                                mipmap: true
+                            }
+                        }
+
+                        MouseArea {
+                            id: contactMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: Qt.openUrlExternally(contactButton.targetUrl)
                         }
                     }
                 }
@@ -188,7 +238,8 @@ ApplicationWindow {
 
             Text {
                 Layout.fillWidth: true
-                text: qsTr("Copyright 2026 ReArk. Licensed under Apache-2.0.")
+                Layout.topMargin: 0
+                text: qsTr("Copyright © %1 Miles Li. All rights reserved.").arg(aboutWindow.copyrightYearRange)
                 font.pointSize: 9
                 color: aboutWindow.secondaryTextColor
                 horizontalAlignment: Text.AlignHCenter

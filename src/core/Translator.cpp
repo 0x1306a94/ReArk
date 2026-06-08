@@ -1,6 +1,7 @@
 #include "core/Translator.h"
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QQmlEngine>
 
 Translator::Translator(QQmlEngine* engine, QObject* parent)
@@ -13,7 +14,9 @@ bool Translator::switchLanguage(const QString& locale)
 {
     QCoreApplication::removeTranslator(&translator_);
 
-    if (!translator_.load(QStringLiteral(":/i18n/reark_%1").arg(locale))) {
+    const QString resourcePath = QStringLiteral(":/i18n/reark_%1.qm").arg(locale);
+    if (!translator_.load(resourcePath)) {
+        qWarning().noquote() << "Failed to load translation:" << resourcePath;
         if (engine_) {
             engine_->retranslate();
         }

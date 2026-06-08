@@ -18,6 +18,7 @@
 namespace {
 
 constexpr int kMaxBackgroundPreloads = 2;
+constexpr int kMaxBackgroundSourceBatchSize = 32;
 constexpr int kMaxQueuedBackgroundPreloads = 512;
 constexpr qsizetype kMaxBackgroundCachedBytes = 2 * 1024 * 1024;
 
@@ -45,6 +46,8 @@ DecompilerController::DecompilerController(ResourcePreviewProvider* previewProvi
             this, &DecompilerController::diagnosticsChanged);
     connect(&tabsModel_, &OpenFileTabsModel::activeTabChanged,
             this, &DecompilerController::refreshActiveHexDocument);
+    connect(&tabsModel_, &OpenFileTabsModel::activeTabChanged,
+            this, &DecompilerController::activeDisassemblyChanged);
     connect(&treeModel_, &SourceTreeModel::selectedIndexChanged,
             this, &DecompilerController::selectedIndexChanged);
     connect(&treeModel_, &SourceTreeModel::fileActivated,
@@ -91,6 +94,49 @@ bool DecompilerController::busy() const
     return busy_;
 }
 
+double DecompilerController::loadingProgress() const
+{
+    return loadingProgress_;
+}
+
+QStringList DecompilerController::activityLog() const
+{
+    return activityLog_;
+}
+
+bool DecompilerController::hasPackage() const
+{
+    return hasPackage_;
+}
+
+QString DecompilerController::packagePath() const
+{
+    return hasPackage_ ? packagePath_ : QString();
+}
+
+bool DecompilerController::activeSupportsDisassembly() const
+{
+    return treeModel_.nodeHasDisassembly(tabsModel_.activeNodeIndex());
+}
+
+bool DecompilerController::activeDisassemblyLoading() const
+{
+    return disassemblyLoadingNodes_.contains(tabsModel_.activeNodeIndex());
+}
+
+QString DecompilerController::activeDisassemblyContent() const
+{
+    const int nodeIndex = tabsModel_.activeNodeIndex();
+    if (nodeIndex < 0) {
+        return {};
+    }
+    if (disassemblyLoadingNodes_.contains(nodeIndex)
+        && !treeModel_.nodeDisassemblyLoaded(nodeIndex)) {
+        return tr("// Disassembling selected source file...");
+    }
+    return treeModel_.nodeDisassembly(nodeIndex);
+}
+
 int DecompilerController::selectedIndex() const
 {
     return treeModel_.selectedIndex();
@@ -112,11 +158,19 @@ void DecompilerController::decompileFile(const QString& filePath)
     if (previewProvider_ != nullptr) {
         previewProvider_->clear();
     }
+    pendingPackagePath_ = filePath;
     packagePath_ = filePath;
+    setHasPackage(true);
     resetLoadingState();
+    tabsModel_.clear();
+    hexModel_.clear();
+    treeModel_.replaceFiles({});
     const quint64 requestId = openRequestId_;
+    clearActivityLog();
+    setLoadingProgress(0.08);
     setBusy(true);
-    setStatus(tr("Decompiling %1").arg(QFileInfo(filePath).fileName()));
+    setStatus(tr("Opening %1").arg(QFileInfo(filePath).fileName()));
+    appendActivity(tr("Opening package session."));
 
     auto context = std::make_shared<HyleDecompiler::SessionContext>();
     packageContext_ = context;
@@ -168,6 +222,16 @@ void DecompilerController::navigateToNode(int nodeIndex)
     treeModel_.activateNode(nodeIndex);
 }
 
+void DecompilerController::loadActiveDisassembly()
+{
+    startDisassemblyLoad(tabsModel_.activeNodeIndex());
+}
+
+void DecompilerController::showStatusMessage(const QString& message)
+{
+    setStatus(message);
+}
+
 QString DecompilerController::formatJson(const QString& content) const
 {
     QJsonParseError parseError;
@@ -193,11 +257,15 @@ void DecompilerController::clear()
         packageContext_->requestStop();
     }
     packageContext_.reset();
+    pendingPackagePath_.clear();
     if (previewProvider_ != nullptr) {
         previewProvider_->clear();
     }
     packagePath_.clear();
+    setHasPackage(false);
     resetLoadingState();
+    clearActivityLog();
+    setLoadingProgress(0.0);
     tabsModel_.clear();
     hexModel_.clear();
     treeModel_.replaceFiles({});
@@ -228,6 +296,48 @@ void DecompilerController::setBusy(bool busy)
     emit busyChanged();
 }
 
+void DecompilerController::setLoadingProgress(double progress)
+{
+    progress = std::clamp(progress, 0.0, 1.0);
+    if (qFuzzyCompare(loadingProgress_, progress)) {
+        return;
+    }
+    loadingProgress_ = progress;
+    emit loadingProgressChanged();
+}
+
+void DecompilerController::clearActivityLog()
+{
+    if (activityLog_.isEmpty()) {
+        return;
+    }
+    activityLog_.clear();
+    emit activityLogChanged();
+}
+
+void DecompilerController::appendActivity(const QString& activity)
+{
+    if (activity.isEmpty()) {
+        return;
+    }
+    activityLog_.append(activity);
+    constexpr qsizetype kMaxActivityLogItems = 8;
+    while (activityLog_.size() > kMaxActivityLogItems) {
+        activityLog_.removeFirst();
+    }
+    emit activityLogChanged();
+}
+
+void DecompilerController::setHasPackage(bool hasPackage)
+{
+    if (hasPackage_ == hasPackage) {
+        return;
+    }
+
+    hasPackage_ = hasPackage;
+    emit packageChanged();
+}
+
 void DecompilerController::applyOpenResult(quint64 requestId, HyleDecompiler::OpenResult result)
 {
     if (requestId != openRequestId_) {
@@ -245,24 +355,33 @@ void DecompilerController::applyOpenResult(quint64 requestId, HyleDecompiler::Op
         if (previewProvider_ != nullptr) {
             previewProvider_->clear();
         }
+        pendingPackagePath_.clear();
         packagePath_.clear();
+        setHasPackage(false);
         resetLoadingState();
+        setLoadingProgress(0.0);
         tabsModel_.clear();
         hexModel_.clear();
         treeModel_.replaceFiles({});
+        appendActivity(result.error);
         setStatus(result.error);
         setBusy(false);
         return;
     }
 
     packageContext_ = std::move(result.context);
+    packagePath_ = pendingPackagePath_;
+    pendingPackagePath_.clear();
     tabsModel_.clear();
+    setLoadingProgress(0.22);
+    appendActivity(tr("Building file tree."));
     treeModel_.replaceFiles(std::move(result.files));
-    if (foregroundLoadingNodes_.empty()) {
-        setBusy(false);
-        setStatus(result.status);
-    }
+    setHasPackage(true);
+    emit packageOpened(packagePath_);
+    appendActivity(result.status);
+    setStatus(result.status);
     rebuildBackgroundPreloadQueue(treeModel_.selectedNode());
+    updateBackgroundPreloadProgress();
 }
 
 void DecompilerController::applySourceResult(quint64 requestId, HyleDecompiler::SourceResult result)
@@ -274,11 +393,14 @@ void DecompilerController::applySourceResult(quint64 requestId, HyleDecompiler::
     const bool wasBackground = backgroundLoadingNodes_.erase(result.nodeIndex) > 0;
     if (wasBackground) {
         activeBackgroundPreloads_ = std::max(0, activeBackgroundPreloads_ - 1);
+        ++backgroundPreloadCompleted_;
     }
 
     if (wasBackground && !wasForeground && result.error.isEmpty()
         && cachedResultSize(result) > kMaxBackgroundCachedBytes) {
         backgroundSkippedNodes_.insert(result.nodeIndex);
+        appendActivity(tr("Skipped large background item: %1").arg(result.name));
+        updateBackgroundPreloadProgress();
         startNextBackgroundPreloads();
         return;
     }
@@ -310,8 +432,46 @@ void DecompilerController::applySourceResult(quint64 requestId, HyleDecompiler::
             ? tr("Loaded %1").arg(result.name)
             : result.error);
         setBusy(!foregroundLoadingNodes_.empty());
+    } else if (wasBackground) {
+        setStatus(result.error.isEmpty()
+            ? tr("Cached %1").arg(result.name)
+            : result.error);
+        appendActivity(result.error.isEmpty()
+            ? tr("Cached %1").arg(result.name)
+            : result.error);
+        updateBackgroundPreloadProgress();
     }
     startNextBackgroundPreloads();
+}
+
+void DecompilerController::applySourceBatchResult(quint64 requestId, HyleDecompiler::SourceBatchResult result)
+{
+    if (requestId != openRequestId_) {
+        return;
+    }
+
+    for (auto& file : result.files) {
+        applySourceResult(requestId, std::move(file));
+    }
+}
+
+void DecompilerController::applyDisassemblyResult(quint64 requestId, HyleDecompiler::DisassemblyResult result)
+{
+    if (requestId != openRequestId_) {
+        return;
+    }
+
+    disassemblyLoadingNodes_.erase(result.nodeIndex);
+    treeModel_.setNodeDisassembly(
+        result.nodeIndex,
+        result.error.isEmpty() ? result.content : result.error);
+
+    if (tabsModel_.activeNodeIndex() == result.nodeIndex) {
+        setStatus(result.error.isEmpty()
+            ? tr("Disassembled %1").arg(result.name)
+            : result.error);
+        emit activeDisassemblyChanged();
+    }
 }
 
 void DecompilerController::openFileTab(int nodeIndex)
@@ -344,9 +504,11 @@ void DecompilerController::startNodeLoad(int nodeIndex, bool foreground)
         foregroundLoadingNodes_.insert(nodeIndex);
         setBusy(true);
         tabsModel_.setNodeLoading(nodeIndex, true);
+        const bool cachedSource = section == QStringLiteral("source")
+            && HyleDecompiler::isSourceFileCached(packageContext_, treeModel_.nodeHyleId(nodeIndex));
         setStatus(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary")
             ? tr("Loading %1").arg(name)
-            : tr("Decompiling %1").arg(name));
+            : cachedSource ? tr("Opening cached %1").arg(name) : tr("Decompiling %1").arg(name));
         if (alreadyForeground || alreadyBackground) {
             return;
         }
@@ -357,6 +519,13 @@ void DecompilerController::startNodeLoad(int nodeIndex, bool foreground)
     if (!foreground) {
         backgroundLoadingNodes_.insert(nodeIndex);
         ++activeBackgroundPreloads_;
+        setBusy(true);
+        setStatus(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary")
+            ? tr("Caching %1").arg(name)
+            : tr("Pre-decompiling %1").arg(name));
+        appendActivity(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary")
+            ? tr("Caching %1").arg(name)
+            : tr("Pre-decompiling %1").arg(name));
     }
 
     const quint64 requestId = openRequestId_;
@@ -384,18 +553,51 @@ void DecompilerController::startNodeLoad(int nodeIndex, bool foreground)
     }));
 }
 
+void DecompilerController::startDisassemblyLoad(int nodeIndex)
+{
+    if (!treeModel_.nodeHasDisassembly(nodeIndex)
+        || treeModel_.nodeDisassemblyLoaded(nodeIndex)
+        || disassemblyLoadingNodes_.contains(nodeIndex)) {
+        return;
+    }
+
+    disassemblyLoadingNodes_.insert(nodeIndex);
+    emit activeDisassemblyChanged();
+
+    const quint64 requestId = openRequestId_;
+    const auto moduleId = treeModel_.nodeModuleId(nodeIndex);
+    const auto context = packageContext_;
+    const QString name = treeModel_.nodeName(nodeIndex);
+
+    setStatus(tr("Disassembling %1").arg(name));
+
+    auto* watcher = new QFutureWatcher<HyleDecompiler::DisassemblyResult>(this);
+    connect(watcher, &QFutureWatcher<HyleDecompiler::DisassemblyResult>::finished, this, [this, watcher, requestId]() {
+        applyDisassemblyResult(requestId, watcher->result());
+        watcher->deleteLater();
+    });
+
+    watcher->setFuture(QtConcurrent::run([context, nodeIndex, moduleId, name]() {
+        return HyleDecompiler::disassembleModuleText(context, nodeIndex, moduleId, name);
+    }));
+}
+
 void DecompilerController::resetLoadingState()
 {
     foregroundLoadingNodes_.clear();
     backgroundLoadingNodes_.clear();
     backgroundSkippedNodes_.clear();
+    disassemblyLoadingNodes_.clear();
     backgroundPreloadQueue_.clear();
     activeBackgroundPreloads_ = 0;
+    backgroundPreloadTotal_ = 0;
+    backgroundPreloadCompleted_ = 0;
 }
 
 void DecompilerController::rebuildBackgroundPreloadQueue(int centerNode)
 {
     backgroundPreloadQueue_.clear();
+    backgroundPreloadCompleted_ = 0;
     for (int nodeIndex : treeModel_.prioritizedPreloadNodeIndices(centerNode, kMaxQueuedBackgroundPreloads)) {
         if (foregroundLoadingNodes_.contains(nodeIndex)
             || backgroundLoadingNodes_.contains(nodeIndex)
@@ -404,21 +606,121 @@ void DecompilerController::rebuildBackgroundPreloadQueue(int centerNode)
         }
         backgroundPreloadQueue_.push_back(nodeIndex);
     }
+    backgroundPreloadTotal_ = static_cast<int>(backgroundPreloadQueue_.size());
+    if (backgroundPreloadTotal_ > 0) {
+        appendActivity(tr("Preparing content cache for %1 item(s).").arg(backgroundPreloadTotal_));
+    }
     startNextBackgroundPreloads();
 }
 
 void DecompilerController::startNextBackgroundPreloads()
 {
     while (activeBackgroundPreloads_ < kMaxBackgroundPreloads && !backgroundPreloadQueue_.empty()) {
-        const int nodeIndex = backgroundPreloadQueue_.front();
-        backgroundPreloadQueue_.pop_front();
+        std::vector<int> sourceBatch;
+
+        while (!backgroundPreloadQueue_.empty()
+               && sourceBatch.size() < static_cast<std::size_t>(kMaxBackgroundSourceBatchSize)) {
+            const int nodeIndex = backgroundPreloadQueue_.front();
+            backgroundPreloadQueue_.pop_front();
+            if (!treeModel_.nodeNeedsLoad(nodeIndex)
+                || foregroundLoadingNodes_.contains(nodeIndex)
+                || backgroundLoadingNodes_.contains(nodeIndex)
+                || backgroundSkippedNodes_.contains(nodeIndex)) {
+                continue;
+            }
+            if (treeModel_.nodeSection(nodeIndex) == QStringLiteral("source")) {
+                sourceBatch.push_back(nodeIndex);
+                continue;
+            }
+
+            if (!sourceBatch.empty()) {
+                backgroundPreloadQueue_.push_front(nodeIndex);
+                break;
+            }
+
+            startNodeLoad(nodeIndex, false);
+            break;
+        }
+
+        if (!sourceBatch.empty()) {
+            startSourceBatchLoad(std::move(sourceBatch));
+        }
+    }
+    updateBackgroundPreloadProgress();
+}
+
+void DecompilerController::startSourceBatchLoad(std::vector<int> nodeIndices)
+{
+    std::vector<HyleDecompiler::SourceRequest> requests;
+    requests.reserve(nodeIndices.size());
+
+    for (int nodeIndex : nodeIndices) {
         if (!treeModel_.nodeNeedsLoad(nodeIndex)
             || foregroundLoadingNodes_.contains(nodeIndex)
             || backgroundLoadingNodes_.contains(nodeIndex)
-            || backgroundSkippedNodes_.contains(nodeIndex)) {
+            || backgroundSkippedNodes_.contains(nodeIndex)
+            || treeModel_.nodeSection(nodeIndex) != QStringLiteral("source")) {
             continue;
         }
-        startNodeLoad(nodeIndex, false);
+
+        backgroundLoadingNodes_.insert(nodeIndex);
+        ++activeBackgroundPreloads_;
+        requests.push_back({
+            nodeIndex,
+            treeModel_.nodeHyleId(nodeIndex),
+            treeModel_.nodeName(nodeIndex),
+            treeModel_.nodePath(nodeIndex)
+        });
+    }
+
+    if (requests.empty()) {
+        return;
+    }
+
+    setBusy(true);
+    setStatus(tr("Pre-decompiling %1 source file(s)").arg(static_cast<int>(requests.size())));
+    appendActivity(tr("Pre-decompiling %1 source file(s)").arg(static_cast<int>(requests.size())));
+
+    const quint64 requestId = openRequestId_;
+    const auto context = packageContext_;
+
+    auto* watcher = new QFutureWatcher<HyleDecompiler::SourceBatchResult>(this);
+    connect(watcher, &QFutureWatcher<HyleDecompiler::SourceBatchResult>::finished, this, [this, watcher, requestId]() {
+        applySourceBatchResult(requestId, watcher->result());
+        watcher->deleteLater();
+    });
+
+    watcher->setFuture(QtConcurrent::run([context, requests = std::move(requests)]() mutable {
+        return HyleDecompiler::decompileSourceFiles(context, std::move(requests));
+    }));
+}
+
+void DecompilerController::updateBackgroundPreloadProgress()
+{
+    if (!foregroundLoadingNodes_.empty()) {
+        return;
+    }
+
+    if (backgroundPreloadTotal_ <= 0) {
+        setLoadingProgress(1.0);
+        setBusy(false);
+        return;
+    }
+
+    const int inFlight = activeBackgroundPreloads_;
+    const int queued = static_cast<int>(backgroundPreloadQueue_.size());
+    const int completed = std::max(0, backgroundPreloadTotal_ - queued - inFlight);
+    backgroundPreloadCompleted_ = std::max(backgroundPreloadCompleted_, completed);
+    const double ratio = static_cast<double>(backgroundPreloadCompleted_) / static_cast<double>(backgroundPreloadTotal_);
+    setLoadingProgress(0.25 + ratio * 0.75);
+
+    if (queued == 0 && inFlight == 0) {
+        setLoadingProgress(1.0);
+        setStatus(tr("Ready"));
+        appendActivity(tr("Content cache is ready."));
+        setBusy(false);
+    } else {
+        setBusy(true);
     }
 }
 

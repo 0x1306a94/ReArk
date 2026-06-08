@@ -5,6 +5,7 @@
 #include <QLatin1String>
 #include <QLocale>
 #include <QSettings>
+#include <QStringList>
 
 namespace {
 constexpr auto kSettingsGroup = "Language";
@@ -110,5 +111,17 @@ QString LanguageController::normalizedSupportedLocale(const QString& locale)
 
 QString LanguageController::systemLanguage()
 {
-    return normalizedSupportedLocale(QLocale::system().name());
+    const QLocale systemLocale = QLocale::system();
+    const QStringList uiLanguages = systemLocale.uiLanguages();
+    for (const QString& uiLanguage : uiLanguages) {
+        const QLocale parsedLocale(uiLanguage);
+        if (parsedLocale.language() == QLocale::Chinese) {
+            return QLatin1String(kChineseLocale);
+        }
+        if (parsedLocale.language() == QLocale::English) {
+            return QLatin1String(kEnglishLocale);
+        }
+    }
+
+    return normalizedSupportedLocale(systemLocale.name());
 }

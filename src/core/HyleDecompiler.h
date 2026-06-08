@@ -47,6 +47,24 @@ struct SourceResult {
     QString error;
 };
 
+struct SourceRequest {
+    int nodeIndex = -1;
+    std::size_t hyleId = 0;
+    QString name;
+    QString path;
+};
+
+struct SourceBatchResult {
+    std::vector<SourceResult> files;
+};
+
+struct DisassemblyResult {
+    int nodeIndex = -1;
+    QString name;
+    QString content;
+    QString error;
+};
+
 [[nodiscard]] OpenResult openFile(
     const QString& filePath,
     const std::shared_ptr<SessionContext>& context);
@@ -54,6 +72,17 @@ struct SourceResult {
     const std::shared_ptr<SessionContext>& context,
     int nodeIndex,
     std::size_t hyleId,
+    const QString& name);
+[[nodiscard]] SourceBatchResult decompileSourceFiles(
+    const std::shared_ptr<SessionContext>& context,
+    std::vector<SourceRequest> requests);
+[[nodiscard]] bool isSourceFileCached(
+    const std::shared_ptr<SessionContext>& context,
+    std::size_t hyleId);
+[[nodiscard]] DisassemblyResult disassembleModuleText(
+    const std::shared_ptr<SessionContext>& context,
+    int nodeIndex,
+    std::size_t moduleId,
     const QString& name);
 [[nodiscard]] SourceResult readResourceContent(
     const std::shared_ptr<SessionContext>& context,

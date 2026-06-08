@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <vector>
 
 struct DecompiledSourceFile {
@@ -24,6 +25,7 @@ struct DecompiledSourceFile {
     std::size_t hyleId = 0;
     bool lazy = false;
     bool directory = false;
+    std::optional<std::size_t> moduleId;
 };
 
 class SourceTreeModel : public QAbstractListModel {
@@ -72,6 +74,10 @@ public:
     [[nodiscard]] QString nodeContentMode(int nodeIndex) const;
     [[nodiscard]] bool nodeNeedsLoad(int nodeIndex) const;
     [[nodiscard]] bool nodeEligibleForBackgroundLoad(int nodeIndex) const;
+    [[nodiscard]] bool nodeHasDisassembly(int nodeIndex) const;
+    [[nodiscard]] bool nodeDisassemblyLoaded(int nodeIndex) const;
+    [[nodiscard]] QString nodeDisassembly(int nodeIndex) const;
+    [[nodiscard]] std::size_t nodeModuleId(int nodeIndex) const;
     [[nodiscard]] QVariantList navigationCandidates(const QString& query, int limit) const;
     [[nodiscard]] QVariantList entryPointCandidates() const;
     [[nodiscard]] QVariantList loadedContentSearchResults(const QString& query, int limit) const;
@@ -79,6 +85,7 @@ public:
 
     void replaceFiles(std::vector<DecompiledSourceFile> files);
     void setNodeContent(int nodeIndex, std::shared_ptr<DocumentContent> document);
+    void setNodeDisassembly(int nodeIndex, QString disassembly);
     bool activateNode(int nodeIndex);
     Q_INVOKABLE void activateIndex(int index);
 
@@ -101,6 +108,7 @@ private:
         QString section;
         QString contentMode = QStringLiteral("text");
         std::size_t hyleId = 0;
+        std::optional<std::size_t> moduleId;
         bool lazy = false;
         bool directory = false;
         bool expanded = true;

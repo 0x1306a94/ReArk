@@ -6,10 +6,12 @@
 
 struct DocumentContent {
     QString text;
+    QString disassembly;
     QByteArray binary;
     QString diagnostics;
     QString kind;
     QString contentMode = QStringLiteral("text");
+    bool disassemblyLoaded = false;
 };
 
 #endif // REARK_DOCUMENT_CONTENT_H

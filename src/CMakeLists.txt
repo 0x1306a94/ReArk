@@ -5,6 +5,8 @@ qt_add_executable(${PROJECT_NAME}
     main.cpp
     core/AppInitializer.cpp
     core/AppInitializer.h
+    core/BuildInfoProvider.cpp
+    core/BuildInfoProvider.h
     core/HyleDecompiler.cpp
     core/HyleDecompiler.h
     core/PerformanceTrace.cpp
@@ -24,6 +26,8 @@ qt_add_executable(${PROJECT_NAME}
     model/DocumentContent.h
     model/OpenFileTabsModel.cpp
     model/OpenFileTabsModel.h
+    model/RecentFilesModel.cpp
+    model/RecentFilesModel.h
     model/HexDocumentModel.cpp
     model/HexDocumentModel.h
     model/SourceTreeModel.cpp
@@ -58,6 +62,16 @@ qt_add_translations(${PROJECT_NAME}
     LUPDATE_OPTIONS -no-obsolete
 )
 
+set(REARK_BUILD_INFO_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/BuildInfo.h")
+add_custom_target(reark_build_info ALL
+    COMMAND ${CMAKE_COMMAND}
+        -DOUTPUT_FILE="${REARK_BUILD_INFO_HEADER}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/WriteBuildInfo.cmake"
+    BYPRODUCTS "${REARK_BUILD_INFO_HEADER}"
+    COMMENT "Writing build metadata"
+)
+add_dependencies(${PROJECT_NAME} reark_build_info)
+
 add_subdirectory(ui/qml/ReArk)
 
 qt_add_resources(${PROJECT_NAME} "images"
@@ -72,8 +86,13 @@ qt_add_resources(${PROJECT_NAME} "icons"
     PREFIX "/icons"
     BASE "${CMAKE_SOURCE_DIR}/resources/icons"
     FILES
-        "${CMAKE_SOURCE_DIR}/resources/icons/email.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/folder-open-white.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/github.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/github-white.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/issue.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/issue-white.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/trash-muted.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/upload-muted.svg"
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -93,6 +112,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 target_include_directories(${PROJECT_NAME} PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/presentation>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>
 )
 
 qt_import_qml_plugins(${PROJECT_NAME})

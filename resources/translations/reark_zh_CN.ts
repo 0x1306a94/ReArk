@@ -8,10 +8,6 @@
         <translation>关于 ReArk</translation>
     </message>
     <message>
-        <source>HarmonyOS Ark Decompiler GUI</source>
-        <translation>HarmonyOS Ark 反编译图形界面</translation>
-    </message>
-    <message>
         <source>Version</source>
         <translation>版本</translation>
     </message>
@@ -28,20 +24,32 @@
         <translation>里缪</translation>
     </message>
     <message>
+        <source>License</source>
+        <translation>许可</translation>
+    </message>
+    <message>
+        <source>Apache-2.0</source>
+        <translation>Apache-2.0</translation>
+    </message>
+    <message>
         <source>GitHub</source>
         <translation>GitHub</translation>
     </message>
     <message>
-        <source>Email</source>
-        <translation>邮箱</translation>
+        <source>Report Issue</source>
+        <translation>反馈问题</translation>
     </message>
     <message>
-        <source>A lightweight desktop shell for browsing HarmonyOS package decompilation output. Hyle integration will provide the file tree and source content.</source>
-        <translation>用于浏览 HarmonyOS 包反编译结果的轻量桌面界面。Hyle 集成会提供文件树和源码内容。</translation>
+        <source>Professional reverse engineering tool for HarmonyOS NEXT HAP/ABC. Supports disassembly, decompilation, signature identification, and file structure browsing.</source>
+        <translation>HarmonyOS NEXT HAP/ABC 专业逆向工具，支持反汇编、反编译、签名识别、文件结构浏览。</translation>
     </message>
     <message>
-        <source>Copyright 2026 ReArk. Licensed under Apache-2.0.</source>
-        <translation>Copyright 2026 ReArk。基于 Apache-2.0 许可。</translation>
+        <source>Reverse the Ark, Reveal the Flow</source>
+        <translation>溯彼方舟，复见其流</translation>
+    </message>
+    <message>
+        <source>Copyright © %1 Miles Li. All rights reserved.</source>
+        <translation>Copyright © %1 里缪. All rights reserved.</translation>
     </message>
 </context>
 <context>
@@ -65,6 +73,18 @@
     <message>
         <source>Open...</source>
         <translation>打开...</translation>
+    </message>
+    <message>
+        <source>Open Recent</source>
+        <translation>打开最近</translation>
+    </message>
+    <message>
+        <source>%1 (missing)</source>
+        <translation>%1 (丢失)</translation>
+    </message>
+    <message>
+        <source>Clear Recent Files</source>
+        <translation>清空最近打开列表</translation>
     </message>
     <message>
         <source>Preferences</source>
@@ -132,7 +152,7 @@
     </message>
     <message>
         <source>ReArk is up to date.</source>
-        <translation>ReArk 已是最新版本。</translation>
+        <translation>ReArk 已是最新版本.</translation>
     </message>
     <message>
         <source>Update Check Failed</source>
@@ -160,6 +180,49 @@
     <message>
         <source>Clear Selection</source>
         <translation>清除选择</translation>
+    </message>
+</context>
+<context>
+    <name>DecompilerController</name>
+    <message>
+        <source>Opening %1</source>
+        <translation>正在打开 %1</translation>
+    </message>
+    <message>
+        <source>Opening package session.</source>
+        <translation>正在打开包会话.</translation>
+    </message>
+    <message>
+        <source>Building file tree.</source>
+        <translation>正在构建文件树.</translation>
+    </message>
+    <message>
+        <source>Cached %1</source>
+        <translation>已缓存 %1</translation>
+    </message>
+    <message>
+        <source>Caching %1</source>
+        <translation>正在缓存 %1</translation>
+    </message>
+    <message>
+        <source>Pre-decompiling %1</source>
+        <translation>正在预反编译 %1</translation>
+    </message>
+    <message>
+        <source>Pre-decompiling %1 source file(s)</source>
+        <translation>正在预反编译 %1 个源码文件</translation>
+    </message>
+    <message>
+        <source>Opening cached %1</source>
+        <translation>正在从缓存打开 %1</translation>
+    </message>
+    <message>
+        <source>Preparing content cache for %1 item(s).</source>
+        <translation>正在准备 %1 个内容缓存项.</translation>
+    </message>
+    <message>
+        <source>Content cache is ready.</source>
+        <translation>内容缓存已就绪.</translation>
     </message>
 </context>
 <context>
@@ -235,12 +298,32 @@
         <translation>从文件树中选择文件</translation>
     </message>
     <message>
+        <source>Preparing workspace</source>
+        <translation>正在准备工作区</translation>
+    </message>
+    <message>
         <source>JSON</source>
         <translation>JSON</translation>
     </message>
     <message>
+        <source>Source</source>
+        <translation>源码</translation>
+    </message>
+    <message>
         <source>Resource index</source>
         <translation>资源索引</translation>
+    </message>
+    <message>
+        <source>Decompiled</source>
+        <translation>反编译</translation>
+    </message>
+    <message>
+        <source>Disassembling</source>
+        <translation>反汇编中</translation>
+    </message>
+    <message>
+        <source>Disassembly</source>
+        <translation>反汇编</translation>
     </message>
     <message>
         <source>Raw</source>
@@ -257,6 +340,20 @@
     <message>
         <source>Binary</source>
         <translation>二进制</translation>
+    </message>
+</context>
+<context>
+    <name>QObject</name>
+    <message>
+        <source>Indexed %1 source file(s)</source>
+        <translation>已索引 %1 个源码文件</translation>
+    </message>
+</context>
+<context>
+    <name>RecentFilesModel</name>
+    <message>
+        <source>%1 (missing)</source>
+        <translation>%1 (丢失)</translation>
     </message>
 </context>
 <context>
@@ -308,11 +405,11 @@
     <name>SourceTreeModel</name>
     <message>
         <source>// Drop a package to start decompiling.</source>
-        <translation>// 拖入包文件开始反编译。</translation>
+        <translation>// 拖入包文件开始反编译.</translation>
     </message>
     <message>
         <source>// Select a source file.</source>
-        <translation>// 选择一个源码文件。</translation>
+        <translation>// 选择一个源码文件.</translation>
     </message>
     <message>
         <source>// Decompiling selected source file...</source>
@@ -356,6 +453,65 @@
     </message>
 </context>
 <context>
+    <name>StartPage</name>
+    <message>
+        <source>Release to open</source>
+        <translation>松开以打开</translation>
+    </message>
+    <message>
+        <source>ReArk</source>
+        <translation>ReArk</translation>
+    </message>
+    <message>
+        <source>HarmonyOS NEXT HAP/ABC</source>
+        <translation type="vanished">HarmonyOS NEXT HAP/ABC</translation>
+    </message>
+    <message>
+        <source>HarmonyOS NEXT HAP / ABC analysis, decompilation and disassembly tool</source>
+        <translation>HarmonyOS NEXT HAP / ABC 解析、反编译与反汇编工具</translation>
+    </message>
+    <message>
+        <source>Open File</source>
+        <translation>打开文件</translation>
+    </message>
+    <message>
+        <source>or drop it here</source>
+        <translation type="vanished">或拖入此处</translation>
+    </message>
+    <message>
+        <source>or drop .hap / .abc files here</source>
+        <translation>或将 .hap / .abc 文件拖放到窗口中</translation>
+    </message>
+    <message>
+        <source>Open Recent</source>
+        <translation type="vanished">打开最近</translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation type="vanished">清空</translation>
+    </message>
+    <message>
+        <source>Recent Files</source>
+        <translation>最近文件</translation>
+    </message>
+    <message>
+        <source>Clear History</source>
+        <translation>清空记录</translation>
+    </message>
+    <message>
+        <source>%1 (missing)</source>
+        <translation>%1 (丢失)</translation>
+    </message>
+    <message>
+        <source>Ready</source>
+        <translation>就绪</translation>
+    </message>
+    <message>
+        <source>No recent files</source>
+        <translation>暂无最近文件</translation>
+    </message>
+</context>
+<context>
     <name>StatusBar</name>
     <message>
         <source>Ready</source>
@@ -370,39 +526,39 @@
     <name>UpdateController</name>
     <message>
         <source>The update response was not valid JSON.</source>
-        <translation>更新响应不是有效的 JSON。</translation>
+        <translation>更新响应不是有效的 JSON.</translation>
     </message>
     <message>
         <source>The update response did not include a release version.</source>
-        <translation>更新响应没有包含发布版本。</translation>
+        <translation>更新响应没有包含发布版本.</translation>
     </message>
     <message>
         <source>GitHub refused the update request. Please try again later.</source>
-        <translation>GitHub 拒绝了更新请求，请稍后再试。</translation>
+        <translation>GitHub 拒绝了更新请求，请稍后再试.</translation>
     </message>
     <message>
         <source>The update information could not be found.</source>
-        <translation>找不到更新信息。</translation>
+        <translation>找不到更新信息.</translation>
     </message>
     <message>
         <source>The update server returned HTTP %1.</source>
-        <translation>更新服务器返回 HTTP %1。</translation>
+        <translation>更新服务器返回 HTTP %1.</translation>
     </message>
     <message>
         <source>The update server could not be found.</source>
-        <translation>找不到更新服务器。</translation>
+        <translation>找不到更新服务器.</translation>
     </message>
     <message>
         <source>The update connection was refused.</source>
-        <translation>更新连接被拒绝。</translation>
+        <translation>更新连接被拒绝.</translation>
     </message>
     <message>
         <source>The update request timed out.</source>
-        <translation>更新请求超时。</translation>
+        <translation>更新请求超时.</translation>
     </message>
     <message>
         <source>The secure update connection failed.</source>
-        <translation>安全更新连接失败。</translation>
+        <translation>安全更新连接失败.</translation>
     </message>
 </context>
 <context>
@@ -417,7 +573,7 @@
     </message>
     <message>
         <source>ReArk %1 is available.</source>
-        <translation>ReArk %1 已发布。</translation>
+        <translation>ReArk %1 已发布.</translation>
     </message>
     <message>
         <source>Current Version</source>
@@ -437,7 +593,7 @@
     </message>
     <message>
         <source>No changelog information is available for this release.</source>
-        <translation>此版本没有可用的更新日志。</translation>
+        <translation>此版本没有可用的更新日志.</translation>
     </message>
     <message>
         <source>Open Release Page</source>
@@ -469,6 +625,10 @@
 </context>
 <context>
     <name>main</name>
+    <message>
+        <source>Recent file no longer exists: %1</source>
+        <translation>最近文件已不存在: %1</translation>
+    </message>
     <message>
         <source>Open HarmonyOS package or Ark bytecode</source>
         <translation>打开 HarmonyOS 包或 Ark 字节码</translation>

@@ -118,6 +118,14 @@ QString OpenFileTabsModel::activeKind() const
     return tabs_.at(static_cast<std::size_t>(activeIndex_)).kind;
 }
 
+int OpenFileTabsModel::activeNodeIndex() const
+{
+    if (activeIndex_ < 0 || activeIndex_ >= rowCount()) {
+        return -1;
+    }
+    return tabs_.at(static_cast<std::size_t>(activeIndex_)).nodeIndex;
+}
+
 bool OpenFileTabsModel::activeHasBinary() const
 {
     if (activeIndex_ < 0 || activeIndex_ >= rowCount()) {

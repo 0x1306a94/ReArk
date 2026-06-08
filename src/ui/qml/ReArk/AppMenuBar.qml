@@ -15,6 +15,7 @@ Rectangle {
     readonly property bool darkTheme: Material.theme === Material.Dark
 
     signal openRequested()
+    signal recentFileRequested(string filePath)
     signal themeRequested(string theme)
     signal highlightThemeRequested(string theme)
 
@@ -150,6 +151,85 @@ Rectangle {
             text: qsTr("Open...")
             shortcut: StandardKey.Open
             onTriggered: root.openRequested()
+        }
+
+        CompactMenu {
+            id: recentFilesMenu
+
+            title: qsTr("Open Recent")
+            enabled: recentFilesModel.count > 0
+            minimumItemWidth: Math.min(
+                                  maximumItemWidth,
+                                  Math.max(baseItemWidth,
+                                           recentLongestNameMetrics.width + 24,
+                                           clearRecentMetrics.width + 24))
+            property int baseItemWidth: 168
+            property int maximumItemWidth: 360
+
+            TextMetrics {
+                id: recentLongestNameMetrics
+                font.pixelSize: 13
+                text: recentFilesModel.longestDisplayName
+            }
+
+            TextMetrics {
+                id: clearRecentMetrics
+                font.pixelSize: 13
+                text: qsTr("Clear Recent Files")
+            }
+
+            delegate: MenuItem {
+                id: recentMenuItem
+
+                implicitWidth: recentFilesMenu.minimumItemWidth
+                implicitHeight: 28
+                padding: 12
+                leftPadding: 12
+                rightPadding: 12
+                verticalPadding: 4
+                font.pixelSize: 13
+                hoverEnabled: true
+                ToolTip.text: action && action.fullPath ? action.fullPath : text
+                ToolTip.visible: hovered && ToolTip.text.length > 0
+                ToolTip.delay: 450
+
+                contentItem: Label {
+                    text: recentMenuItem.text
+                    color: recentMenuItem.enabled ? Material.foreground : Material.hintTextColor
+                    font: recentMenuItem.font
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Instantiator {
+                model: recentFilesModel
+
+                delegate: Action {
+                    required property string name
+                    required property string path
+                    required property bool exists
+                    property string fullPath: path
+
+                    text: exists ? name : qsTr("%1 (missing)").arg(name)
+                    onTriggered: root.recentFileRequested(path)
+                }
+
+                onObjectAdded: function(index, object) {
+                    recentFilesMenu.insertAction(index, object)
+                }
+
+                onObjectRemoved: function(index, object) {
+                    recentFilesMenu.removeAction(object)
+                }
+            }
+
+            CompactMenuSeparator {}
+
+            Action {
+                text: qsTr("Clear Recent Files")
+                onTriggered: recentFilesModel.clear()
+            }
         }
 
         CompactMenuSeparator {}

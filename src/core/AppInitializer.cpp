@@ -3,8 +3,10 @@
 #include "controller/DecompilerController.h"
 #include "controller/LanguageController.h"
 #include "controller/UpdateController.h"
+#include "core/BuildInfoProvider.h"
 #include "core/ResourcePreviewProvider.h"
 #include "core/WindowChrome.h"
+#include "model/RecentFilesModel.h"
 
 #include <QIcon>
 #include <QQmlContext>
@@ -48,11 +50,15 @@ void AppInitializer::initializeContext()
     engine_.addImageProvider(QStringLiteral("rearkResources"), resourcePreviewProvider_);
     decompilerController_ = new DecompilerController(resourcePreviewProvider_, &engine_);
     languageController_ = new LanguageController(&engine_, &engine_);
+    buildInfoProvider_ = new BuildInfoProvider(languageController_, &engine_);
+    recentFilesModel_ = new RecentFilesModel(&engine_);
     updateController_ = new UpdateController(&engine_);
     windowChrome_ = new WindowChrome(&engine_);
 
     auto* context = engine_.rootContext();
     context->setContextProperty(QStringLiteral("appVersion"), QStringLiteral(REARK_VERSION));
+    context->setContextProperty(QStringLiteral("buildInfo"), buildInfoProvider_);
+    context->setContextProperty(QStringLiteral("recentFilesModel"), recentFilesModel_);
     context->setContextProperty(QStringLiteral("initialFileUrl"), initialFileUrl_);
     context->setContextProperty(QStringLiteral("decompilerController"), decompilerController_);
     context->setContextProperty(QStringLiteral("languageController"), languageController_);

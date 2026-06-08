@@ -9,7 +9,7 @@ Rectangle {
     property string fileName: ""
     property string filePath: ""
     property string highlightTheme: "GitHub Dark"
-    readonly property bool hasPackage: filePath.length > 0
+    readonly property bool hasPackage: decompilerController.hasPackage
     readonly property bool darkTheme: Material.theme === Material.Dark
     readonly property color pageColor: darkTheme ? "#171a1f" : "#f5f7f8"
     readonly property color sidebarColor: darkTheme ? "#20242b" : "#ffffff"
@@ -25,7 +25,11 @@ Rectangle {
     readonly property bool activeIsResourceIndex: activeIsText
                                                   && activeKind === "RESOURCE_INDEX"
                                                   && decompilerController.tabsModel.activeHasBinary
-    readonly property bool fileToolsVisible: activeIsJson || activeIsResourceIndex
+    readonly property bool activeSupportsDisassembly: activeIsText
+                                                      && decompilerController.activeSupportsDisassembly
+    readonly property bool fileToolsVisible: activeSupportsDisassembly
+                                             || activeIsJson
+                                             || activeIsResourceIndex
     property string textViewMode: "raw"
     property string formattedJsonContent: ""
 
@@ -33,14 +37,6 @@ Rectangle {
     signal fileDropped(url fileUrl)
 
     color: pageColor
-
-    onFilePathChanged: {
-        if (filePath.length > 0) {
-            decompilerController.decompileFile(filePath)
-        } else {
-            decompilerController.clear()
-        }
-    }
 
     Connections {
         target: decompilerController.tabsModel
@@ -94,13 +90,6 @@ Rectangle {
                     color: hasPackage ? Material.foreground : secondaryTextColor
                     font.pixelSize: 12
                     elide: Text.ElideMiddle
-                }
-
-                BusyIndicator {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.topMargin: 18
-                    running: decompilerController.busy
-                    visible: decompilerController.busy
                 }
 
                 ListView {
@@ -371,11 +360,15 @@ Rectangle {
                             visible: decompilerController.tabsModel.hasTabs
                                      && decompilerController.tabsModel.activeContentMode === "text"
                                      && root.textViewMode !== "binary"
-                            code: root.textViewMode === "formatted"
+                            code: root.textViewMode === "disassembly"
+                                  ? decompilerController.activeDisassemblyContent
+                                  : root.textViewMode === "formatted"
                                   ? root.formattedJsonContent
                                   : decompilerController.selectedContent
                             highlightTheme: root.highlightTheme
-                            syntax: root.activeIsJson
+                            syntax: root.textViewMode === "disassembly"
+                                    ? "ABC"
+                                    : root.activeIsJson
                                     ? "JSON"
                                     : decompilerController.tabsModel.activePath
                         }
@@ -401,6 +394,67 @@ Rectangle {
                                      && decompilerController.tabsModel.activeContentMode === "media"
                             sourceUrl: visible ? decompilerController.selectedContent : ""
                             fileName: decompilerController.tabsModel.activeName
+                        }
+
+                        Rectangle {
+                            width: Math.min(360, parent.width - 80)
+                            height: progressColumn.implicitHeight
+                            anchors.centerIn: parent
+                            visible: !decompilerController.tabsModel.hasTabs && decompilerController.busy
+                            color: "transparent"
+
+                            ColumnLayout {
+                                id: progressColumn
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                spacing: 12
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Preparing workspace")
+                                    color: Material.foreground
+                                    font.pixelSize: 15
+                                    font.weight: Font.DemiBold
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: decompilerController.status
+                                    color: secondaryTextColor
+                                    font.pixelSize: 12
+                                    elide: Text.ElideMiddle
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+
+                                ProgressBar {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 4
+                                    from: 0
+                                    to: 1
+                                    value: decompilerController.loadingProgress
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.topMargin: 4
+                                    spacing: 5
+
+                                    Repeater {
+                                        model: decompilerController.activityLog
+
+                                        delegate: Label {
+                                            Layout.fillWidth: true
+                                            text: modelData
+                                            color: secondaryTextColor
+                                            opacity: 0.9
+                                            font.pixelSize: 11
+                                            elide: Text.ElideMiddle
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         Label {
@@ -432,7 +486,9 @@ Rectangle {
                             spacing: 8
 
                             Label {
-                                text: root.activeIsJson ? qsTr("JSON") : qsTr("Resource index")
+                                text: root.activeSupportsDisassembly
+                                      ? qsTr("Source")
+                                      : root.activeIsJson ? qsTr("JSON") : qsTr("Resource index")
                                 color: secondaryTextColor
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -451,8 +507,10 @@ Rectangle {
                                 ButtonGroup.group: fileViewGroup
                                 checkable: true
                                 checked: root.textViewMode === "raw"
-                                text: root.activeIsJson ? qsTr("Raw") : qsTr("Text")
-                                implicitWidth: 58
+                                text: root.activeSupportsDisassembly
+                                      ? qsTr("Decompiled")
+                                      : root.activeIsJson ? qsTr("Raw") : qsTr("Text")
+                                implicitWidth: root.activeSupportsDisassembly ? 96 : 58
                                 implicitHeight: 24
                                 padding: 0
                                 onClicked: root.textViewMode = "raw"
@@ -462,7 +520,7 @@ Rectangle {
                                 ButtonGroup.group: fileViewGroup
                                 checkable: true
                                 checked: root.textViewMode === "formatted"
-                                visible: root.activeIsJson
+                                visible: root.activeIsJson && !root.activeSupportsDisassembly
                                 text: qsTr("Formatted")
                                 implicitWidth: 92
                                 implicitHeight: 24
@@ -477,12 +535,29 @@ Rectangle {
                                 ButtonGroup.group: fileViewGroup
                                 checkable: true
                                 checked: root.textViewMode === "binary"
-                                visible: root.activeIsResourceIndex
+                                visible: root.activeIsResourceIndex && !root.activeSupportsDisassembly
                                 text: qsTr("Binary")
                                 implicitWidth: 72
                                 implicitHeight: 24
                                 padding: 0
                                 onClicked: root.textViewMode = "binary"
+                            }
+
+                            ToolButton {
+                                ButtonGroup.group: fileViewGroup
+                                checkable: true
+                                checked: root.textViewMode === "disassembly"
+                                visible: root.activeSupportsDisassembly
+                                text: decompilerController.activeDisassemblyLoading
+                                      ? qsTr("Disassembling")
+                                      : qsTr("Disassembly")
+                                implicitWidth: 112
+                                implicitHeight: 24
+                                padding: 0
+                                onClicked: {
+                                    root.textViewMode = "disassembly"
+                                    decompilerController.loadActiveDisassembly()
+                                }
                             }
 
                             Item {

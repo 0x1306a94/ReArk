@@ -5,8 +5,10 @@
 #include <QQmlApplicationEngine>
 #include <QString>
 
+class BuildInfoProvider;
 class DecompilerController;
 class LanguageController;
+class RecentFilesModel;
 class ResourcePreviewProvider;
 class UpdateController;
 class WindowChrome;
@@ -26,7 +28,9 @@ private:
     QGuiApplication& app_;
     QQmlApplicationEngine& engine_;
     QString initialFileUrl_;
+    BuildInfoProvider* buildInfoProvider_ = nullptr;
     ResourcePreviewProvider* resourcePreviewProvider_ = nullptr;
+    RecentFilesModel* recentFilesModel_ = nullptr;
     DecompilerController* decompilerController_ = nullptr;
     LanguageController* languageController_ = nullptr;
     UpdateController* updateController_ = nullptr;

@@ -690,8 +690,8 @@
         <translation>最近文件已不存在: %1</translation>
     </message>
     <message>
-        <source>Open HarmonyOS package or Ark bytecode</source>
-        <translation>打开 HarmonyOS 包或 Ark 字节码</translation>
+        <source>Open HAP package or ABC file</source>
+        <translation>打开 HAP 包或 ABC 文件</translation>
     </message>
     <message>
         <source>HarmonyOS packages (*.hap *.app *.abc)</source>

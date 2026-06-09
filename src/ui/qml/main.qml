@@ -185,7 +185,7 @@ ApplicationWindow {
 
     FileDialog {
         id: openFileDialog
-        title: qsTr("Open HarmonyOS package or Ark bytecode")
+        title: qsTr("Open HAP package or ABC file")
         nameFilters: [
             qsTr("HarmonyOS packages (*.hap *.app *.abc)"),
             qsTr("All files (*)")

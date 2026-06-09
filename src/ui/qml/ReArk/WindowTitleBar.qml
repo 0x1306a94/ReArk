@@ -123,7 +123,15 @@ Rectangle {
             id: windowButtons
 
             Layout.fillHeight: true
-            Layout.preferredWidth: minimizeButton.width + maximizeButton.width + closeButton.width
+            Layout.preferredWidth: aiAnalysisButton.width + minimizeButton.width + maximizeButton.width + closeButton.width
+
+            WindowTitleButton {
+                id: aiAnalysisButton
+                height: parent.height
+                buttonType: "ai"
+                ToolTip.text: qsTr("Smart Analysis")
+                ToolTip.visible: hovered
+            }
 
             WindowTitleButton {
                 id: minimizeButton

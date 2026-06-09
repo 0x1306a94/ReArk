@@ -667,6 +667,10 @@
 <context>
     <name>WindowTitleBar</name>
     <message>
+        <source>Smart Analysis</source>
+        <translation>智能分析</translation>
+    </message>
+    <message>
         <source>Minimize</source>
         <translation>最小化</translation>
     </message>

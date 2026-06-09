@@ -214,13 +214,13 @@ Rectangle {
             Action {
                 text: qsTr("Copy")
                 enabled: editor.hasSelection
-                shortcut: StandardKey.Copy
+                shortcut: "Ctrl+C"
                 onTriggered: editor.copySelection()
             }
 
             Action {
                 text: qsTr("Select All")
-                shortcut: StandardKey.SelectAll
+                shortcut: "Ctrl+A"
                 onTriggered: editor.selectAll()
             }
 

@@ -22,7 +22,7 @@ Menu {
         }
 
         const text = String(shortcut)
-        return text === "0" ? "" : text
+        return /^\d+$/.test(text) ? "" : text
     }
 
     delegate: MenuItem {

@@ -159,7 +159,7 @@ Rectangle {
 
         Action {
             text: qsTr("Open...")
-            shortcut: StandardKey.Open
+            shortcut: "Ctrl+O"
             onTriggered: root.openRequested()
         }
 
@@ -371,7 +371,7 @@ Rectangle {
 
         Action {
             text: qsTr("Exit")
-            shortcut: StandardKey.Quit
+            shortcut: "Ctrl+Q"
             onTriggered: Qt.quit()
         }
     }

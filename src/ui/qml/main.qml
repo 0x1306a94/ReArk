@@ -23,6 +23,7 @@ ApplicationWindow {
     property string currentTheme: "dark"
     property string currentHighlightTheme: "GitHub Dark"
     property string activeView: "start"
+    property var settingsWindow: null
     readonly property bool effectiveDarkTheme: currentTheme === "system"
                                                ? Qt.styleHints.colorScheme === Qt.Dark
                                                : currentTheme === "dark"
@@ -61,6 +62,7 @@ ApplicationWindow {
             smartAnalysisActive: mainWindow.activeView === "smartAnalysis"
             onOpenRequested: openFileDialog.open()
             onRecentFileRequested: function(filePath) { mainWindow.openRecentFilePath(filePath) }
+            onSettingsRequested: mainWindow.openSettingsWindow()
             onThemeRequested: function(theme) { mainWindow.applyTheme(theme) }
             onHighlightThemeRequested: function(theme) { mainWindow.currentHighlightTheme = theme }
             onSmartAnalysisRequested: mainWindow.toggleSmartAnalysisView()
@@ -99,6 +101,7 @@ ApplicationWindow {
             RK.SmartAnalysisPage {
                 anchors.fill: parent
                 visible: mainWindow.activeView === "smartAnalysis"
+                agentController: rearkAgentController
             }
         }
     }
@@ -212,8 +215,8 @@ ApplicationWindow {
     Connections {
         target: decompilerController
 
-        function onPackageOpened(filePath) {
-            recentFilesModel.addFile(filePath)
+        function onPackageOpened(filePath, appIconDataUrl) {
+            recentFilesModel.addFile(filePath, appIconDataUrl)
         }
     }
 
@@ -252,6 +255,40 @@ ApplicationWindow {
         }
 
         activeView = "smartAnalysis"
+    }
+
+    function openSettingsWindow() {
+        if (settingsWindow !== null) {
+            settingsWindow.currentTheme = mainWindow.currentTheme
+            settingsWindow.settingsController = rearkSettingsController
+            settingsWindow.show()
+            settingsWindow.raise()
+            settingsWindow.requestActivate()
+            return
+        }
+
+        var factory = Qt.createComponent("qrc:/ReArk/SettingsWindow.qml")
+        if (factory.status === Component.Ready) {
+            var window = factory.createObject(mainWindow, {
+                "currentTheme": mainWindow.currentTheme,
+                "settingsController": rearkSettingsController,
+                "closeCallback": function() {
+                    if (mainWindow.settingsWindow === window) {
+                        mainWindow.settingsWindow = null
+                    }
+                }
+            })
+            if (window === null) {
+                console.error(factory.errorString())
+                return
+            }
+            settingsWindow = window
+            window.show()
+            window.raise()
+            window.requestActivate()
+        } else {
+            console.error(factory.errorString())
+        }
     }
 
     function openFileUrl(fileUrl) {

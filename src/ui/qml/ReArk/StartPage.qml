@@ -358,6 +358,7 @@ Rectangle {
                     required property string name
                     required property string path
                     required property bool exists
+                    required property string iconUrl
                     readonly property string fileKind: root.recentFileKind(path, exists)
 
                     width: recentList.width
@@ -384,41 +385,15 @@ Rectangle {
                         anchors.rightMargin: 12
                         spacing: 11
 
-                        Rectangle {
-                            Layout.preferredWidth: 25
+                        PackageFileIcon {
+                            Layout.preferredWidth: 32
                             Layout.preferredHeight: 32
-                            radius: 2
-                            color: root.darkTheme ? "#1b2731" : "#f2f6f8"
-                            border.width: 1
-                            border.color: root.darkTheme ? "#8393a2" : "#607080"
-
-                            Rectangle {
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                width: 8
-                                height: 8
-                                color: root.elevatedColor
-                                border.width: 1
-                                border.color: parent.border.color
-                            }
-
-                            Rectangle {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.bottom: parent.bottom
-                                anchors.bottomMargin: 4
-                                width: 20
-                                height: 13
-                                radius: 2
-                                color: recentDelegate.exists ? "#69d7c7" : "#5b6570"
-
-                                Label {
-                                    anchors.centerIn: parent
-                                    text: recentDelegate.fileKind
-                                    color: recentDelegate.exists ? "#0c2528" : "#d6dce2"
-                                    font.pixelSize: 8
-                                    font.weight: Font.Bold
-                                }
-                            }
+                            Layout.alignment: Qt.AlignVCenter
+                            iconUrl: recentDelegate.iconUrl
+                            fileKind: recentDelegate.fileKind
+                            exists: recentDelegate.exists
+                            darkTheme: root.darkTheme
+                            elevatedColor: root.elevatedColor
                         }
 
                         ColumnLayout {

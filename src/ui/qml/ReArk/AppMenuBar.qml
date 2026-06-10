@@ -11,6 +11,8 @@ Rectangle {
     property string currentHighlightTheme: "GitHub Dark"
     property bool embedded: false
     property bool menuNavigationActive: false
+    property var aboutWindow: null
+    property var updateWindow: null
     property var entryPointItems: []
     readonly property bool darkTheme: Material.theme === Material.Dark
     readonly property string tutorialUrl: "https://www.cppmore.com/category/ReArk/"
@@ -18,6 +20,7 @@ Rectangle {
 
     signal openRequested()
     signal recentFileRequested(string filePath)
+    signal settingsRequested()
     signal themeRequested(string theme)
     signal highlightThemeRequested(string theme)
 
@@ -62,6 +65,72 @@ Rectangle {
             if (!root.anyMenuVisible()) {
                 root.menuNavigationActive = false
             }
+        })
+    }
+
+    function showOwnedWindow(window, properties) {
+        if (window !== null) {
+            for (var key in properties) {
+                window[key] = properties[key]
+            }
+            window.show()
+            window.raise()
+            window.requestActivate()
+            return window
+        }
+        return null
+    }
+
+    function createOwnedWindow(url, properties, onClosing) {
+        var factory = Qt.createComponent(url)
+        if (factory.status !== Component.Ready) {
+            console.error(factory.errorString())
+            return null
+        }
+
+        properties.closeCallback = onClosing
+        var window = factory.createObject(root, properties)
+        if (window === null) {
+            console.error(factory.errorString())
+            return null
+        }
+
+        window.show()
+        window.raise()
+        window.requestActivate()
+        return window
+    }
+
+    function openAboutWindow() {
+        var existing = showOwnedWindow(aboutWindow, {
+            "currentTheme": root.currentTheme
+        })
+        if (existing !== null) {
+            return
+        }
+
+        aboutWindow = createOwnedWindow("qrc:/ReArk/AboutWindow.qml", {
+            "currentTheme": root.currentTheme
+        }, function() {
+            root.aboutWindow = null
+        })
+    }
+
+    function openUpdateWindow(version, changelog, releaseUrl, releaseDate) {
+        var properties = {
+            "currentTheme": root.currentTheme,
+            "version": version,
+            "changelog": changelog,
+            "releaseUrl": releaseUrl,
+            "releaseDate": releaseDate
+        }
+        var existing = showOwnedWindow(updateWindow, properties)
+        if (existing !== null) {
+            return
+        }
+
+        updateWindow = createOwnedWindow("qrc:/ReArk/UpdateWindow.qml", properties, function() {
+            root.updateWindow = null
         })
     }
 
@@ -247,6 +316,13 @@ Rectangle {
         CompactMenu {
             title: qsTr("Preferences")
             minimumItemWidth: 184
+
+            Action {
+                text: qsTr("Settings")
+                onTriggered: root.settingsRequested()
+            }
+
+            CompactMenuSeparator {}
 
             CompactMenu {
                 title: qsTr("Theme")
@@ -520,17 +596,7 @@ Rectangle {
 
         Action {
             text: qsTr("About ReArk")
-            onTriggered: {
-                var factory = Qt.createComponent("qrc:/ReArk/AboutWindow.qml")
-                if (factory.status === Component.Ready) {
-                    var aboutWindow = factory.createObject(null, {
-                        "currentTheme": root.currentTheme
-                    })
-                    aboutWindow.show()
-                } else {
-                    console.error(factory.errorString())
-                }
-            }
+            onTriggered: root.openAboutWindow()
         }
     }
 
@@ -567,19 +633,7 @@ Rectangle {
         target: updateController
 
         function onUpdateAvailable(version, changelog, releaseUrl, releaseDate) {
-            var factory = Qt.createComponent("qrc:/ReArk/UpdateWindow.qml")
-            if (factory.status === Component.Ready) {
-                var updateWindow = factory.createObject(null, {
-                    "currentTheme": root.currentTheme,
-                    "version": version,
-                    "changelog": changelog,
-                    "releaseUrl": releaseUrl,
-                    "releaseDate": releaseDate
-                })
-                updateWindow.show()
-            } else {
-                console.error(factory.errorString())
-            }
+            root.openUpdateWindow(version, changelog, releaseUrl, releaseDate)
         }
 
         function onNoUpdateAvailable() {

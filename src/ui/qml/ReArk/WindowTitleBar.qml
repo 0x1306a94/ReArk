@@ -17,6 +17,7 @@ Rectangle {
 
     signal openRequested()
     signal recentFileRequested(string filePath)
+    signal settingsRequested()
     signal themeRequested(string theme)
     signal highlightThemeRequested(string theme)
     signal smartAnalysisRequested()
@@ -113,6 +114,7 @@ Rectangle {
             currentHighlightTheme: root.currentHighlightTheme
             onOpenRequested: root.openRequested()
             onRecentFileRequested: function(filePath) { root.recentFileRequested(filePath) }
+            onSettingsRequested: root.settingsRequested()
             onThemeRequested: function(theme) { root.themeRequested(theme) }
             onHighlightThemeRequested: function(theme) { root.highlightThemeRequested(theme) }
         }

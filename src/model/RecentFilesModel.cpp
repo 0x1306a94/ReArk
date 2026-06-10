@@ -1,7 +1,9 @@
 #include "model/RecentFilesModel.h"
 
+#include <QDateTime>
 #include <QFileInfo>
 #include <QSettings>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <utility>
@@ -11,6 +13,7 @@ namespace {
 constexpr qsizetype kMaxRecentFiles = 8;
 constexpr auto kSettingsGroup = "RecentFiles";
 constexpr auto kPathsKey = "Paths";
+constexpr auto kIconUrlsKey = "IconUrls";
 
 } // namespace
 
@@ -42,6 +45,8 @@ QVariant RecentFilesModel::data(const QModelIndex& index, int role) const
         return path;
     case ExistsRole:
         return QFileInfo(path).isFile();
+    case IconUrlRole:
+        return QFileInfo(path).isFile() ? iconUrls_.value(cacheKey(path)) : QString();
     default:
         return {};
     }
@@ -53,6 +58,7 @@ QHash<int, QByteArray> RecentFilesModel::roleNames() const
         { NameRole, "name" },
         { PathRole, "path" },
         { ExistsRole, "exists" },
+        { IconUrlRole, "iconUrl" },
     };
 }
 
@@ -77,11 +83,15 @@ QString RecentFilesModel::longestDisplayName() const
     return longest;
 }
 
-void RecentFilesModel::addFile(const QString& filePath)
+void RecentFilesModel::addFile(const QString& filePath, const QString& iconUrl)
 {
     const QString path = normalizedPath(filePath);
     if (path.isEmpty()) {
         return;
+    }
+
+    if (!iconUrl.isEmpty()) {
+        iconUrls_.insert(cacheKey(path), iconUrl);
     }
 
     QStringList nextPaths;
@@ -115,11 +125,13 @@ void RecentFilesModel::removeFile(const QString& filePath)
             nextPaths.append(existingPath);
         }
     }
+    iconUrls_.remove(cacheKey(path));
     replacePaths(std::move(nextPaths));
 }
 
 void RecentFilesModel::clear()
 {
+    iconUrls_.clear();
     replacePaths({});
 }
 
@@ -128,6 +140,7 @@ void RecentFilesModel::load()
     QSettings settings;
     settings.beginGroup(QLatin1String(kSettingsGroup));
     const QStringList storedPaths = settings.value(QLatin1String(kPathsKey)).toStringList();
+    const QVariantMap storedIconUrls = settings.value(QLatin1String(kIconUrlsKey)).toMap();
     settings.endGroup();
 
     QStringList loadedPaths;
@@ -152,8 +165,18 @@ void RecentFilesModel::load()
         return;
     }
 
+    QHash<QString, QString> loadedIconUrls;
+    for (const QString& path : loadedPaths) {
+        const QString key = cacheKey(path);
+        const QString iconUrl = storedIconUrls.value(key).toString();
+        if (!iconUrl.isEmpty()) {
+            loadedIconUrls.insert(key, iconUrl);
+        }
+    }
+
     beginResetModel();
     paths_ = std::move(loadedPaths);
+    iconUrls_ = std::move(loadedIconUrls);
     endResetModel();
     emit entriesChanged();
     emit countChanged();
@@ -164,6 +187,15 @@ void RecentFilesModel::save() const
     QSettings settings;
     settings.beginGroup(QLatin1String(kSettingsGroup));
     settings.setValue(QLatin1String(kPathsKey), paths_);
+    QVariantMap storedIconUrls;
+    for (const QString& path : paths_) {
+        const QString key = cacheKey(path);
+        const QString iconUrl = iconUrls_.value(key);
+        if (!iconUrl.isEmpty()) {
+            storedIconUrls.insert(key, iconUrl);
+        }
+    }
+    settings.setValue(QLatin1String(kIconUrlsKey), storedIconUrls);
     settings.endGroup();
 }
 
@@ -176,6 +208,17 @@ void RecentFilesModel::replacePaths(QStringList paths)
     const int oldCount = paths_.size();
     beginResetModel();
     paths_ = std::move(paths);
+
+    QHash<QString, QString> nextIconUrls;
+    for (const QString& path : paths_) {
+        const QString key = cacheKey(path);
+        const QString iconUrl = iconUrls_.value(key);
+        if (!iconUrl.isEmpty()) {
+            nextIconUrls.insert(key, iconUrl);
+        }
+    }
+    iconUrls_ = std::move(nextIconUrls);
+
     endResetModel();
     save();
     emit entriesChanged();
@@ -193,6 +236,16 @@ QString RecentFilesModel::normalizedPath(const QString& filePath)
     }
 
     return QFileInfo(trimmedPath).absoluteFilePath();
+}
+
+QString RecentFilesModel::cacheKey(const QString& filePath)
+{
+    const QString path = normalizedPath(filePath);
+    const QFileInfo fileInfo(path);
+    return QStringLiteral("%1|%2|%3")
+        .arg(path.toCaseFolded())
+        .arg(fileInfo.isFile() ? fileInfo.size() : -1)
+        .arg(fileInfo.isFile() ? fileInfo.lastModified().toUTC().toMSecsSinceEpoch() : -1);
 }
 
 bool RecentFilesModel::samePath(const QString& lhs, const QString& rhs)

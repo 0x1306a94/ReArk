@@ -2,6 +2,7 @@
 #define REARK_RECENT_FILES_MODEL_H
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QString>
 #include <QStringList>
 
@@ -14,7 +15,8 @@ public:
     enum Role {
         NameRole = Qt::UserRole + 1,
         PathRole,
-        ExistsRole
+        ExistsRole,
+        IconUrlRole
     };
 
     explicit RecentFilesModel(QObject* parent = nullptr);
@@ -25,7 +27,7 @@ public:
     [[nodiscard]] int count() const;
     [[nodiscard]] QString longestDisplayName() const;
 
-    Q_INVOKABLE void addFile(const QString& filePath);
+    Q_INVOKABLE void addFile(const QString& filePath, const QString& iconUrl = {});
     Q_INVOKABLE bool fileExists(const QString& filePath) const;
     Q_INVOKABLE void removeFile(const QString& filePath);
     Q_INVOKABLE void clear();
@@ -39,9 +41,11 @@ private:
     void save() const;
     void replacePaths(QStringList paths);
     [[nodiscard]] static QString normalizedPath(const QString& filePath);
+    [[nodiscard]] static QString cacheKey(const QString& filePath);
     [[nodiscard]] static bool samePath(const QString& lhs, const QString& rhs);
 
     QStringList paths_;
+    QHash<QString, QString> iconUrls_;
 };
 
 #endif // REARK_RECENT_FILES_MODEL_H

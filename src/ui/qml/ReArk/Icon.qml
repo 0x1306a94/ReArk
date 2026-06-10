@@ -19,6 +19,9 @@ Item {
         if (name === "arrow-up") {
             return "qrc:/icons/fontawesome/arrow-up.svg"
         }
+        if (name === "close") {
+            return "qrc:/icons/close-small.svg"
+        }
         if (name === "new-chat") {
             return "qrc:/icons/fontawesome/square-plus.svg"
         }

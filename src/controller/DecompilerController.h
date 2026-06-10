@@ -9,6 +9,7 @@
 #include <QObject>
 #include <QString>
 #include <QVariantList>
+#include <QVector>
 
 #include <memory>
 #include <deque>
@@ -32,6 +33,7 @@ class DecompilerController : public QObject {
     Q_PROPERTY(bool hasPackage READ hasPackage NOTIFY packageChanged)
     Q_PROPERTY(QString packagePath READ packagePath NOTIFY packageChanged)
     Q_PROPERTY(QString appIconUrl READ appIconUrl NOTIFY appIconChanged)
+    Q_PROPERTY(QString appIconDataUrl READ appIconDataUrl NOTIFY appIconChanged)
     Q_PROPERTY(QString appIconPath READ appIconPath NOTIFY appIconChanged)
     Q_PROPERTY(bool appIconLayered READ appIconLayered NOTIFY appIconChanged)
     Q_PROPERTY(bool activeSupportsDisassembly READ activeSupportsDisassembly NOTIFY activeDisassemblyChanged)
@@ -40,6 +42,27 @@ class DecompilerController : public QObject {
     Q_PROPERTY(int selectedIndex READ selectedIndex WRITE setSelectedIndex NOTIFY selectedIndexChanged)
 
 public:
+    struct AgentFileSnapshot {
+        QString name;
+        QString path;
+        QString kind;
+        QString section;
+        QString contentMode;
+        QString content;
+        QString disassembly;
+        bool loaded = false;
+        bool hasDisassembly = false;
+        bool disassemblyLoaded = false;
+    };
+
+    struct AgentSnapshot {
+        QString packageSummary;
+        QString fileList;
+        QString entryPoints;
+        QString signatureSummary;
+        QVector<AgentFileSnapshot> files;
+    };
+
     explicit DecompilerController(ResourcePreviewProvider* previewProvider, QObject* parent = nullptr);
 
     [[nodiscard]] SourceTreeModel* treeModel();
@@ -55,6 +78,7 @@ public:
     [[nodiscard]] bool hasPackage() const;
     [[nodiscard]] QString packagePath() const;
     [[nodiscard]] QString appIconUrl() const;
+    [[nodiscard]] QString appIconDataUrl() const;
     [[nodiscard]] QString appIconPath() const;
     [[nodiscard]] bool appIconLayered() const;
     [[nodiscard]] bool activeSupportsDisassembly() const;
@@ -65,6 +89,7 @@ public:
     Q_INVOKABLE void decompileFile(const QString& filePath);
     Q_INVOKABLE void activateIndex(int index);
     Q_INVOKABLE void openActivePreviewFile() const;
+    Q_INVOKABLE void revealPackageInFileExplorer();
     Q_INVOKABLE QVariantList quickOpenCandidates(const QString& query) const;
     Q_INVOKABLE QVariantList searchCandidates(const QString& query) const;
     Q_INVOKABLE QVariantList entryPointCandidates() const;
@@ -74,6 +99,15 @@ public:
     Q_INVOKABLE QString formatJson(const QString& content) const;
     Q_INVOKABLE void copyTextToClipboard(const QString& text) const;
     Q_INVOKABLE void clear();
+
+    [[nodiscard]] QString agentPackageSummary() const;
+    [[nodiscard]] QString agentListFiles(const QString& query, int limit) const;
+    [[nodiscard]] QString agentSearchLoadedContent(const QString& query, int limit) const;
+    [[nodiscard]] QString agentReadSource(const QString& pathOrQuery, int maxChars) const;
+    [[nodiscard]] QString agentReadDisassembly(const QString& pathOrQuery, int maxChars) const;
+    [[nodiscard]] QString agentEntryPoints() const;
+    [[nodiscard]] QString agentSignatureSummary(int maxChars) const;
+    [[nodiscard]] AgentSnapshot agentSnapshot(int maxFiles = 500, int maxContentChars = 12000, int maxDisassemblyChars = 20000) const;
 
 public slots:
     void setSelectedIndex(int index);
@@ -88,7 +122,7 @@ signals:
     void activityLogChanged();
     void packageChanged();
     void appIconChanged();
-    void packageOpened(const QString& filePath);
+    void packageOpened(const QString& filePath, const QString& appIconDataUrl);
     void activeDisassemblyChanged();
     void selectedIndexChanged();
 
@@ -122,6 +156,7 @@ private:
     QString pendingPackagePath_;
     QString packagePath_;
     QString appIconUrl_;
+    QString appIconDataUrl_;
     QString appIconPath_;
     bool appIconLayered_ = false;
     bool hasPackage_ = false;

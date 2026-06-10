@@ -39,6 +39,20 @@ Rectangle {
     signal openRequested()
     signal fileDropped(url fileUrl)
 
+    function packageFileKind(filePath) {
+        const lowerPath = filePath.toLowerCase()
+        if (lowerPath.endsWith(".abc")) {
+            return "ABC"
+        }
+        if (lowerPath.endsWith(".app")) {
+            return "APP"
+        }
+        if (lowerPath.endsWith(".hap")) {
+            return "HAP"
+        }
+        return "FILE"
+    }
+
     color: pageColor
 
     Connections {
@@ -84,6 +98,8 @@ Rectangle {
                 spacing: 0
 
                 RowLayout {
+                    id: packageHeader
+
                     Layout.fillWidth: true
                     Layout.leftMargin: 12
                     Layout.rightMargin: 12
@@ -96,23 +112,24 @@ Rectangle {
                         id: appHeaderHover
                     }
 
-                    Rectangle {
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        enabled: hasPackage
+                        onTapped: function(point, button) {
+                            packageHeaderMenu.popup(packageHeader, point.position.x, point.position.y)
+                        }
+                    }
+
+                    PackageFileIcon {
                         Layout.preferredWidth: 32
                         Layout.preferredHeight: 32
                         Layout.alignment: Qt.AlignVCenter
-                        visible: hasPackage && root.appIconUrl.length > 0
-                        radius: 7
-                        color: "transparent"
-
-                        Image {
-                            anchors.fill: parent
-                            source: root.appIconUrl
-                            sourceSize.width: 64
-                            sourceSize.height: 64
-                            fillMode: Image.PreserveAspectFit
-                            smooth: true
-                            mipmap: true
-                        }
+                        visible: hasPackage
+                        iconUrl: root.appIconUrl
+                        fileKind: root.packageFileKind(root.filePath)
+                        exists: hasPackage
+                        darkTheme: root.darkTheme
+                        elevatedColor: root.sidebarColor
                     }
 
                     Label {
@@ -126,6 +143,31 @@ Rectangle {
                         ToolTip.text: root.appIconPath.length > 0 ? root.appIconPath : root.filePath
                         ToolTip.visible: appHeaderHover.hovered && ToolTip.text.length > 0
                         ToolTip.delay: 500
+                    }
+                }
+
+                CompactMenu {
+                    id: packageHeaderMenu
+                    minimumItemWidth: 190
+
+                    Action {
+                        text: qsTr("Reveal in File Explorer")
+                        enabled: hasPackage && root.filePath.length > 0
+                        onTriggered: decompilerController.revealPackageInFileExplorer()
+                    }
+
+                    CompactMenuSeparator {}
+
+                    Action {
+                        text: qsTr("Copy Path")
+                        enabled: hasPackage && root.filePath.length > 0
+                        onTriggered: decompilerController.copyTextToClipboard(root.filePath)
+                    }
+
+                    Action {
+                        text: qsTr("Copy Name")
+                        enabled: hasPackage && root.fileName.length > 0
+                        onTriggered: decompilerController.copyTextToClipboard(root.fileName)
                     }
                 }
 

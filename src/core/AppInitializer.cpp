@@ -1,7 +1,9 @@
 #include "core/AppInitializer.h"
 
 #include "controller/DecompilerController.h"
+#include "controller/AgentController.h"
 #include "controller/LanguageController.h"
+#include "controller/SettingsController.h"
 #include "controller/UpdateController.h"
 #include "core/ApplicationController.h"
 #include "core/BuildInfoProvider.h"
@@ -51,9 +53,11 @@ void AppInitializer::initializeContext()
     engine_.addImageProvider(QStringLiteral("rearkResources"), resourcePreviewProvider_);
     applicationController_ = new ApplicationController(&engine_);
     decompilerController_ = new DecompilerController(resourcePreviewProvider_, &engine_);
+    agentController_ = new AgentController(decompilerController_, &engine_);
     languageController_ = new LanguageController(&engine_, &engine_);
     buildInfoProvider_ = new BuildInfoProvider(languageController_, &engine_);
     recentFilesModel_ = new RecentFilesModel(&engine_);
+    settingsController_ = new SettingsController(&engine_);
     updateController_ = new UpdateController(&engine_);
     windowChrome_ = new WindowChrome(&engine_);
 
@@ -64,7 +68,9 @@ void AppInitializer::initializeContext()
     context->setContextProperty(QStringLiteral("recentFilesModel"), recentFilesModel_);
     context->setContextProperty(QStringLiteral("initialFileUrl"), initialFileUrl_);
     context->setContextProperty(QStringLiteral("decompilerController"), decompilerController_);
+    context->setContextProperty(QStringLiteral("rearkAgentController"), agentController_);
     context->setContextProperty(QStringLiteral("languageController"), languageController_);
+    context->setContextProperty(QStringLiteral("rearkSettingsController"), settingsController_);
     context->setContextProperty(QStringLiteral("updateController"), updateController_);
     context->setContextProperty(QStringLiteral("windowChrome"), windowChrome_);
 }

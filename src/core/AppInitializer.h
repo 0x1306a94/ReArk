@@ -7,10 +7,12 @@
 
 class BuildInfoProvider;
 class ApplicationController;
+class AgentController;
 class DecompilerController;
 class LanguageController;
 class RecentFilesModel;
 class ResourcePreviewProvider;
+class SettingsController;
 class UpdateController;
 class WindowChrome;
 
@@ -30,11 +32,13 @@ private:
     QQmlApplicationEngine& engine_;
     QString initialFileUrl_;
     ApplicationController* applicationController_ = nullptr;
+    AgentController* agentController_ = nullptr;
     BuildInfoProvider* buildInfoProvider_ = nullptr;
     ResourcePreviewProvider* resourcePreviewProvider_ = nullptr;
     RecentFilesModel* recentFilesModel_ = nullptr;
     DecompilerController* decompilerController_ = nullptr;
     LanguageController* languageController_ = nullptr;
+    SettingsController* settingsController_ = nullptr;
     UpdateController* updateController_ = nullptr;
     WindowChrome* windowChrome_ = nullptr;
 };

@@ -21,6 +21,7 @@ ApplicationWindow {
     property string changelog: ""
     property string releaseUrl: ""
     property string releaseDate: ""
+    property var closeCallback: null
     readonly property bool darkTheme: currentTheme === "system"
                                       ? Qt.styleHints.colorScheme === Qt.Dark
                                       : currentTheme === "dark"
@@ -32,6 +33,12 @@ ApplicationWindow {
     color: backgroundColor
     Material.theme: darkTheme ? Material.Dark : Material.Light
     Material.accent: Material.Teal
+    onClosing: {
+        if (closeCallback) {
+            closeCallback()
+        }
+        destroy()
+    }
 
     Rectangle {
         anchors.fill: parent

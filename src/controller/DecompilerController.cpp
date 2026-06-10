@@ -4,12 +4,16 @@
 
 #include <QClipboard>
 #include <QDesktopServices>
+#include <QDir>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QMimeDatabase>
+#include <QProcess>
 #include <QUrl>
+#include <QVariantMap>
 #include <QtConcurrent>
 
 #include <algorithm>
@@ -27,6 +31,76 @@ qsizetype cachedResultSize(const HyleDecompiler::SourceResult& result)
     return result.content.size() * static_cast<qsizetype>(sizeof(QChar))
         + result.binaryContent.size()
         + result.diagnostics.size() * static_cast<qsizetype>(sizeof(QChar));
+}
+
+QString makeAppIconDataUrl(const QByteArray& bytes, const QString& iconPath, bool layered)
+{
+    if (bytes.isEmpty()) {
+        return {};
+    }
+
+    QString mimeName = QStringLiteral("image/png");
+    if (!layered) {
+        QMimeDatabase mimeDatabase;
+        auto mime = mimeDatabase.mimeTypeForFileNameAndData(iconPath, bytes);
+        if (!mime.isValid() || !mime.name().startsWith(QLatin1String("image/"))) {
+            mime = mimeDatabase.mimeTypeForData(bytes);
+        }
+        if (!mime.isValid() || !mime.name().startsWith(QLatin1String("image/"))) {
+            return {};
+        }
+        mimeName = mime.name();
+    }
+
+    return QStringLiteral("data:%1;base64,%2")
+        .arg(mimeName, QString::fromLatin1(bytes.toBase64()));
+}
+
+QString boundedAgentText(QString text, int maxChars)
+{
+    constexpr int kDefaultMaxChars = 12000;
+    constexpr int kHardMaxChars = 60000;
+    if (maxChars <= 0) {
+        maxChars = kDefaultMaxChars;
+    }
+    maxChars = std::clamp(maxChars, 1000, kHardMaxChars);
+    if (text.size() <= maxChars) {
+        return text;
+    }
+    return text.left(maxChars)
+        + QStringLiteral("\n\n[truncated: %1 of %2 characters shown]")
+              .arg(maxChars)
+              .arg(text.size());
+}
+
+int candidateNodeIndex(const QVariantMap& candidate)
+{
+    bool ok = false;
+    const int nodeIndex = candidate.value(QStringLiteral("nodeIndex")).toInt(&ok);
+    return ok ? nodeIndex : -1;
+}
+
+QString formatCandidateLine(const QVariantMap& candidate)
+{
+    const QString path = candidate.value(QStringLiteral("path")).toString();
+    const QString kind = candidate.value(QStringLiteral("kind")).toString();
+    const QString section = candidate.value(QStringLiteral("section")).toString();
+    const QString mode = candidate.value(QStringLiteral("contentMode")).toString();
+    const QString subtitle = candidate.value(QStringLiteral("subtitle")).toString();
+    QString line = path;
+    if (!kind.isEmpty()) {
+        line += QStringLiteral(" | kind=%1").arg(kind);
+    }
+    if (!section.isEmpty()) {
+        line += QStringLiteral(" | section=%1").arg(section);
+    }
+    if (!mode.isEmpty()) {
+        line += QStringLiteral(" | mode=%1").arg(mode);
+    }
+    if (!subtitle.isEmpty() && subtitle != path) {
+        line += QStringLiteral(" | %1").arg(subtitle);
+    }
+    return line;
 }
 
 } // namespace
@@ -117,6 +191,11 @@ QString DecompilerController::packagePath() const
 QString DecompilerController::appIconUrl() const
 {
     return hasPackage_ ? appIconUrl_ : QString();
+}
+
+QString DecompilerController::appIconDataUrl() const
+{
+    return hasPackage_ ? appIconDataUrl_ : QString();
 }
 
 QString DecompilerController::appIconPath() const
@@ -222,6 +301,33 @@ void DecompilerController::openActivePreviewFile() const
     }
 }
 
+void DecompilerController::revealPackageInFileExplorer()
+{
+    const QString path = packagePath_.isEmpty() ? pendingPackagePath_ : packagePath_;
+    const QFileInfo fileInfo(path);
+    if (path.isEmpty() || !fileInfo.exists()) {
+        showStatusMessage(tr("Package file no longer exists: %1").arg(path));
+        return;
+    }
+
+#ifdef Q_OS_WIN
+    const QString nativePath = QDir::toNativeSeparators(fileInfo.absoluteFilePath());
+    const bool opened = QProcess::startDetached(
+        QStringLiteral("explorer.exe"),
+        { QStringLiteral("/select,%1").arg(nativePath) });
+#elif defined(Q_OS_MACOS)
+    const bool opened = QProcess::startDetached(
+        QStringLiteral("open"),
+        { QStringLiteral("-R"), fileInfo.absoluteFilePath() });
+#else
+    const bool opened = QDesktopServices::openUrl(QUrl::fromLocalFile(fileInfo.absolutePath()));
+#endif
+
+    if (!opened) {
+        showStatusMessage(tr("Failed to reveal package file: %1").arg(fileInfo.absoluteFilePath()));
+    }
+}
+
 QVariantList DecompilerController::quickOpenCandidates(const QString& query) const
 {
     return treeModel_.navigationCandidates(query, 80);
@@ -268,6 +374,182 @@ void DecompilerController::copyTextToClipboard(const QString& text) const
     if (auto* clipboard = QGuiApplication::clipboard()) {
         clipboard->setText(text);
     }
+}
+
+QString DecompilerController::agentPackageSummary() const
+{
+    QString summary;
+    summary += QStringLiteral("Package: %1\n").arg(hasPackage_ ? packagePath_ : QStringLiteral("<none>"));
+    summary += QStringLiteral("Status: %1\n").arg(status_);
+    summary += QStringLiteral("Busy: %1\n").arg(busy_ ? QStringLiteral("true") : QStringLiteral("false"));
+    summary += QStringLiteral("Active tab: %1\n").arg(tabsModel_.activePath());
+    summary += QStringLiteral("Active kind: %1\n").arg(tabsModel_.activeKind());
+    summary += QStringLiteral("Active content mode: %1\n").arg(tabsModel_.activeContentMode());
+    summary += QStringLiteral("Diagnostics: %1\n").arg(diagnostics());
+
+    const QVariantList entryPoints = treeModel_.entryPointCandidates();
+    if (!entryPoints.isEmpty()) {
+        summary += QStringLiteral("\nImportant files:\n");
+        for (const QVariant& item : entryPoints) {
+            summary += QStringLiteral("- %1\n").arg(formatCandidateLine(item.toMap()));
+        }
+    }
+
+    return boundedAgentText(summary, 16000);
+}
+
+QString DecompilerController::agentListFiles(const QString& query, int limit) const
+{
+    const QVariantList candidates = treeModel_.navigationCandidates(query, limit <= 0 ? 40 : limit);
+    if (candidates.isEmpty()) {
+        return tr("No files matched: %1").arg(query);
+    }
+
+    QString result;
+    for (const QVariant& item : candidates) {
+        result += QStringLiteral("- %1\n").arg(formatCandidateLine(item.toMap()));
+    }
+    return boundedAgentText(result, 24000);
+}
+
+QString DecompilerController::agentSearchLoadedContent(const QString& query, int limit) const
+{
+    const QVariantList candidates = treeModel_.loadedContentSearchResults(query, limit <= 0 ? 40 : limit);
+    if (candidates.isEmpty()) {
+        return tr("No loaded content matched: %1").arg(query);
+    }
+
+    QString result;
+    for (const QVariant& item : candidates) {
+        result += QStringLiteral("- %1\n").arg(formatCandidateLine(item.toMap()));
+    }
+    return boundedAgentText(result, 24000);
+}
+
+QString DecompilerController::agentReadSource(const QString& pathOrQuery, int maxChars) const
+{
+    const QVariantList candidates = treeModel_.navigationCandidates(pathOrQuery, 10);
+    if (candidates.isEmpty()) {
+        return tr("No source file matched: %1").arg(pathOrQuery);
+    }
+
+    const QVariantMap candidate = candidates.first().toMap();
+    const int nodeIndex = candidateNodeIndex(candidate);
+    if (nodeIndex < 0) {
+        return tr("Matched file is no longer available: %1").arg(pathOrQuery);
+    }
+    if (treeModel_.nodeNeedsLoad(nodeIndex)) {
+        return tr("Matched file is not loaded yet: %1").arg(treeModel_.nodePath(nodeIndex));
+    }
+
+    QString text;
+    text += QStringLiteral("# file: %1\n").arg(treeModel_.nodePath(nodeIndex));
+    text += QStringLiteral("# kind: %1\n\n").arg(treeModel_.nodeKind(nodeIndex));
+    text += treeModel_.nodeContent(nodeIndex);
+    return boundedAgentText(text, maxChars);
+}
+
+QString DecompilerController::agentReadDisassembly(const QString& pathOrQuery, int maxChars) const
+{
+    const QVariantList candidates = treeModel_.navigationCandidates(pathOrQuery, 10);
+    if (candidates.isEmpty()) {
+        return tr("No source file matched: %1").arg(pathOrQuery);
+    }
+
+    const QVariantMap candidate = candidates.first().toMap();
+    const int nodeIndex = candidateNodeIndex(candidate);
+    if (nodeIndex < 0) {
+        return tr("Matched file is no longer available: %1").arg(pathOrQuery);
+    }
+    if (!treeModel_.nodeHasDisassembly(nodeIndex)) {
+        return tr("Matched file does not have source-file disassembly: %1").arg(treeModel_.nodePath(nodeIndex));
+    }
+    if (!treeModel_.nodeDisassemblyLoaded(nodeIndex)) {
+        return tr("Disassembly is not loaded yet for: %1").arg(treeModel_.nodePath(nodeIndex));
+    }
+
+    QString text;
+    text += QStringLiteral("# disassembly: %1\n\n").arg(treeModel_.nodePath(nodeIndex));
+    text += treeModel_.nodeDisassembly(nodeIndex);
+    return boundedAgentText(text, maxChars);
+}
+
+QString DecompilerController::agentEntryPoints() const
+{
+    const QVariantList candidates = treeModel_.entryPointCandidates();
+    if (candidates.isEmpty()) {
+        return tr("No entry point candidates are available.");
+    }
+
+    QString result;
+    for (const QVariant& item : candidates) {
+        result += QStringLiteral("- %1\n").arg(formatCandidateLine(item.toMap()));
+    }
+    return boundedAgentText(result, 16000);
+}
+
+QString DecompilerController::agentSignatureSummary(int maxChars) const
+{
+    const QVariantList candidates = treeModel_.navigationCandidates(QStringLiteral("signature"), 10);
+    for (const QVariant& item : candidates) {
+        const QVariantMap candidate = item.toMap();
+        const int nodeIndex = candidateNodeIndex(candidate);
+        if (nodeIndex < 0) {
+            continue;
+        }
+        const QString section = candidate.value(QStringLiteral("section")).toString();
+        const QString name = candidate.value(QStringLiteral("name")).toString();
+        if (section != QStringLiteral("signature") && !name.contains(QStringLiteral("signature"), Qt::CaseInsensitive)) {
+            continue;
+        }
+        if (treeModel_.nodeNeedsLoad(nodeIndex)) {
+            return tr("Signature view is not loaded yet: %1").arg(treeModel_.nodePath(nodeIndex));
+        }
+        return boundedAgentText(treeModel_.nodeContent(nodeIndex), maxChars);
+    }
+
+    return tr("No package signature view is available.");
+}
+
+DecompilerController::AgentSnapshot DecompilerController::agentSnapshot(
+    int maxFiles,
+    int maxContentChars,
+    int maxDisassemblyChars) const
+{
+    AgentSnapshot snapshot;
+    snapshot.packageSummary = agentPackageSummary();
+    snapshot.fileList = agentListFiles({}, maxFiles);
+    snapshot.entryPoints = agentEntryPoints();
+    snapshot.signatureSummary = agentSignatureSummary(maxContentChars);
+
+    const QVariantList candidates = treeModel_.navigationCandidates({}, maxFiles <= 0 ? 500 : maxFiles);
+    snapshot.files.reserve(candidates.size());
+    for (const QVariant& item : candidates) {
+        const QVariantMap candidate = item.toMap();
+        const int nodeIndex = candidateNodeIndex(candidate);
+        if (nodeIndex < 0) {
+            continue;
+        }
+
+        AgentFileSnapshot file;
+        file.name = candidate.value(QStringLiteral("name")).toString();
+        file.path = treeModel_.nodePath(nodeIndex);
+        file.kind = treeModel_.nodeKind(nodeIndex);
+        file.section = candidate.value(QStringLiteral("section")).toString();
+        file.contentMode = treeModel_.nodeContentMode(nodeIndex);
+        file.loaded = !treeModel_.nodeNeedsLoad(nodeIndex);
+        if (file.loaded) {
+            file.content = boundedAgentText(treeModel_.nodeContent(nodeIndex), maxContentChars);
+        }
+        file.hasDisassembly = treeModel_.nodeHasDisassembly(nodeIndex);
+        file.disassemblyLoaded = file.hasDisassembly && treeModel_.nodeDisassemblyLoaded(nodeIndex);
+        if (file.disassemblyLoaded) {
+            file.disassembly = boundedAgentText(treeModel_.nodeDisassembly(nodeIndex), maxDisassemblyChars);
+        }
+        snapshot.files.push_back(std::move(file));
+    }
+
+    return snapshot;
 }
 
 void DecompilerController::clear()
@@ -366,6 +648,7 @@ void DecompilerController::clearAppIcon()
     }
 
     appIconUrl_.clear();
+    appIconDataUrl_.clear();
     appIconPath_.clear();
     appIconLayered_ = false;
     emit appIconChanged();
@@ -409,7 +692,8 @@ void DecompilerController::applyOpenResult(quint64 requestId, HyleDecompiler::Op
     clearAppIcon();
     appIconPath_ = std::move(result.appIconPath);
     appIconLayered_ = result.appIconLayered;
-    if (!result.appIconBytes.isEmpty() && previewProvider_ != nullptr) {
+    appIconDataUrl_ = makeAppIconDataUrl(result.appIconBytes, appIconPath_, appIconLayered_);
+    if (!appIconDataUrl_.isEmpty() && previewProvider_ != nullptr) {
         appIconUrl_ = previewProvider_->storeImage(result.appIconBytes);
     }
     if (!appIconUrl_.isEmpty() || !appIconPath_.isEmpty() || appIconLayered_) {
@@ -420,7 +704,7 @@ void DecompilerController::applyOpenResult(quint64 requestId, HyleDecompiler::Op
     appendActivity(tr("Building file tree."));
     treeModel_.replaceFiles(std::move(result.files));
     setHasPackage(true);
-    emit packageOpened(packagePath_);
+    emit packageOpened(packagePath_, appIconDataUrl_);
     appendActivity(result.status);
     setStatus(result.status);
     rebuildBackgroundPreloadQueue(treeModel_.selectedNode());

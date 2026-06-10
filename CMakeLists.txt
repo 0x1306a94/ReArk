@@ -24,6 +24,17 @@ if(EXISTS "${HYLE_INSTALL_PREFIX}")
 endif()
 find_package(hyle CONFIG REQUIRED)
 
+set(WUWE_INSTALL_PREFIX "$ENV{WUWE_INSTALL_PREFIX}" CACHE PATH "Installed wuwe package prefix")
+if(EXISTS "${WUWE_INSTALL_PREFIX}")
+    list(APPEND CMAKE_PREFIX_PATH "${WUWE_INSTALL_PREFIX}")
+endif()
+find_package(wuwe CONFIG QUIET)
+if(wuwe_FOUND)
+    message(STATUS "Wuwe Agent runtime enabled")
+else()
+    message(STATUS "Wuwe Agent runtime not found; smart analysis will show setup guidance")
+endif()
+
 if(WIN32)
     set(APP_ICON_PATH "${PROJECT_SOURCE_DIR}/resources/images/app_icon.ico")
     configure_file(

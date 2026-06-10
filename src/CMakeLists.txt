@@ -21,8 +21,14 @@ qt_add_executable(${PROJECT_NAME}
     core/WindowChrome.h
     controller/DecompilerController.cpp
     controller/DecompilerController.h
+    controller/AgentSettings.cpp
+    controller/AgentSettings.h
+    controller/AgentController.cpp
+    controller/AgentController.h
     controller/LanguageController.cpp
     controller/LanguageController.h
+    controller/SettingsController.cpp
+    controller/SettingsController.h
     controller/UpdateController.cpp
     controller/UpdateController.h
     model/DocumentContent.h
@@ -123,6 +129,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     reark_qml_moduleplugin
 )
 
+if(wuwe_FOUND)
+    get_target_property(REARK_WUWE_INCLUDE_DIRS wuwe::wuwe INTERFACE_INCLUDE_DIRECTORIES)
+    if(REARK_WUWE_INCLUDE_DIRS)
+        target_include_directories(${PROJECT_NAME} BEFORE PRIVATE ${REARK_WUWE_INCLUDE_DIRS})
+    endif()
+    target_link_libraries(${PROJECT_NAME} PRIVATE wuwe::wuwe)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE REARK_HAS_WUWE=1)
+endif()
+
 target_include_directories(${PROJECT_NAME} PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/presentation>
@@ -137,6 +152,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Crypt32)
+
     set_target_properties(${PROJECT_NAME} PROPERTIES
         WIN32_EXECUTABLE $<$<CONFIG:Release>:TRUE>
     )

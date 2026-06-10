@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Effects
+import QtQuick.Controls.impl
 
 Item {
     id: root
@@ -29,23 +29,14 @@ Item {
     implicitHeight: 16
     visible: iconSource.length > 0
 
-    Image {
-        id: iconImage
-
+    ColorImage {
         anchors.fill: parent
         source: root.iconSource
+        color: root.color
         sourceSize.width: Math.max(1, Math.round(root.width * 2))
         sourceSize.height: Math.max(1, Math.round(root.height * 2))
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true
-        visible: false
-    }
-
-    MultiEffect {
-        anchors.fill: iconImage
-        source: iconImage
-        colorization: 1.0
-        colorizationColor: root.color
     }
 }

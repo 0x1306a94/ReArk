@@ -130,7 +130,7 @@ Rectangle {
 
                 Label {
                     Layout.fillWidth: true
-                    text: qsTr("HarmonyOS NEXT HAP / ABC analysis, decompilation and disassembly tool")
+                    text: qsTr("HarmonyOS NEXT app reverse engineering with agentic analysis")
                     color: root.secondaryTextColor
                     font.pixelSize: 16
                     horizontalAlignment: Text.AlignHCenter

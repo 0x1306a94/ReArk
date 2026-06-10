@@ -149,7 +149,7 @@ ApplicationWindow {
             Text {
                 Layout.fillWidth: true
                 Layout.topMargin: 16
-                text: qsTr("A professional reverse engineering tool for HarmonyOS NEXT HAP/ABC, supporting disassembly, decompilation, signature identification, package browsing, application analysis, and more.")
+                text: qsTr("A professional reverse engineering tool for HarmonyOS NEXT HAP/ABC, supporting disassembly, decompilation, agentic analysis, signature identification, package browsing, and more.")
                 font.pointSize: 10
                 wrapMode: Text.WordWrap
                 lineHeight: 1.35

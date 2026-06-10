@@ -40,8 +40,8 @@
         <translation>官网</translation>
     </message>
     <message>
-        <source>A professional reverse engineering tool for HarmonyOS NEXT HAP/ABC, supporting disassembly, decompilation, signature identification, package browsing, application analysis, and more.</source>
-        <translation>一款用于 HarmonyOS NEXT HAP/ABC 的专业逆向工具，支持反汇编、反编译、签名识别、包体浏览、应用分析等功能。</translation>
+        <source>A professional reverse engineering tool for HarmonyOS NEXT HAP/ABC, supporting disassembly, decompilation, agentic analysis, signature identification, package browsing, and more.</source>
+        <translation>一款用于 HarmonyOS NEXT HAP/ABC 的专业逆向工具，支持反汇编、反编译、Agent智能分析、签名识别、包体浏览等功能。</translation>
     </message>
     <message>
         <source>Reverse the Ark, Reveal the App</source>
@@ -423,6 +423,14 @@
         <translation>未选择媒体</translation>
     </message>
     <message>
+        <source>Audio Preview</source>
+        <translation>音频预览</translation>
+    </message>
+    <message>
+        <source>Audio file</source>
+        <translation>音频文件</translation>
+    </message>
+    <message>
         <source>Pause</source>
         <translation>暂停</translation>
     </message>
@@ -519,12 +527,16 @@
         <translation>新建会话</translation>
     </message>
     <message>
-        <source>What do you want to protect?</source>
-        <translation>想要保护什么？</translation>
+        <source>What would you like to ask?</source>
+        <translation>想要问点什么？</translation>
     </message>
     <message>
-        <source>Ask anything about app protection</source>
-        <translation>询问应用保护的任何问题</translation>
+        <source>Ask anything about this app</source>
+        <translation>询问有关该应用的任何问题</translation>
+    </message>
+    <message>
+        <source>Send</source>
+        <translation>发送</translation>
     </message>
 </context>
 <context>
@@ -542,8 +554,8 @@
         <translation type="vanished">HarmonyOS NEXT HAP/ABC</translation>
     </message>
     <message>
-        <source>HarmonyOS NEXT HAP / ABC analysis, decompilation and disassembly tool</source>
-        <translation>HarmonyOS NEXT HAP / ABC 解析、反编译与反汇编工具</translation>
+        <source>HarmonyOS NEXT app reverse engineering with agentic analysis</source>
+        <translation>HarmonyOS NEXT 应用逆向与Agent智能分析</translation>
     </message>
     <message>
         <source>Open File</source>

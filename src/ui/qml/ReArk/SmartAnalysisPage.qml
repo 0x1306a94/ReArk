@@ -8,47 +8,71 @@ Rectangle {
     id: root
 
     readonly property bool darkTheme: Material.theme === Material.Dark
-    readonly property color pageColor: "#e8eef7"
-    readonly property color panelColor: "#fbfcff"
-    readonly property color primaryTextColor: "#0f172a"
-    readonly property color secondaryTextColor: "#748094"
-    readonly property color borderColor: "#cfd8e6"
-    readonly property color iconColor: "#1f3354"
-    readonly property color accentColor: "#5d83f4"
-    readonly property color accentHoverColor: "#4e74e4"
+    readonly property color pageTopColor: darkTheme ? "#111923" : "#e8f0fb"
+    readonly property color pageBottomColor: darkTheme ? "#0d121a" : "#f4f8fc"
+    readonly property color panelColor: darkTheme ? "#151d28" : "#fbfcff"
+    readonly property color panelHoverColor: darkTheme ? "#1a2532" : "#ffffff"
+    readonly property color primaryTextColor: darkTheme ? "#eef5ff" : "#0f172a"
+    readonly property color secondaryTextColor: darkTheme ? "#98a7bb" : "#748094"
+    readonly property color borderColor: darkTheme ? "#2c3848" : "#d3dce9"
+    readonly property color iconColor: darkTheme ? "#cbd8ea" : "#14213d"
+    readonly property color accentColor: darkTheme ? "#6f8cff" : "#5d83f4"
+    readonly property color accentHoverColor: darkTheme ? "#809aff" : "#4e74e4"
+    readonly property color accentPressedColor: darkTheme ? "#5874e7" : "#446bdd"
+    readonly property color newChatColor: darkTheme ? "#182231" : "#f8fbff"
+    readonly property color newChatHoverColor: darkTheme ? "#202c3d" : "#ffffff"
+    readonly property color newChatBorderColor: darkTheme ? "#344255" : "#d7e0ed"
+    readonly property real panelShadowOpacity: darkTheme ? 0.28 : 0.13
+    readonly property real buttonShadowOpacity: darkTheme ? 0.22 : 0.1
 
-    color: pageColor
+    gradient: Gradient {
+        GradientStop {
+            position: 0
+            color: root.pageTopColor
+        }
+        GradientStop {
+            position: 1
+            color: root.pageBottomColor
+        }
+    }
 
     Button {
         id: newChatButton
 
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.topMargin: 16
+        anchors.topMargin: 18
         anchors.rightMargin: 24
-        width: Math.max(116, newChatContent.implicitWidth + 28)
-        height: 36
+        width: Math.max(106, newChatContent.implicitWidth + 26)
+        height: 34
         padding: 0
         hoverEnabled: true
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowBlur: 0.75
+            shadowOpacity: root.buttonShadowOpacity
+            shadowVerticalOffset: 5
+        }
 
         background: Rectangle {
             radius: height / 2
-            color: newChatButton.hovered ? "#ffffff" : "#f7f9fd"
+            color: newChatButton.hovered ? root.newChatHoverColor : root.newChatColor
             border.width: 1
-            border.color: root.borderColor
+            border.color: root.newChatBorderColor
         }
 
         contentItem: Row {
             id: newChatContent
 
             anchors.centerIn: parent
-            spacing: 8
+            spacing: 7
 
             Icon {
                 name: "new-chat"
-                color: root.iconColor
-                width: 15
-                height: 15
+                color: root.primaryTextColor
+                width: 13
+                height: 13
                 strokeWidth: 1.8
                 anchors.verticalCenter: parent.verticalCenter
             }
@@ -56,7 +80,7 @@ Rectangle {
             Text {
                 text: qsTr("New Chat")
                 color: root.primaryTextColor
-                font.pixelSize: 14
+                font.pixelSize: 13
                 font.weight: Font.DemiBold
                 anchors.verticalCenter: parent.verticalCenter
                 renderType: Text.NativeRendering
@@ -65,24 +89,24 @@ Rectangle {
     }
 
     ColumnLayout {
-        width: Math.min(930, Math.max(660, parent.width * 0.56))
+        width: Math.min(930, Math.max(660, parent.width - 264))
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: -14
-        spacing: 16
+        anchors.verticalCenterOffset: 20
+        spacing: 17
 
         Label {
             Layout.fillWidth: true
-            text: qsTr("What do you want to protect?")
+            text: qsTr("What would you like to ask?")
             color: root.primaryTextColor
-            font.pixelSize: 32
+            font.pixelSize: 34
             font.weight: Font.Bold
             horizontalAlignment: Text.AlignHCenter
         }
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 118
+            Layout.preferredHeight: 130
             radius: 8
             color: root.panelColor
             border.width: 1
@@ -90,9 +114,9 @@ Rectangle {
             layer.enabled: true
             layer.effect: MultiEffect {
                 shadowEnabled: true
-                shadowBlur: 0.5
-                shadowOpacity: 0.15
-                shadowVerticalOffset: 4
+                shadowBlur: 0.55
+                shadowOpacity: root.panelShadowOpacity
+                shadowVerticalOffset: 5
             }
 
             TextEdit {
@@ -104,21 +128,22 @@ Rectangle {
                 anchors.bottom: toolRow.top
                 anchors.leftMargin: 18
                 anchors.rightMargin: 16
-                anchors.topMargin: 15
+                anchors.topMargin: 18
                 anchors.bottomMargin: 8
                 wrapMode: TextEdit.Wrap
                 color: root.primaryTextColor
                 selectedTextColor: "#ffffff"
                 selectionColor: root.accentColor
+                cursorVisible: activeFocus
                 font.pixelSize: 13
             }
 
             Label {
                 anchors.left: promptInput.left
                 anchors.top: promptInput.top
-                text: qsTr("Ask anything about app protection")
+                text: qsTr("Ask anything about this app")
                 color: root.secondaryTextColor
-                font.pixelSize: 13
+                font.pixelSize: 12
                 visible: promptInput.text.length === 0
             }
 
@@ -127,15 +152,15 @@ Rectangle {
 
                 anchors.left: parent.left
                 anchors.bottom: parent.bottom
-                anchors.leftMargin: 24
-                anchors.bottomMargin: 20
-                spacing: 18
+                anchors.leftMargin: 26
+                anchors.bottomMargin: 23
+                spacing: 19
 
                 Icon {
                     name: "paperclip"
                     color: root.iconColor
-                    width: 16
-                    height: 16
+                    width: 15
+                    height: 15
                     strokeWidth: 1.9
                     anchors.verticalCenter: parent.verticalCenter
                 }
@@ -143,40 +168,28 @@ Rectangle {
                 Icon {
                     name: "diamond"
                     color: root.iconColor
-                    width: 16
-                    height: 16
+                    width: 15
+                    height: 15
                     strokeWidth: 1.9
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
 
-            Button {
+            RoundIconButton {
                 id: sendButton
 
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.rightMargin: 16
-                anchors.bottomMargin: 14
-                width: 40
-                height: width
-                padding: 0
-                hoverEnabled: true
-
-                background: Rectangle {
-                    radius: width / 2
-                    color: sendButton.hovered ? root.accentHoverColor : root.accentColor
-                }
-
-                contentItem: Item {
-                    Icon {
-                        anchors.centerIn: parent
-                        name: "arrow-up"
-                        color: "#ffffff"
-                        width: 18
-                        height: 18
-                        strokeWidth: 2.1
-                    }
-                }
+                anchors.bottomMargin: 13
+                diameter: 38
+                iconSize: 17
+                iconName: "arrow-up"
+                backgroundColor: root.accentColor
+                hoverColor: root.accentHoverColor
+                pressedColor: root.accentPressedColor
+                iconColor: "#ffffff"
+                toolTipText: qsTr("Send")
             }
         }
     }

@@ -87,31 +87,28 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.leftMargin: 12
                     Layout.rightMargin: 12
-                    Layout.topMargin: 8
-                    Layout.bottomMargin: 6
-                    Layout.preferredHeight: 34
-                    spacing: 9
+                    Layout.topMargin: 10
+                    Layout.bottomMargin: 8
+                    Layout.preferredHeight: 44
+                    spacing: 10
 
                     HoverHandler {
                         id: appHeaderHover
                     }
 
                     Rectangle {
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 28
+                        Layout.preferredWidth: 32
+                        Layout.preferredHeight: 32
                         Layout.alignment: Qt.AlignVCenter
                         visible: hasPackage && root.appIconUrl.length > 0
-                        radius: 6
-                        color: darkTheme ? "#151b22" : "#f2f6f8"
-                        border.width: 1
-                        border.color: dividerColor
+                        radius: 7
+                        color: "transparent"
 
                         Image {
                             anchors.fill: parent
-                            anchors.margins: 3
                             source: root.appIconUrl
-                            sourceSize.width: 56
-                            sourceSize.height: 56
+                            sourceSize.width: 64
+                            sourceSize.height: 64
                             fillMode: Image.PreserveAspectFit
                             smooth: true
                             mipmap: true
@@ -122,13 +119,22 @@ Rectangle {
                         Layout.fillWidth: true
                         text: hasPackage ? root.fileName : qsTr("Drop a package to start decompiling")
                         color: hasPackage ? Material.foreground : secondaryTextColor
-                        font.pixelSize: 12
+                        font.pixelSize: 13
+                        font.weight: hasPackage ? Font.DemiBold : Font.Normal
                         elide: Text.ElideMiddle
                         verticalAlignment: Text.AlignVCenter
                         ToolTip.text: root.appIconPath.length > 0 ? root.appIconPath : root.filePath
                         ToolTip.visible: appHeaderHover.hovered && ToolTip.text.length > 0
                         ToolTip.delay: 500
                     }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 12
+                    Layout.rightMargin: 12
+                    Layout.preferredHeight: 1
+                    color: darkTheme ? "#29313b" : "#e0e7eb"
                 }
 
                 ListView {
@@ -150,7 +156,7 @@ Rectangle {
                         width: fileTree.width
                         height: 28
                         leftPadding: 8 + model.depth * 16
-                        rightPadding: 10
+                        rightPadding: 18
                         text: model.name
                         highlighted: index === decompilerController.selectedIndex
                         hoverEnabled: true
@@ -218,6 +224,29 @@ Rectangle {
                             text: qsTr("Copy Name")
                             enabled: fileTree.contextName.length > 0
                             onTriggered: decompilerController.copyTextToClipboard(fileTree.contextName)
+                        }
+                    }
+
+                    ScrollBar.vertical: ScrollBar {
+                        id: fileTreeScrollBar
+
+                        policy: ScrollBar.AsNeeded
+                        active: hovered || pressed || fileTree.moving || fileTree.flicking
+                        width: 10
+
+                        background: Item {}
+
+                        contentItem: Rectangle {
+                            implicitWidth: 6
+                            radius: width / 2
+                            color: root.darkTheme ? "#6f7b8b" : "#9aa8b5"
+                            opacity: fileTreeScrollBar.active ? 0.82 : 0.45
+
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: 120
+                                }
+                            }
                         }
                     }
                 }

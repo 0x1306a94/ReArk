@@ -22,6 +22,7 @@
 #include <QRegularExpression>
 #include <QStringList>
 #include <QTime>
+#include <QTimer>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -655,7 +656,11 @@ AgentController::AgentController(
     , decompilerController_(decompilerController)
     , knowledgeController_(knowledgeController)
     , runtime_(std::make_unique<Runtime>())
+    , assistantDeltaTimer_(new QTimer(this))
 {
+    assistantDeltaTimer_->setSingleShot(true);
+    assistantDeltaTimer_->setInterval(50);
+    connect(assistantDeltaTimer_, &QTimer::timeout, this, &AgentController::flushPendingAssistantDelta);
     setStatus(available() ? tr("Ready") : unavailableMessage());
 }
 
@@ -861,7 +866,7 @@ void AgentController::ask(const QString& question)
         const QString chunk = fromStringView(delta);
         QMetaObject::invokeMethod(self.data(), [self, chunk] {
             if (self) {
-                self->appendToActiveAssistantMessage(chunk);
+                self->queueAssistantDelta(chunk);
             }
         }, Qt::QueuedConnection);
     };
@@ -903,6 +908,7 @@ void AgentController::ask(const QString& question)
             }
             self->setReasoningDetails(resultJson, {}, {});
             self->setErrorMessage(message);
+            self->flushPendingAssistantDelta();
             self->appendToActiveAssistantMessage(message);
             self->finishActiveAssistantMessage();
             self->setRunning(false);
@@ -968,7 +974,7 @@ void AgentController::ask(const QString& question)
         const QString chunk = fromStringView(text);
         QMetaObject::invokeMethod(self.data(), [self, chunk] {
             if (self) {
-                self->appendToActiveAssistantMessage(chunk);
+                self->queueAssistantDelta(chunk);
             }
         }, Qt::QueuedConnection);
     };
@@ -1020,6 +1026,7 @@ void AgentController::ask(const QString& question)
             QMetaObject::invokeMethod(self.data(), [self, msg] {
                 if (self) {
                     self->setErrorMessage(msg);
+                    self->flushPendingAssistantDelta();
                     self->appendToActiveAssistantMessage(msg);
                     self->finishActiveAssistantMessage();
                     self->setStatus(msg);
@@ -1127,6 +1134,10 @@ void AgentController::clearMessages()
     if (messages_.isEmpty() && transcript_.isEmpty() && activeAssistantMessage_ < 0) {
         return;
     }
+    if (assistantDeltaTimer_ != nullptr) {
+        assistantDeltaTimer_->stop();
+    }
+    pendingAssistantDelta_.clear();
     messages_.clear();
     activeAssistantMessage_ = -1;
     emit messagesChanged();
@@ -1153,6 +1164,33 @@ void AgentController::appendMessage(const QString& role, const QString& text, co
     rebuildTranscript();
 }
 
+void AgentController::queueAssistantDelta(const QString& text)
+{
+    if (text.isEmpty()) {
+        return;
+    }
+
+    pendingAssistantDelta_ += text;
+    if (pendingAssistantDelta_.size() >= 512) {
+        flushPendingAssistantDelta();
+        return;
+    }
+    if (assistantDeltaTimer_ != nullptr && !assistantDeltaTimer_->isActive()) {
+        assistantDeltaTimer_->start();
+    }
+}
+
+void AgentController::flushPendingAssistantDelta()
+{
+    if (pendingAssistantDelta_.isEmpty()) {
+        return;
+    }
+
+    QString delta;
+    std::swap(delta, pendingAssistantDelta_);
+    appendToActiveAssistantMessage(delta);
+}
+
 void AgentController::appendToActiveAssistantMessage(const QString& text)
 {
     if (text.isEmpty()) {
@@ -1169,11 +1207,15 @@ void AgentController::appendToActiveAssistantMessage(const QString& text)
         message.value(QStringLiteral("text")).toString() + text);
     messages_[activeAssistantMessage_] = message;
     emit messagesChanged();
-    rebuildTranscript();
 }
 
 void AgentController::finishActiveAssistantMessage(const QString& fallbackText)
 {
+    if (assistantDeltaTimer_ != nullptr) {
+        assistantDeltaTimer_->stop();
+    }
+    flushPendingAssistantDelta();
+
     if (activeAssistantMessage_ < 0 || activeAssistantMessage_ >= messages_.size()) {
         return;
     }
@@ -1256,6 +1298,11 @@ void AgentController::setReasoningDetails(
 
 void AgentController::resetRun()
 {
+    if (assistantDeltaTimer_ != nullptr) {
+        assistantDeltaTimer_->stop();
+    }
+    pendingAssistantDelta_.clear();
+
 #ifdef REARK_HAS_WUWE
 #ifdef REARK_HAS_WUWE_REASONING
     if (runtime_->reasoningRun.has_value()) {

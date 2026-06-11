@@ -11,6 +11,7 @@
 
 class DecompilerController;
 class AgentKnowledgeController;
+class QTimer;
 
 class AgentController : public QObject {
     Q_OBJECT
@@ -65,6 +66,8 @@ private:
     void setTranscript(const QString& transcript);
     void clearMessages();
     void appendMessage(const QString& role, const QString& text, const QString& state = {});
+    void queueAssistantDelta(const QString& text);
+    void flushPendingAssistantDelta();
     void appendToActiveAssistantMessage(const QString& text);
     void finishActiveAssistantMessage(const QString& fallbackText = {});
     void rebuildTranscript();
@@ -86,6 +89,8 @@ private:
     QString reasoningResultJson_;
     QString reasoningTraceJson_;
     QString reasoningUsageJson_;
+    QString pendingAssistantDelta_;
+    QTimer* assistantDeltaTimer_ = nullptr;
     int activeAssistantMessage_ = -1;
     bool running_ = false;
 };

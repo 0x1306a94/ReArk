@@ -294,7 +294,7 @@ Rectangle {
                         anchors.rightMargin: 15
                         anchors.topMargin: 11
                         markdown: messageDelegate.messageText
-                        markdownEnabled: !messageDelegate.userMessage
+                        markdownEnabled: !messageDelegate.userMessage && !messageDelegate.streaming
                         emptyText: messageDelegate.streaming ? qsTr("Thinking...") : ""
                         darkTheme: root.darkTheme
                         textColor: root.primaryTextColor

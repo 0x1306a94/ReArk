@@ -25,6 +25,12 @@ Item {
         if (name === "new-chat") {
             return "qrc:/icons/fontawesome/square-plus.svg"
         }
+        if (name === "copy") {
+            return "qrc:/icons/fontawesome/copy.svg"
+        }
+        if (name === "check") {
+            return "qrc:/icons/fontawesome/check.svg"
+        }
         return ""
     }
 

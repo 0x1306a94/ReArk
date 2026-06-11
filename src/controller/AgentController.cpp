@@ -10,10 +10,14 @@
 #include "controller/AgentSettings.h"
 #include "controller/DecompilerController.h"
 
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QMetaObject>
 #include <QPointer>
 #include <QRegularExpression>
 #include <QStringList>
+#include <QTime>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <functional>
@@ -582,6 +586,16 @@ QString AgentController::transcript() const
     return transcript_;
 }
 
+QVariantList AgentController::messages() const
+{
+    return messages_;
+}
+
+bool AgentController::hasMessages() const
+{
+    return !messages_.isEmpty();
+}
+
 QString AgentController::errorMessage() const
 {
     return errorMessage_;
@@ -601,6 +615,8 @@ void AgentController::ask(const QString& question)
 
     setErrorMessage({});
     if (!available()) {
+        appendMessage(QStringLiteral("user"), trimmed);
+        appendMessage(QStringLiteral("assistant"), unavailableMessage(), QStringLiteral("error"));
         setErrorMessage(unavailableMessage());
         setStatus(unavailableMessage());
         return;
@@ -617,6 +633,8 @@ void AgentController::ask(const QString& question)
     const AgentSettings settings = AgentSettingsStore::load();
     const QString validationMessage = AgentSettingsStore::validationMessage(settings);
     if (!validationMessage.isEmpty()) {
+        appendMessage(QStringLiteral("user"), trimmed);
+        appendMessage(QStringLiteral("assistant"), validationMessage, QStringLiteral("error"));
         setErrorMessage(validationMessage);
         setStatus(validationMessage);
         return;
@@ -642,7 +660,8 @@ void AgentController::ask(const QString& question)
         runtime_->provider);
     runtime_->stopSource = std::stop_source {};
 
-    setTranscript(QStringLiteral("You: %1\n\nAssistant:\n").arg(trimmed));
+    appendMessage(QStringLiteral("user"), trimmed);
+    appendMessage(QStringLiteral("assistant"), {}, QStringLiteral("streaming"));
     setStatus(tr("Thinking..."));
     setRunning(true);
 
@@ -661,10 +680,19 @@ void AgentController::ask(const QString& question)
         .content = toStdString(QStringLiteral("Current ReArk snapshot:\n%1")
             .arg(snapshot->packageSummary.isEmpty() ? QStringLiteral("<none>") : snapshot->packageSummary))
     });
-    request.messages.push_back({
-        .role = "user",
-        .content = toStdString(trimmed)
-    });
+    for (const QVariant& item : messages_) {
+        const QVariantMap message = item.toMap();
+        const QString role = message.value(QStringLiteral("role")).toString();
+        const QString content = message.value(QStringLiteral("text")).toString();
+        if (content.trimmed().isEmpty()
+            || (role != QStringLiteral("user") && role != QStringLiteral("assistant"))) {
+            continue;
+        }
+        request.messages.push_back({
+            .role = role == QStringLiteral("user") ? "user" : "assistant",
+            .content = toStdString(content)
+        });
+    }
 
     QPointer<AgentController> self(this);
     wuwe::llm_agent_run_options options;
@@ -676,7 +704,7 @@ void AgentController::ask(const QString& question)
         const QString chunk = fromStringView(text);
         QMetaObject::invokeMethod(self.data(), [self, chunk] {
             if (self) {
-                self->appendTranscript(chunk);
+                self->appendToActiveAssistantMessage(chunk);
             }
         }, Qt::QueuedConnection);
     };
@@ -713,6 +741,7 @@ void AgentController::ask(const QString& question)
         QMetaObject::invokeMethod(self.data(), [self] {
             if (self) {
                 self->setRunning(false);
+                self->finishActiveAssistantMessage(AgentController::tr("No response."));
                 self->setStatus(AgentController::tr("Ready"));
                 self->resetRun();
             }
@@ -727,6 +756,8 @@ void AgentController::ask(const QString& question)
             QMetaObject::invokeMethod(self.data(), [self, msg] {
                 if (self) {
                     self->setErrorMessage(msg);
+                    self->appendToActiveAssistantMessage(msg);
+                    self->finishActiveAssistantMessage();
                     self->setStatus(msg);
                     self->setRunning(false);
                     self->resetRun();
@@ -740,6 +771,7 @@ void AgentController::ask(const QString& question)
         QMetaObject::invokeMethod(self.data(), [self] {
             if (self) {
                 self->setStatus(AgentController::tr("Analysis cancelled."));
+                self->finishActiveAssistantMessage(AgentController::tr("Analysis cancelled."));
                 self->setRunning(false);
                 self->resetRun();
             }
@@ -781,9 +813,16 @@ void AgentController::newChat()
     }
     resetRun();
     setRunning(false);
-    setTranscript({});
+    clearMessages();
     setErrorMessage({});
     setStatus(available() ? tr("Ready") : unavailableMessage());
+}
+
+void AgentController::copyTextToClipboard(const QString& text) const
+{
+    if (auto* clipboard = QGuiApplication::clipboard()) {
+        clipboard->setText(text);
+    }
 }
 
 void AgentController::setRunning(bool running)
@@ -802,6 +841,89 @@ void AgentController::setTranscript(const QString& transcript)
     }
     transcript_ = transcript;
     emit transcriptChanged();
+}
+
+void AgentController::clearMessages()
+{
+    if (messages_.isEmpty() && transcript_.isEmpty() && activeAssistantMessage_ < 0) {
+        return;
+    }
+    messages_.clear();
+    activeAssistantMessage_ = -1;
+    emit messagesChanged();
+    setTranscript({});
+}
+
+void AgentController::appendMessage(const QString& role, const QString& text, const QString& state)
+{
+    QVariantMap message;
+    message.insert(QStringLiteral("role"), role);
+    message.insert(QStringLiteral("text"), text);
+    message.insert(QStringLiteral("state"), state);
+    message.insert(QStringLiteral("time"), QTime::currentTime().toString(QStringLiteral("h:mm AP")));
+    messages_.append(message);
+    activeAssistantMessage_ = role == QStringLiteral("assistant")
+        ? messages_.size() - 1
+        : -1;
+    emit messagesChanged();
+    rebuildTranscript();
+}
+
+void AgentController::appendToActiveAssistantMessage(const QString& text)
+{
+    if (text.isEmpty()) {
+        return;
+    }
+    if (activeAssistantMessage_ < 0 || activeAssistantMessage_ >= messages_.size()) {
+        appendMessage(QStringLiteral("assistant"), text);
+        return;
+    }
+
+    QVariantMap message = messages_.at(activeAssistantMessage_).toMap();
+    message.insert(
+        QStringLiteral("text"),
+        message.value(QStringLiteral("text")).toString() + text);
+    messages_[activeAssistantMessage_] = message;
+    emit messagesChanged();
+    rebuildTranscript();
+}
+
+void AgentController::finishActiveAssistantMessage(const QString& fallbackText)
+{
+    if (activeAssistantMessage_ < 0 || activeAssistantMessage_ >= messages_.size()) {
+        return;
+    }
+
+    QVariantMap message = messages_.at(activeAssistantMessage_).toMap();
+    if (message.value(QStringLiteral("state")).toString() != QStringLiteral("streaming")) {
+        activeAssistantMessage_ = -1;
+        return;
+    }
+    if (!fallbackText.isEmpty()
+        && message.value(QStringLiteral("text")).toString().trimmed().isEmpty()) {
+        message.insert(QStringLiteral("text"), fallbackText);
+    }
+    message.insert(QStringLiteral("state"), QStringLiteral("done"));
+    messages_[activeAssistantMessage_] = message;
+    activeAssistantMessage_ = -1;
+    emit messagesChanged();
+    rebuildTranscript();
+}
+
+void AgentController::rebuildTranscript()
+{
+    QString text;
+    for (const QVariant& item : messages_) {
+        const QVariantMap message = item.toMap();
+        const QString role = message.value(QStringLiteral("role")).toString();
+        const QString content = message.value(QStringLiteral("text")).toString();
+        if (!text.isEmpty()) {
+            text += QStringLiteral("\n\n");
+        }
+        text += role == QStringLiteral("user") ? QStringLiteral("You:\n") : QStringLiteral("Assistant:\n");
+        text += content;
+    }
+    setTranscript(text);
 }
 
 void AgentController::appendTranscript(const QString& text)

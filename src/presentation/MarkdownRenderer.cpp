@@ -411,13 +411,13 @@ QVariantMap renderTableBlockModel(
     QVariantList rows;
     QVector<int> columnWeights(headerCells.size(), 8);
     for (int column = 0; column < headerCells.size(); ++column) {
-        columnWeights[column] = std::clamp(static_cast<int>(headerCells.at(column).size()), 8, 36);
+        columnWeights[column] = std::clamp(static_cast<int>(headerCells.at(column).size()), 8, 72);
     }
     for (const QStringList& row : bodyRows) {
         QVariantList renderedRow;
         for (int column = 0; column < headerCells.size(); ++column) {
             const QString cellText = column < row.size() ? row.at(column) : QString();
-            const int cellWeight = std::clamp(static_cast<int>(cellText.size()), 8, 48);
+            const int cellWeight = std::clamp(static_cast<int>(cellText.size()), 8, 120);
             columnWeights[column] = std::max(columnWeights.at(column), cellWeight);
             renderedRow.append(renderTableCell(cellText, darkTheme));
         }

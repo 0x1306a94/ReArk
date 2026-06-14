@@ -30,7 +30,9 @@ Item {
     readonly property color mutedTextColor: darkTheme ? "#9fb0c4" : "#5f7085"
     readonly property color headerAccent: darkTheme ? "#5fd1cd" : "#2b8a8a"
     readonly property real minimumColumnWidth: 120
-    readonly property real preferredTableWidth: Math.max(width, columnCount * minimumColumnWidth)
+    readonly property real maximumColumnWidth: 980
+    readonly property real averageCharacterWidth: Math.max(7, textPixelSize * 0.62)
+    readonly property real preferredTableWidth: Math.max(width, naturalTableWidth())
 
     implicitWidth: tableFlick.implicitWidth
     implicitHeight: tableFlick.implicitHeight
@@ -55,11 +57,27 @@ Item {
 
     function columnWeight(column) {
         const value = column < columnWeights.length ? Number(columnWeights[column]) : 12
-        return Math.max(8, Math.min(48, value || 12))
+        return Math.max(8, Math.min(120, value || 12))
+    }
+
+    function naturalColumnWidth(column) {
+        return Math.max(minimumColumnWidth,
+                        Math.min(maximumColumnWidth,
+                                 columnWeight(column) * averageCharacterWidth + 34))
+    }
+
+    function naturalTableWidth() {
+        let total = 0
+        for (let i = 0; i < columnCount; ++i) {
+            total += naturalColumnWidth(i)
+        }
+        return Math.max(columnCount * minimumColumnWidth, total)
     }
 
     function columnWidth(column) {
-        return Math.max(minimumColumnWidth, preferredTableWidth * columnWeight(column) / totalColumnWeight)
+        const naturalWidth = naturalColumnWidth(column)
+        const extraWidth = Math.max(0, preferredTableWidth - naturalTableWidth())
+        return naturalWidth + extraWidth * columnWeight(column) / totalColumnWeight
     }
 
     Flickable {
@@ -162,7 +180,7 @@ Item {
                                         height: contentHeight
                                         readOnly: true
                                         selectByMouse: true
-                                        wrapMode: TextEdit.Wrap
+                                        wrapMode: TextEdit.WrapAnywhere
                                         textFormat: TextEdit.RichText
                                         text: cellFrame.cell.html || ""
                                         color: tableRow.header ? root.textColor : root.textColor

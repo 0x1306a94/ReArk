@@ -274,10 +274,11 @@ Rectangle {
                     font.weight: Font.DemiBold
                 }
 
-                Rectangle {
+                Item {
                     id: messageBubble
 
                     readonly property real horizontalPadding: 30
+                    readonly property color bubbleColor: messageDelegate.userMessage ? root.userBubbleColor : root.assistantBubbleColor
                     readonly property real compactWidth: Math.min(
                         Math.max(44, bubbleTextMeasure.implicitWidth + horizontalPadding),
                         messageDelegate.maxBubbleWidth)
@@ -290,16 +291,29 @@ Rectangle {
                                      ? compactWidth
                                      : messageDelegate.maxBubbleWidth
                     implicitHeight: messageBody.implicitHeight + 22
-                    radius: 8
-                    color: messageDelegate.userMessage ? root.userBubbleColor : root.assistantBubbleColor
-                    border.width: messageDelegate.userMessage ? 0 : 1
-                    border.color: root.borderColor
-                    layer.enabled: !messageDelegate.userMessage && !messageDelegate.streaming
-                    layer.effect: MultiEffect {
-                        shadowEnabled: true
-                        shadowBlur: 0.35
-                        shadowOpacity: root.darkTheme ? 0.16 : 0.08
-                        shadowVerticalOffset: 3
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 8
+                        color: messageBubble.bubbleColor
+                        border.width: messageDelegate.userMessage ? 0 : 1
+                        border.color: root.borderColor
+                        visible: !messageDelegate.userMessage && !messageDelegate.streaming
+                        layer.enabled: visible
+                        layer.effect: MultiEffect {
+                            shadowEnabled: true
+                            shadowBlur: 0.35
+                            shadowOpacity: root.darkTheme ? 0.16 : 0.08
+                            shadowVerticalOffset: 3
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 8
+                        color: messageBubble.bubbleColor
+                        border.width: messageDelegate.userMessage ? 0 : 1
+                        border.color: root.borderColor
                     }
 
                     Text {

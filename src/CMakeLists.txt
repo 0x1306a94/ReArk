@@ -123,6 +123,13 @@ qt_add_resources(${PROJECT_NAME} "icons"
         "${CMAKE_SOURCE_DIR}/resources/icons/website-white.svg"
 )
 
+qt_add_resources(${PROJECT_NAME} "legal"
+    PREFIX "/legal"
+    BASE "${CMAKE_SOURCE_DIR}"
+    FILES
+        "${CMAKE_SOURCE_DIR}/LICENSE"
+)
+
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
     Qt6::Gui

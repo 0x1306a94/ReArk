@@ -7,9 +7,9 @@ import QtQuick.Window
 ApplicationWindow {
     id: aboutWindow
     width: 580
-    height: 515
+    height: 570
     minimumWidth: 520
-    minimumHeight: 490
+    minimumHeight: 540
     visible: false
     title: qsTr("About ReArk")
     modality: Qt.ApplicationModal

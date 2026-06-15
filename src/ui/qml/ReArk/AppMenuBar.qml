@@ -12,6 +12,7 @@ Rectangle {
     property bool embedded: false
     property bool menuNavigationActive: false
     property var aboutWindow: null
+    property var licenseWindow: null
     property var updateWindow: null
     property var entryPointItems: []
     readonly property bool darkTheme: Material.theme === Material.Dark
@@ -113,6 +114,21 @@ Rectangle {
             "currentTheme": root.currentTheme
         }, function() {
             root.aboutWindow = null
+        })
+    }
+
+    function openLicenseWindow() {
+        var existing = showOwnedWindow(licenseWindow, {
+            "currentTheme": root.currentTheme
+        })
+        if (existing !== null) {
+            return
+        }
+
+        licenseWindow = createOwnedWindow("qrc:/ReArk/LicenseWindow.qml", {
+            "currentTheme": root.currentTheme
+        }, function() {
+            root.licenseWindow = null
         })
     }
 
@@ -581,7 +597,7 @@ Rectangle {
 
         Action {
             text: qsTr("View License")
-            enabled: false
+            onTriggered: root.openLicenseWindow()
         }
 
         CompactMenuSeparator {}

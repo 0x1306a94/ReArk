@@ -10,6 +10,8 @@ public:
     explicit ApplicationController(QObject* parent = nullptr);
 
     Q_INVOKABLE bool openNewWindow();
+    Q_INVOKABLE void copyTextToClipboard(const QString& text) const;
+    Q_INVOKABLE QString licenseText() const;
 };
 
 #endif // REARK_APPLICATION_CONTROLLER_H

@@ -69,6 +69,14 @@ endif()
 
 if(WIN32)
     set(APP_ICON_PATH "${PROJECT_SOURCE_DIR}/resources/images/app_icon.ico")
+    set(REARK_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
+    set(REARK_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
+    set(REARK_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
+    if(PROJECT_VERSION_TWEAK STREQUAL "")
+        set(REARK_VERSION_TWEAK 0)
+    else()
+        set(REARK_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
+    endif()
     configure_file(
         "${PROJECT_SOURCE_DIR}/app_icon.rc.in"
         "${CMAKE_BINARY_DIR}/app_icon.rc"

@@ -12,7 +12,6 @@ Rectangle {
     property var agentKnowledgeController: null
     property string draftText: ""
     property int copiedMessageIndex: -1
-    property bool reasoningDetailsCopied: false
 
     readonly property bool darkTheme: Material.theme === Material.Dark
     readonly property bool agentAvailable: agentController !== null && agentController.available
@@ -24,14 +23,6 @@ Rectangle {
     readonly property bool hasMessages: agentController !== null && agentController.hasMessages
     readonly property string agentError: agentController !== null ? agentController.errorMessage : ""
     readonly property string agentStatus: agentController !== null ? agentController.status : ""
-    readonly property bool hasReasoningDetails: agentController !== null && agentController.hasReasoningDetails
-    readonly property string reasoningResultJson: agentController !== null ? agentController.reasoningResultJson : ""
-    readonly property string reasoningTraceJson: agentController !== null ? agentController.reasoningTraceJson : ""
-    readonly property string reasoningUsageJson: agentController !== null ? agentController.reasoningUsageJson : ""
-    property int detailsTabIndex: 0
-    readonly property string activeDetailsJson: detailsTabIndex === 0
-            ? reasoningResultJson
-            : (detailsTabIndex === 1 ? reasoningTraceJson : reasoningUsageJson)
     readonly property string unavailableStatus: agentStatus.length > 0
             ? agentStatus
             : qsTr("Smart analysis is temporarily unavailable.")
@@ -151,51 +142,6 @@ Rectangle {
             }
             root.draftText = ""
             promptInput.forceActiveFocus()
-        }
-    }
-
-    Button {
-        id: detailsButton
-
-        anchors.top: parent.top
-        anchors.right: newChatButton.left
-        anchors.topMargin: 18
-        anchors.rightMargin: 10
-        width: Math.max(104, detailsButtonText.implicitWidth + 28)
-        height: 34
-        padding: 0
-        hoverEnabled: true
-        visible: root.hasReasoningDetails
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true
-            shadowBlur: 0.75
-            shadowOpacity: root.buttonShadowOpacity
-            shadowVerticalOffset: 5
-        }
-
-        background: Rectangle {
-            radius: height / 2
-            color: detailsButton.hovered ? root.newChatHoverColor : root.newChatColor
-            border.width: 1
-            border.color: root.newChatBorderColor
-        }
-
-        contentItem: Text {
-            id: detailsButtonText
-
-            text: qsTr("Run Details")
-            color: root.primaryTextColor
-            font.pixelSize: 13
-            font.weight: Font.DemiBold
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            renderType: Text.NativeRendering
-        }
-
-        onClicked: {
-            root.detailsTabIndex = 0
-            reasoningDetailsDialog.open()
         }
     }
 
@@ -453,8 +399,8 @@ Rectangle {
             }
         ]
 
-        TextEdit {
-            id: promptInput
+        Flickable {
+            id: promptViewport
 
             anchors.left: parent.left
             anchors.right: sendButton.left
@@ -464,32 +410,85 @@ Rectangle {
             anchors.rightMargin: 16
             anchors.topMargin: referenceFlow.visible ? 10 : 18
             anchors.bottomMargin: 8
-            wrapMode: TextEdit.Wrap
-            color: root.primaryTextColor
-            selectedTextColor: "#ffffff"
-            selectionColor: root.accentColor
-            cursorVisible: activeFocus
-            font.pixelSize: 13
-            enabled: !root.agentRunning
-            text: root.draftText
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            contentWidth: width
+            contentHeight: Math.max(height, promptInput.implicitHeight)
+            ScrollBar.vertical: ScrollBar {
+                id: promptScrollBar
 
-            onTextChanged: {
-                if (root.draftText !== text) {
-                    root.draftText = text
+                policy: promptViewport.contentHeight > promptViewport.height
+                        ? ScrollBar.AsNeeded
+                        : ScrollBar.AlwaysOff
+                width: 7
+                rightPadding: 2
+                contentItem: Rectangle {
+                    implicitWidth: 5
+                    radius: 2.5
+                    color: root.darkTheme ? "#6c737d" : "#9aa6b2"
+                    opacity: promptViewport.moving || promptScrollBar.pressed || promptScrollBar.hovered ? 0.82 : 0.56
+                }
+                background: Item {
+                    implicitWidth: 7
                 }
             }
 
-            Keys.onPressed: function(event) {
-                if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter) {
-                    return
+            function keepCursorVisible() {
+                const cursorTop = promptInput.cursorRectangle.y
+                const cursorBottom = cursorTop + promptInput.cursorRectangle.height
+                const visibleBottom = contentY + height
+
+                if (cursorBottom > visibleBottom) {
+                    contentY = Math.min(cursorBottom - height, contentHeight - height)
+                } else if (cursorTop < contentY) {
+                    contentY = Math.max(0, cursorTop)
                 }
-                if (event.modifiers & Qt.ControlModifier) {
-                    promptInput.insert(promptInput.cursorPosition, "\n")
+            }
+
+            TextEdit {
+                id: promptInput
+
+                width: Math.max(0, promptViewport.width - 12)
+                wrapMode: TextEdit.Wrap
+                color: root.primaryTextColor
+                selectedTextColor: "#ffffff"
+                selectionColor: root.accentColor
+                cursorVisible: activeFocus
+                font.pixelSize: 13
+                enabled: !root.agentRunning
+                text: root.draftText
+
+                onTextChanged: {
+                    if (root.draftText !== text) {
+                        root.draftText = text
+                    }
+                    if (text.length === 0) {
+                        promptViewport.contentY = 0
+                    }
+                }
+
+                onCursorRectangleChanged: promptViewport.keepCursorVisible()
+
+                Keys.onPressed: function(event) {
+                    if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter) {
+                        return
+                    }
+
+                    const modifiers = event.modifiers & ~Qt.KeypadModifier
+                    if (modifiers === Qt.ShiftModifier) {
+                        promptInput.insert(promptInput.cursorPosition, "\n")
+                        event.accepted = true
+                        return
+                    }
+
+                    if (modifiers !== Qt.NoModifier) {
+                        event.accepted = true
+                        return
+                    }
+
+                    root.submitPrompt()
                     event.accepted = true
-                    return
                 }
-                root.submitPrompt()
-                event.accepted = true
             }
         }
 
@@ -576,8 +575,8 @@ Rectangle {
         }
 
         Label {
-            anchors.left: promptInput.left
-            anchors.top: promptInput.top
+            anchors.left: promptViewport.left
+            anchors.top: promptViewport.top
             text: qsTr("Ask anything about this app")
             color: root.secondaryTextColor
             font.pixelSize: 12
@@ -587,7 +586,7 @@ Rectangle {
         Label {
             id: statusLabel
 
-            anchors.left: promptInput.left
+            anchors.left: promptViewport.left
             anchors.right: sendButton.left
             anchors.bottom: toolRow.visible ? toolRow.top : parent.bottom
             anchors.bottomMargin: toolRow.visible ? 7 : 14
@@ -721,281 +720,12 @@ Rectangle {
         }
     }
 
-    Dialog {
-        id: reasoningDetailsDialog
-
-        modal: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        padding: 0
-        width: Math.min(880, root.width - 96)
-        height: Math.min(620, root.height - 120)
-        x: Math.round((root.width - width) / 2)
-        y: Math.round((root.height - height) / 2)
-
-        Overlay.modal: Rectangle {
-            color: root.darkTheme ? "#a0080d14" : "#b8dbe4ee"
-        }
-
-        background: Rectangle {
-            radius: 10
-            color: root.darkTheme ? "#1b1d20" : "#fbfcff"
-            border.width: 1
-            border.color: root.darkTheme ? "#3a4047" : "#ccd7e6"
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowBlur: 0.55
-                shadowColor: "#000000"
-                shadowOpacity: root.darkTheme ? 0.24 : 0.16
-                shadowVerticalOffset: 14
-            }
-        }
-
-        header: Rectangle {
-            implicitHeight: 60
-            radius: 10
-            color: root.darkTheme ? "#202226" : "#f6f8fc"
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: root.borderColor
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 22
-                anchors.rightMargin: 14
-                spacing: 12
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
-
-                    Label {
-                        text: qsTr("Run Details")
-                        color: root.primaryTextColor
-                        font.pixelSize: 20
-                        font.weight: Font.DemiBold
-                    }
-
-                    Label {
-                        text: qsTr("Reasoning result, trace, and usage captured from Wuwe.")
-                        color: root.secondaryTextColor
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                }
-
-                ToolButton {
-                    Layout.preferredWidth: 32
-                    Layout.preferredHeight: 32
-                    text: "×"
-                    font.pixelSize: 20
-                    focusPolicy: Qt.NoFocus
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Close")
-                    onClicked: reasoningDetailsDialog.close()
-
-                    contentItem: Label {
-                        text: parent.text
-                        color: parent.hovered ? root.primaryTextColor : root.secondaryTextColor
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font: parent.font
-                    }
-
-                    background: Rectangle {
-                        radius: 6
-                        color: parent.hovered
-                               ? (root.darkTheme ? "#2a2e34" : "#edf3fb")
-                               : "transparent"
-                    }
-                }
-            }
-        }
-
-        contentItem: ColumnLayout {
-            spacing: 14
-
-            Row {
-                Layout.fillWidth: true
-                Layout.leftMargin: 22
-                Layout.rightMargin: 22
-                Layout.topMargin: 18
-                spacing: 4
-
-                Repeater {
-                    model: [qsTr("Result"), qsTr("Trace"), qsTr("Usage")]
-
-                    delegate: Rectangle {
-                        width: Math.max(86, tabLabel.implicitWidth + 28)
-                        height: 34
-                        radius: 6
-                        color: root.detailsTabIndex === index
-                               ? (root.darkTheme ? "#2a3038" : "#e8f0ff")
-                               : "transparent"
-                        border.width: root.detailsTabIndex === index ? 1 : 0
-                        border.color: root.darkTheme ? "#414851" : "#c9d7ee"
-
-                        Label {
-                            id: tabLabel
-
-                            anchors.centerIn: parent
-                            text: modelData
-                            color: root.detailsTabIndex === index ? root.primaryTextColor : root.secondaryTextColor
-                            font.pixelSize: 13
-                            font.weight: root.detailsTabIndex === index ? Font.DemiBold : Font.Normal
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.detailsTabIndex = index
-                        }
-                    }
-                }
-            }
-
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.leftMargin: 22
-                Layout.rightMargin: 22
-                clip: true
-
-                TextArea {
-                    id: detailsText
-
-                    readOnly: true
-                    selectByMouse: true
-                    wrapMode: TextEdit.NoWrap
-                    text: root.activeDetailsJson.length > 0
-                            ? root.activeDetailsJson
-                            : qsTr("No details were recorded for this section.")
-                    color: root.primaryTextColor
-                    selectedTextColor: "#ffffff"
-                    selectionColor: root.accentColor
-                    leftPadding: 14
-                    rightPadding: 14
-                    topPadding: 14
-                    bottomPadding: 14
-                    font.family: "Cascadia Mono, Consolas, Courier New, monospace"
-                    font.pixelSize: 12
-                    background: Rectangle {
-                        radius: 6
-                        color: root.darkTheme ? "#17191c" : "#f7f9fd"
-                        border.width: 1
-                        border.color: root.darkTheme ? "#34383d" : "#d6e0ee"
-                    }
-                }
-            }
-        }
-
-        footer: Rectangle {
-            implicitHeight: 64
-            color: root.darkTheme ? "#1b1d20" : "#fbfcff"
-            radius: 10
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                height: 1
-                color: root.borderColor
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 22
-                anchors.rightMargin: 22
-                spacing: 12
-
-                Label {
-                    Layout.fillWidth: true
-                    text: qsTr("Structured JSON for debugging, audit, and issue reports.")
-                    color: root.secondaryTextColor
-                    font.pixelSize: 12
-                    elide: Text.ElideRight
-                }
-
-                Button {
-                    Layout.preferredWidth: 118
-                    Layout.preferredHeight: 34
-                    text: root.reasoningDetailsCopied ? qsTr("Copied") : qsTr("Copy JSON")
-                    enabled: root.activeDetailsJson.length > 0
-                    onClicked: {
-                        if (root.agentController !== null) {
-                            root.agentController.copyTextToClipboard(root.activeDetailsJson)
-                            root.reasoningDetailsCopied = true
-                            reasoningDetailsCopiedTimer.restart()
-                        }
-                    }
-
-                    contentItem: Label {
-                        text: parent.text
-                        color: parent.enabled ? "#ffffff" : root.mutedTextColor
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 13
-                        font.weight: Font.DemiBold
-                    }
-
-                    background: Rectangle {
-                        radius: 7
-                        color: !parent.enabled
-                               ? (root.darkTheme ? "#25282d" : "#e7edf6")
-                               : (parent.hovered ? root.accentHoverColor : root.accentColor)
-                    }
-                }
-
-                Button {
-                    Layout.preferredWidth: 82
-                    Layout.preferredHeight: 34
-                    text: qsTr("Close")
-                    onClicked: reasoningDetailsDialog.close()
-
-                    contentItem: Label {
-                        text: parent.text
-                        color: parent.hovered ? root.primaryTextColor : root.secondaryTextColor
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 13
-                    }
-
-                    background: Rectangle {
-                        radius: 7
-                        color: parent.hovered
-                               ? (root.darkTheme ? "#2a2e34" : "#edf3fb")
-                               : "transparent"
-                        border.width: 1
-                        border.color: root.borderColor
-                    }
-                }
-            }
-        }
-
-        onOpened: root.reasoningDetailsCopied = false
-    }
-
     Timer {
         id: copiedResetTimer
 
         interval: 1800
         repeat: false
         onTriggered: root.copiedMessageIndex = -1
-    }
-
-    Timer {
-        id: reasoningDetailsCopiedTimer
-
-        interval: 1600
-        repeat: false
-        onTriggered: root.reasoningDetailsCopied = false
     }
 
     Timer {

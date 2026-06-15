@@ -80,6 +80,39 @@
     </message>
 </context>
 <context>
+    <name>LicenseWindow</name>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/LicenseWindow.qml" line="15"/>
+        <source>License</source>
+        <translation>许可</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/LicenseWindow.qml" line="49"/>
+        <source>The complete Apache License 2.0 text for ReArk.</source>
+        <translation>ReArk 的完整 Apache License 2.0 许可文本。</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/LicenseWindow.qml" line="122"/>
+        <source>Copied</source>
+        <translation>已复制</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/LicenseWindow.qml" line="122"/>
+        <source>Copy</source>
+        <translation>复制</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/LicenseWindow.qml" line="133"/>
+        <source>Close</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/LicenseWindow.qml" line="159"/>
+        <source>Unable to load the license text.</source>
+        <translation>无法加载许可文本。</translation>
+    </message>
+</context>
+<context>
     <name>AgentController</name>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="45"/>
@@ -127,18 +160,23 @@
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="690"/>
-        <source>Running tool: %1</source>
-        <translation>正在运行工具：%1</translation>
+        <source>Calling model...</source>
+        <translation>正在调用模型...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="704"/>
-        <source>Finished tool: %1</source>
-        <translation>工具已完成：%1</translation>
+        <source>Reading analysis data...</source>
+        <translation>正在读取分析数据...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="705"/>
-        <source>Tool failed: %1</source>
-        <translation>工具失败：%1</translation>
+        <source>Analysis data ready.</source>
+        <translation>分析数据已就绪。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/AgentController.cpp" line="705"/>
+        <source>Analysis data read failed.</source>
+        <translation>分析数据读取失败。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="767"/>

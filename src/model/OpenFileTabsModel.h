@@ -19,6 +19,7 @@ class OpenFileTabsModel : public QAbstractListModel {
     Q_PROPERTY(QString activePath READ activePath NOTIFY activeTabChanged)
     Q_PROPERTY(QString activeKind READ activeKind NOTIFY activeTabChanged)
     Q_PROPERTY(int activeNodeIndex READ activeNodeIndex NOTIFY activeTabChanged)
+    Q_PROPERTY(bool activeLoading READ activeLoading NOTIFY activeTabChanged)
     Q_PROPERTY(bool activeHasBinary READ activeHasBinary NOTIFY activeTabChanged)
     Q_PROPERTY(QString activeDiagnostics READ activeDiagnostics NOTIFY activeTabChanged)
     Q_PROPERTY(bool hasTabs READ hasTabs NOTIFY tabsChanged)
@@ -49,6 +50,7 @@ public:
     [[nodiscard]] QString activePath() const;
     [[nodiscard]] QString activeKind() const;
     [[nodiscard]] int activeNodeIndex() const;
+    [[nodiscard]] bool activeLoading() const;
     [[nodiscard]] bool activeHasBinary() const;
     [[nodiscard]] QString activeDiagnostics() const;
     [[nodiscard]] bool hasTabs() const;

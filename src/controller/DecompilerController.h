@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <deque>
+#include <functional>
 #include <set>
 #include <vector>
 
@@ -39,6 +40,15 @@ class DecompilerController : public QObject {
     Q_PROPERTY(bool activeSupportsDisassembly READ activeSupportsDisassembly NOTIFY activeDisassemblyChanged)
     Q_PROPERTY(bool activeDisassemblyLoading READ activeDisassemblyLoading NOTIFY activeDisassemblyChanged)
     Q_PROPERTY(QString activeDisassemblyContent READ activeDisassemblyContent NOTIFY activeDisassemblyChanged)
+    Q_PROPERTY(bool abcEvidenceBusy READ abcEvidenceBusy NOTIFY abcEvidenceChanged)
+    Q_PROPERTY(QString abcEvidenceKind READ abcEvidenceKind NOTIFY abcEvidenceChanged)
+    Q_PROPERTY(QString abcEvidenceTitle READ abcEvidenceTitle NOTIFY abcEvidenceChanged)
+    Q_PROPERTY(QString abcEvidenceContent READ abcEvidenceContent NOTIFY abcEvidenceChanged)
+    Q_PROPERTY(bool abcXrefsBusy READ abcXrefsBusy NOTIFY abcXrefsChanged)
+    Q_PROPERTY(QString abcXrefsQuery READ abcXrefsQuery NOTIFY abcXrefsChanged)
+    Q_PROPERTY(QString abcXrefsKind READ abcXrefsKind NOTIFY abcXrefsChanged)
+    Q_PROPERTY(QString abcXrefsError READ abcXrefsError NOTIFY abcXrefsChanged)
+    Q_PROPERTY(QVariantList abcXrefRows READ abcXrefRows NOTIFY abcXrefsChanged)
     Q_PROPERTY(int selectedIndex READ selectedIndex WRITE setSelectedIndex NOTIFY selectedIndexChanged)
 
 public:
@@ -88,6 +98,15 @@ public:
     [[nodiscard]] bool activeSupportsDisassembly() const;
     [[nodiscard]] bool activeDisassemblyLoading() const;
     [[nodiscard]] QString activeDisassemblyContent() const;
+    [[nodiscard]] bool abcEvidenceBusy() const;
+    [[nodiscard]] QString abcEvidenceKind() const;
+    [[nodiscard]] QString abcEvidenceTitle() const;
+    [[nodiscard]] QString abcEvidenceContent() const;
+    [[nodiscard]] bool abcXrefsBusy() const;
+    [[nodiscard]] QString abcXrefsQuery() const;
+    [[nodiscard]] QString abcXrefsKind() const;
+    [[nodiscard]] QString abcXrefsError() const;
+    [[nodiscard]] QVariantList abcXrefRows() const;
     [[nodiscard]] int selectedIndex() const;
 
     Q_INVOKABLE void decompileFile(const QString& filePath);
@@ -99,6 +118,16 @@ public:
     Q_INVOKABLE QVariantList entryPointCandidates() const;
     Q_INVOKABLE void navigateToNode(int nodeIndex);
     Q_INVOKABLE void loadActiveDisassembly();
+    Q_INVOKABLE void requestAbcLiteralEvidence(const QString& offset, const QString& pathOrQuery = QStringLiteral("modules.abc"));
+    Q_INVOKABLE void requestAbcStringSearch(const QString& pattern, int minLen, int maxLen, int limit, const QString& pathOrQuery = QStringLiteral("modules.abc"));
+    Q_INVOKABLE void requestAbcTreeEvidence(const QString& pathOrQuery = QStringLiteral("modules.abc"), int limit = 200);
+    Q_INVOKABLE void requestAbcXrefs(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QStringLiteral("modules.abc"));
+    Q_INVOKABLE void requestAbcXrefRows(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QStringLiteral("modules.abc"));
+    Q_INVOKABLE void requestAbcFlows(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QStringLiteral("modules.abc"));
+    Q_INVOKABLE void clearAbcEvidence();
+    Q_INVOKABLE void clearAbcXrefRows();
+    Q_INVOKABLE bool navigateToAbcXref(const QVariantMap& row);
+    Q_INVOKABLE QVariantList parseAbcStringRows(const QString& evidence) const;
     Q_INVOKABLE void showStatusMessage(const QString& message);
     Q_INVOKABLE QString formatJson(const QString& content) const;
     Q_INVOKABLE void copyTextToClipboard(const QString& text) const;
@@ -128,6 +157,10 @@ signals:
     void appIconChanged();
     void packageOpened(const QString& filePath, const QString& appIconDataUrl);
     void activeDisassemblyChanged();
+    void abcEvidenceChanged();
+    void abcXrefsChanged();
+    void codeNavigationSearchRequested(const QString& query);
+    void codeNavigationRevealRequested(const QStringList& queries);
     void selectedIndexChanged();
 
 private:
@@ -142,10 +175,14 @@ private:
     void applySourceResult(quint64 requestId, HyleDecompiler::SourceResult result);
     void applySourceBatchResult(quint64 requestId, HyleDecompiler::SourceBatchResult result);
     void applyDisassemblyResult(quint64 requestId, HyleDecompiler::DisassemblyResult result);
+    void applyAbcEvidenceResult(quint64 requestId, const QString& content);
+    void applyAbcXrefRowsResult(quint64 requestId, const QString& query, const QString& kind, HyleDecompiler::AbcXrefSearchResult result);
     void openFileTab(int nodeIndex);
     void startNodeLoad(int nodeIndex, bool foreground);
     void startSourceBatchLoad(std::vector<int> nodeIndices);
     void startDisassemblyLoad(int nodeIndex);
+    void startAbcEvidenceRequest(const QString& kind, const QString& title, std::function<QString()> task);
+    void setAbcEvidenceState(const QString& kind, const QString& title, const QString& content, bool busy);
     void resetLoadingState();
     void rebuildBackgroundPreloadQueue(int centerNode);
     void startNextBackgroundPreloads();
@@ -174,9 +211,20 @@ private:
     int backgroundPreloadCompleted_ = 0;
     QString status_ = tr("Ready");
     bool busy_ = false;
+    bool abcEvidenceBusy_ = false;
+    QString abcEvidenceKind_;
+    QString abcEvidenceTitle_;
+    QString abcEvidenceContent_;
+    bool abcXrefsBusy_ = false;
+    QString abcXrefsQuery_;
+    QString abcXrefsKind_;
+    QString abcXrefsError_;
+    QVariantList abcXrefRows_;
     double loadingProgress_ = 0.0;
     QStringList activityLog_;
     quint64 openRequestId_ = 0;
+    quint64 abcEvidenceRequestId_ = 0;
+    quint64 abcXrefsRequestId_ = 0;
 };
 
 #endif // REARK_DECOMPILER_CONTROLLER_H

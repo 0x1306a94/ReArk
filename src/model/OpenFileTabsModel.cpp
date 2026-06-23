@@ -126,6 +126,14 @@ int OpenFileTabsModel::activeNodeIndex() const
     return tabs_.at(static_cast<std::size_t>(activeIndex_)).nodeIndex;
 }
 
+bool OpenFileTabsModel::activeLoading() const
+{
+    if (activeIndex_ < 0 || activeIndex_ >= rowCount()) {
+        return false;
+    }
+    return tabs_.at(static_cast<std::size_t>(activeIndex_)).loading;
+}
+
 bool OpenFileTabsModel::activeHasBinary() const
 {
     if (activeIndex_ < 0 || activeIndex_ >= rowCount()) {

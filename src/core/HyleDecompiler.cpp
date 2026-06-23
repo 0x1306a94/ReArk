@@ -60,6 +60,11 @@ QString fromUtf8(const std::string& value)
     return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
 }
 
+QString fromUtf8(std::string_view value)
+{
+    return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
+}
+
 std::string toLower(std::string value)
 {
     std::ranges::transform(value, value.begin(), [](unsigned char ch) {
@@ -1059,6 +1064,21 @@ QString formatAbcTargetHeader(const AbcEvidenceTarget& target)
     return text;
 }
 
+hyle::result<hyle::hap::abc_parser> openParsedAbcParser(const AbcEvidenceTarget& target)
+{
+    auto parser = hyle::hap::open_abc(std::filesystem::path(toUtf8Path(target.filePath)));
+    if (!parser) {
+        return hyle::error(parser.error());
+    }
+
+    auto parsed = parser->parse();
+    if (!parsed) {
+        return hyle::error(parsed.error());
+    }
+
+    return std::move(*parser);
+}
+
 } // namespace
 
 namespace HyleDecompiler {
@@ -1629,26 +1649,110 @@ QString searchAbcStringEvidence(
         return QStringLiteral("# status: error\n# code: abc_not_found\n# message: %1").arg(target.error);
     }
 
-    hyle::hap::abc_string_search_options options;
+    hyle::hap::abc_string_index_options options;
+    options.min_len = static_cast<std::size_t>(std::max(1, minLen));
+    options.max_len = static_cast<std::size_t>(std::max(0, maxLen));
+    options.pattern = toUtf8Path(pattern);
+    options.limit = static_cast<std::size_t>(std::clamp(limit <= 0 ? 80 : limit, 1, 1000));
+    options.printable_only = true;
+    options.unique_offsets = true;
+
+    auto parser = openParsedAbcParser(target);
+    if (!parser) {
+        return QStringLiteral(
+            "# status: error\n"
+            "# code: open_abc_failed\n"
+            "# abc: %1\n"
+            "# message: %2")
+            .arg(target.displayPath, fromUtf8(parser.error().message()));
+    }
+
+    auto entries = pattern.trimmed().isEmpty()
+        ? hyle::hap::build_abc_string_index(*parser, options)
+        : hyle::hap::search_abc_strings(*parser, options);
+    if (!entries) {
+        return QStringLiteral(
+            "# status: error\n"
+            "# code: search_abc_strings_failed\n"
+            "# abc: %1\n"
+            "# message: %2")
+            .arg(target.displayPath, fromUtf8(entries.error().message()));
+    }
+
+    QString text = formatAbcTargetHeader(target);
+    text += QStringLiteral("# scope: all_strings\n");
+    text += QStringLiteral("# match_count: %1\n").arg(static_cast<qulonglong>(entries->size()));
+    text += QStringLiteral("# min_len: %1\n").arg(options.min_len);
+    text += QStringLiteral("# max_len: %1\n").arg(options.max_len);
+    if (!pattern.isEmpty()) {
+        text += QStringLiteral("# pattern: %1\n").arg(pattern);
+    }
+    text += QStringLiteral("\n");
+
+    int index = 0;
+    for (const auto& entry : *entries) {
+        text += QStringLiteral("- match[%1]\n").arg(index++);
+        text += QStringLiteral("  offset: %1\n").arg(hexOffset(entry.offset));
+        text += QStringLiteral("  source: %1\n").arg(fromUtf8(hyle::hap::abc_string_source_kind_name(entry.source_kind)));
+        text += QStringLiteral("  length: %1\n").arg(static_cast<qulonglong>(entry.length));
+        if (!entry.classification.empty()) {
+            text += QStringLiteral("  classification: %1\n").arg(fromUtf8(entry.classification));
+        }
+        text += QStringLiteral("  value: %1\n").arg(quotedPreview(fromUtf8(entry.value), 2000));
+    }
+    if (entries->empty()) {
+        text += QStringLiteral("[no ABC strings matched]\n");
+    }
+    return boundedEvidenceText(text, maxChars);
+}
+
+QString searchAbcLiteralStringEvidence(
+    const std::shared_ptr<SessionContext>& context,
+    const QString& fallbackPackagePath,
+    const QString& pathOrQuery,
+    const QString& pattern,
+    int minLen,
+    int maxLen,
+    int limit,
+    int maxChars,
+    std::stop_token stopToken)
+{
+    PerformanceTrace trace(QStringLiteral("HyleDecompiler::searchAbcLiteralStringEvidence"));
+
+    const auto target = resolveAbcEvidenceTarget(context, fallbackPackagePath, pathOrQuery, stopToken);
+    if (!target.error.isEmpty()) {
+        return QStringLiteral("# status: error\n# code: abc_not_found\n# message: %1").arg(target.error);
+    }
+
+    hyle::hap::abc_literal_string_search_options options;
     options.min_len = static_cast<std::size_t>(std::max(1, minLen));
     options.max_len = static_cast<std::size_t>(std::max(0, maxLen));
     options.pattern = toUtf8Path(pattern);
     options.limit = static_cast<std::size_t>(std::clamp(limit <= 0 ? 80 : limit, 1, 1000));
     options.printable_only = true;
 
-    auto matches = hyle::hap::search_abc_strings(
-        std::filesystem::path(toUtf8Path(target.filePath)),
-        options);
+    auto parser = openParsedAbcParser(target);
+    if (!parser) {
+        return QStringLiteral(
+            "# status: error\n"
+            "# code: open_abc_failed\n"
+            "# abc: %1\n"
+            "# message: %2")
+            .arg(target.displayPath, fromUtf8(parser.error().message()));
+    }
+
+    auto matches = hyle::hap::search_abc_literal_strings(*parser, options);
     if (!matches) {
         return QStringLiteral(
             "# status: error\n"
-            "# code: search_abc_strings_failed\n"
+            "# code: search_abc_literal_strings_failed\n"
             "# abc: %1\n"
             "# message: %2")
             .arg(target.displayPath, fromUtf8(matches.error().message()));
     }
 
     QString text = formatAbcTargetHeader(target);
+    text += QStringLiteral("# scope: literal_strings\n");
     text += QStringLiteral("# match_count: %1\n").arg(static_cast<qulonglong>(matches->size()));
     text += QStringLiteral("# min_len: %1\n").arg(options.min_len);
     text += QStringLiteral("# max_len: %1\n").arg(options.max_len);
@@ -1678,9 +1782,68 @@ QString searchAbcStringEvidence(
         text += QStringLiteral("  value: %1\n").arg(quotedPreview(fromUtf8(match.value), 2000));
     }
     if (matches->empty()) {
-        text += QStringLiteral("[no ABC strings matched]\n");
+        text += QStringLiteral("[no ABC literal strings matched]\n");
     }
     return boundedEvidenceText(text, maxChars);
+}
+
+AbcStringSearchResult searchAbcStrings(
+    const std::shared_ptr<SessionContext>& context,
+    const QString& fallbackPackagePath,
+    const QString& pathOrQuery,
+    const QString& pattern,
+    int minLen,
+    int maxLen,
+    int limit,
+    std::stop_token stopToken)
+{
+    PerformanceTrace trace(QStringLiteral("HyleDecompiler::searchAbcStrings"));
+
+    AbcStringSearchResult result;
+    const auto target = resolveAbcEvidenceTarget(context, fallbackPackagePath, pathOrQuery, stopToken);
+    if (!target.error.isEmpty()) {
+        result.error = target.error;
+        return result;
+    }
+    result.abcPath = target.displayPath;
+
+    hyle::hap::abc_string_index_options options;
+    options.min_len = static_cast<std::size_t>(std::max(1, minLen));
+    options.max_len = static_cast<std::size_t>(std::max(0, maxLen));
+    options.pattern = toUtf8Path(pattern);
+    options.limit = static_cast<std::size_t>(std::clamp(limit <= 0 ? 80 : limit, 1, 1000));
+    options.printable_only = true;
+    options.unique_offsets = true;
+
+    auto parser = openParsedAbcParser(target);
+    if (!parser) {
+        result.error = errorMessage("Open ABC failed", parser.error());
+        return result;
+    }
+
+    auto entries = pattern.trimmed().isEmpty()
+        ? hyle::hap::build_abc_string_index(*parser, options)
+        : hyle::hap::search_abc_strings(*parser, options);
+    if (!entries) {
+        result.error = errorMessage("Search ABC strings failed", entries.error());
+        return result;
+    }
+
+    result.rows.reserve(entries->size());
+    for (const auto& entry : *entries) {
+        AbcStringRow row;
+        row.offset = hexOffset(entry.offset);
+        row.sourceKind = fromUtf8(hyle::hap::abc_string_source_kind_name(entry.source_kind));
+        row.type = row.sourceKind;
+        row.value = fromUtf8(entry.value);
+        row.length = static_cast<int>(std::min<std::size_t>(
+            entry.length,
+            static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        row.classification = fromUtf8(entry.classification);
+        result.rows.push_back(std::move(row));
+    }
+
+    return result;
 }
 
 QString readAbcTreeEvidence(
@@ -1698,7 +1861,17 @@ QString readAbcTreeEvidence(
         return QStringLiteral("# status: error\n# code: abc_not_found\n# message: %1").arg(target.error);
     }
 
-    auto tree = hyle::hap::read_abc_tree(std::filesystem::path(toUtf8Path(target.filePath)));
+    auto parser = openParsedAbcParser(target);
+    if (!parser) {
+        return QStringLiteral(
+            "# status: error\n"
+            "# code: open_abc_failed\n"
+            "# abc: %1\n"
+            "# message: %2")
+            .arg(target.displayPath, fromUtf8(parser.error().message()));
+    }
+
+    auto tree = hyle::hap::build_abc_tree(*parser);
     if (!tree) {
         return QStringLiteral(
             "# status: error\n"
@@ -1748,6 +1921,85 @@ QString readAbcTreeEvidence(
         }
     }
     return boundedEvidenceText(text, maxChars);
+}
+
+AbcXrefSearchResult findAbcXrefs(
+    const std::shared_ptr<SessionContext>& context,
+    const QString& fallbackPackagePath,
+    const QString& pathOrQuery,
+    const QString& query,
+    const QString& kind,
+    int limit,
+    std::stop_token stopToken)
+{
+    PerformanceTrace trace(QStringLiteral("HyleDecompiler::findAbcXrefs"));
+
+    AbcXrefSearchResult result;
+    const auto target = resolveAbcEvidenceTarget(context, fallbackPackagePath, pathOrQuery, stopToken);
+    if (!target.error.isEmpty()) {
+        result.error = target.error;
+        return result;
+    }
+    result.abcPath = target.displayPath;
+
+    hyle::hap::abc_xref_query xrefQuery;
+    xrefQuery.kind = parseBytecodeReferenceKind(kind);
+    if (!kind.trimmed().isEmpty() && kind.trimmed().compare(QStringLiteral("any"), Qt::CaseInsensitive) != 0
+        && !xrefQuery.kind) {
+        result.error = QObject::tr("kind must be string, method, literal, or any.");
+        return result;
+    }
+    xrefQuery.substring = true;
+    if (const auto offset = parseAbcOffset(query)) {
+        xrefQuery.target_offset = *offset;
+    } else {
+        xrefQuery.target_text = toUtf8Path(query);
+    }
+
+    auto xrefs = hyle::hap::find_abc_xrefs(
+        std::filesystem::path(toUtf8Path(target.filePath)),
+        xrefQuery);
+    if (!xrefs) {
+        result.error = errorMessage("Find ABC xrefs failed", xrefs.error());
+        return result;
+    }
+
+    QHash<QString, QString> classSourceFiles;
+    if (auto parser = openParsedAbcParser(target)) {
+        if (auto tree = hyle::hap::build_abc_tree(*parser)) {
+            for (const auto& klass : tree->classes) {
+                if (!klass.source_file.empty()) {
+                    classSourceFiles.insert(fromUtf8(klass.name), fromUtf8(klass.source_file));
+                }
+            }
+        }
+    }
+
+    const int maxItems = std::clamp(limit <= 0 ? 80 : limit, 1, 1000);
+    result.rows.reserve(static_cast<std::size_t>(std::min(maxItems, static_cast<int>(xrefs->size()))));
+    int index = 0;
+    for (const auto& xref : *xrefs) {
+        if (index >= maxItems) {
+            break;
+        }
+
+        AbcXrefRow row;
+        row.index = index++;
+        row.kind = bytecodeReferenceKindName(xref.kind);
+        row.targetOffset = hexOffset(xref.target_offset);
+        row.targetText = fromUtf8(xref.target_text);
+        row.operandIndex = xref.index;
+        row.classOffset = hexOffset(xref.class_offset);
+        row.className = fromUtf8(xref.class_name);
+        row.sourceFile = classSourceFiles.value(row.className);
+        row.methodOffset = hexOffset(xref.method_offset);
+        row.methodName = fromUtf8(xref.method_name);
+        row.codeOffset = hexOffset(xref.code_offset);
+        row.instructionOffset = hexOffset(xref.instruction_offset);
+        result.rows.push_back(std::move(row));
+    }
+
+    return result;
 }
 
 QString findAbcXrefEvidence(

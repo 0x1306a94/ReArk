@@ -43,6 +43,7 @@
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <system_error>
 #include <unordered_map>
@@ -201,6 +202,107 @@ wuwe::agent::execution::execution_policy rearkExecutionPolicy(const std::filesys
     policy.require_approval_for_shell = true;
     policy.allowed_env = {};
     return policy;
+}
+
+struct ReArkExecutionBackendSelection {
+    std::unique_ptr<wuwe::agent::execution::execution_backend> backend;
+    QString promptNote;
+};
+
+QString sandboxBackendUnavailableText(
+    const std::optional<wuwe::agent::sandbox::sandbox_backend_info>& info,
+    const QString& fallback)
+{
+    if (!info.has_value()) {
+        return fallback;
+    }
+    if (!info->unavailable_reason.empty()) {
+        return QString::fromStdString(info->unavailable_reason);
+    }
+    if (!info->available) {
+        return QStringLiteral("%1 backend is unavailable.").arg(QString::fromStdString(info->name));
+    }
+    return fallback;
+}
+
+ReArkExecutionBackendSelection makeReArkExecutionBackend(
+    const AgentSettings& settings,
+    const PythonRuntimeProbe& pythonRuntime,
+    const std::filesystem::path& workdir)
+{
+    namespace execution = wuwe::agent::execution;
+    namespace sandbox = wuwe::agent::sandbox;
+
+    execution::controlled_process_backend_config controlledConfig {
+        .python_interpreter = PythonRuntimeResolver::toFilesystemPath(pythonRuntime.resolvedPath),
+        .fallback_workdir = workdir,
+        .use_job_object = true,
+        .validate_python_on_start = true,
+        .python_startup_timeout = std::chrono::milliseconds { 3000 }
+    };
+
+    execution::restricted_process_backend_config restrictedConfig;
+    restrictedConfig.python_interpreter = controlledConfig.python_interpreter;
+    restrictedConfig.fallback_workdir = workdir;
+    restrictedConfig.runtime_staging_root = workdir / "restricted-runtime";
+    restrictedConfig.readable_roots = { workdir };
+    restrictedConfig.writable_roots = { workdir };
+    restrictedConfig.deny_network = true;
+    restrictedConfig.use_job_object = true;
+    restrictedConfig.inherit_parent_environment = false;
+    restrictedConfig.cleanup_runtime_staging = true;
+    restrictedConfig.python_startup_timeout = std::chrono::milliseconds { 3000 };
+
+    execution::execution_backend_registry_options registryOptions {
+        .controlled_process = std::move(controlledConfig),
+        .enable_restricted_process_backend = settings.enableRestrictedPythonBackend,
+        .restricted_process = std::move(restrictedConfig)
+    };
+    auto registry = execution::make_execution_backend_registry(std::move(registryOptions));
+
+    ReArkExecutionBackendSelection selection;
+    if (settings.enableRestrictedPythonBackend) {
+        execution::execution_backend_requirements requirements;
+        requirements.isolation = sandbox::isolation_level::restricted_process;
+        requirements.require_shell_disabled = true;
+        requirements.require_timeout = true;
+        requirements.require_cancellation = true;
+        requirements.require_stdout_limit = true;
+        requirements.require_stderr_limit = true;
+        requirements.require_environment_allowlist = true;
+        requirements.require_process_tree_cleanup = true;
+        requirements.require_filesystem_read_deny = true;
+        requirements.require_filesystem_write_deny = true;
+        requirements.require_network_deny = true;
+
+        selection.backend = registry.create_best(requirements);
+        if (selection.backend != nullptr) {
+            const auto info = selection.backend->info();
+            selection.promptNote = QStringLiteral(
+                "Local Python analysis uses Wuwe restricted_process. File access is limited to the temporary execution workdir, network access is denied, and backend result metadata reports enforcement status.");
+            if (!info.available && !info.unavailable_reason.empty()) {
+                selection.promptNote += QStringLiteral(" Backend availability note: %1")
+                    .arg(QString::fromStdString(info.unavailable_reason));
+            }
+            return selection;
+        }
+
+        selection.promptNote = QStringLiteral(
+            "Local Python analysis is unavailable because Windows restricted_process was requested but no backend satisfying filesystem and network deny requirements is available: %1")
+            .arg(sandboxBackendUnavailableText(
+                registry.describe("restricted_process"),
+                QStringLiteral("restricted_process backend unavailable")));
+        return selection;
+    }
+
+    selection.backend = registry.create("controlled_process");
+    if (selection.backend != nullptr) {
+        selection.promptNote = QStringLiteral(
+            "Local Python analysis uses Wuwe controlled_process with bounded output, timeout, environment allowlist, and process cleanup where supported. It is not a file or network security sandbox.");
+    } else {
+        selection.promptNote = QStringLiteral("Local Python analysis is unavailable because controlled_process backend could not be created.");
+    }
+    return selection;
 }
 
 void applyAnalysisScriptSchemaLimits(wuwe::llm_tool& tool)
@@ -989,7 +1091,7 @@ struct read_abc_literal {
 
 struct search_abc_strings {
     static constexpr std::string_view description =
-        "Search decoded ABC literal strings, including string items inside array literals, with optional regex filtering.";
+        "Search the full decoded ABC string index, including class, bytecode, literal, annotation, and debug strings, with optional regex filtering.";
 
     wuwe::field<std::string> path_or_query {
         .default_value = "modules.abc",
@@ -1634,6 +1736,7 @@ struct AgentController::Runtime {
     std::unique_ptr<wuwe::agent::execution::execution_runtime> executionRuntime;
     std::shared_ptr<wuwe::agent::execution::execution_tool_provider> executionProvider;
     std::shared_ptr<ReArkExecutionToolProvider> guardedExecutionProvider;
+    QString executionPromptNote;
 #endif
     std::shared_ptr<AgentKnowledgeController::KnowledgeToolProviderHandle> knowledgeProvider;
     std::shared_ptr<wuwe::composite_tool_provider> provider;
@@ -1769,30 +1872,39 @@ void AgentController::ask(const QString& question)
 #ifdef REARK_HAS_WUWE_EXECUTION
     runtime_->executionWorkdir = std::make_unique<QTemporaryDir>(
         QDir::temp().filePath(QStringLiteral("ReArk-agent-analysis-XXXXXX")));
+    runtime_->executionPromptNote.clear();
     const PythonRuntimeProbe pythonRuntime = PythonRuntimeResolver::resolve(settings.pythonInterpreterPath);
     if (runtime_->executionWorkdir->isValid()
         && pythonRuntime.status == PythonRuntimeProbe::Status::Ok) {
         namespace execution = wuwe::agent::execution;
         const auto workdir = PythonRuntimeResolver::toFilesystemPath(runtime_->executionWorkdir->path());
-        runtime_->executionRuntime = std::make_unique<execution::execution_runtime>(
-            execution::make_controlled_process_backend(execution::controlled_process_backend_config {
-                .python_interpreter = PythonRuntimeResolver::toFilesystemPath(pythonRuntime.resolvedPath),
-                .fallback_workdir = workdir,
-                .use_job_object = true,
-                .validate_python_on_start = true,
-                .python_startup_timeout = std::chrono::milliseconds { 3000 }
-            }),
-            rearkExecutionPolicy(workdir),
-            &runtime_->executionAuditSink,
-            &runtime_->executionApprovalService);
-        runtime_->executionProvider = std::make_shared<execution::execution_tool_provider>(
-            *runtime_->executionRuntime,
-            execution::execution_tool_options {
-                .tool_name = "run_analysis_script",
-                .description = "Run a short Python analysis script with bounded output and timeout."
-            });
-        runtime_->guardedExecutionProvider =
-            std::make_shared<ReArkExecutionToolProvider>(runtime_->executionProvider);
+        ReArkExecutionBackendSelection executionBackend =
+            makeReArkExecutionBackend(settings, pythonRuntime, workdir);
+        runtime_->executionPromptNote = executionBackend.promptNote;
+        if (executionBackend.backend != nullptr) {
+            runtime_->executionRuntime = std::make_unique<execution::execution_runtime>(
+                std::move(executionBackend.backend),
+                rearkExecutionPolicy(workdir),
+                &runtime_->executionAuditSink,
+                &runtime_->executionApprovalService);
+            runtime_->executionProvider = std::make_shared<execution::execution_tool_provider>(
+                *runtime_->executionRuntime,
+                execution::execution_tool_options {
+                    .tool_name = "run_analysis_script",
+                    .description = settings.enableRestrictedPythonBackend
+                        ? "Run a short Python analysis script in Wuwe restricted_process with bounded output and timeout."
+                        : "Run a short Python analysis script with bounded output and timeout in a local controlled process. This is not a file or network security sandbox."
+                });
+            runtime_->guardedExecutionProvider =
+                std::make_shared<ReArkExecutionToolProvider>(runtime_->executionProvider);
+        }
+    } else if (!runtime_->executionWorkdir->isValid()) {
+        runtime_->executionPromptNote = tr("Local Python analysis is unavailable because the temporary execution workdir could not be created.");
+    } else {
+        runtime_->executionPromptNote = tr("Local Python analysis is unavailable because Python runtime validation failed: %1")
+            .arg(pythonRuntime.detail.isEmpty()
+                    ? PythonRuntimeResolver::statusLabel(pythonRuntime)
+                    : pythonRuntime.detail);
     }
 #endif
     runtime_->knowledgeProvider = knowledgeController_ != nullptr
@@ -1843,6 +1955,9 @@ void AgentController::ask(const QString& question)
             "Do not claim that ReArk Agent never uses emoji; explain that stable simple emoji are supported, while keycap and complex emoji sequences are avoided. "
             "Be concise, evidence-based, and mention when requested data is unavailable through the tools.");
 #ifdef REARK_HAS_WUWE_EXECUTION
+    if (!runtime_->executionPromptNote.isEmpty()) {
+        systemPrompt += QStringLiteral(" %1").arg(runtime_->executionPromptNote);
+    }
     if (runtime_->guardedExecutionProvider != nullptr) {
         systemPrompt += QStringLiteral(
             " Use the bounded local Python analysis capability when a short deterministic calculation would verify decoding, "
@@ -2599,6 +2714,7 @@ void AgentController::resetRun()
     runtime_->executionProvider.reset();
     runtime_->executionRuntime.reset();
     runtime_->executionWorkdir.reset();
+    runtime_->executionPromptNote.clear();
     runtime_->executionAuditSink.clear();
 #endif
     runtime_->rearkProvider.reset();

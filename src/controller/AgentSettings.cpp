@@ -28,6 +28,7 @@ constexpr auto kAgentProtectedApiKeyKey = "Agent/ApiKeyProtected";
 constexpr auto kAgentModelKey = "Agent/Model";
 constexpr auto kAgentRequireApiKeyKey = "Agent/RequireApiKey";
 constexpr auto kAgentPythonInterpreterPathKey = "Agent/PythonInterpreterPath";
+constexpr auto kAgentEnableRestrictedPythonBackendKey = "Agent/EnableRestrictedPythonBackend";
 constexpr auto kAgentEmbeddingBaseUrlKey = "Agent/EmbeddingBaseUrl";
 constexpr auto kAgentEmbeddingApiKeyKey = "Agent/EmbeddingApiKey";
 constexpr auto kAgentProtectedEmbeddingApiKeyKey = "Agent/EmbeddingApiKeyProtected";
@@ -497,6 +498,9 @@ AgentSettings AgentSettingsStore::load()
     result.pythonInterpreterPath = settings.value(
         QString::fromLatin1(kAgentPythonInterpreterPathKey),
         defaultPythonInterpreterPath()).toString().trimmed();
+    result.enableRestrictedPythonBackend = settings.value(
+        QString::fromLatin1(kAgentEnableRestrictedPythonBackendKey),
+        envBool("REARK_ENABLE_RESTRICTED_PYTHON_BACKEND", false)).toBool();
     result.embeddingApiKey = loadProtectedKey(
         settings,
         kAgentProtectedEmbeddingApiKeyKey,
@@ -524,6 +528,9 @@ bool AgentSettingsStore::save(const AgentSettings& settings)
     qsettings.setValue(
         QString::fromLatin1(kAgentPythonInterpreterPathKey),
         settings.pythonInterpreterPath.trimmed());
+    qsettings.setValue(
+        QString::fromLatin1(kAgentEnableRestrictedPythonBackendKey),
+        settings.enableRestrictedPythonBackend);
     qsettings.setValue(QString::fromLatin1(kAgentEmbeddingBaseUrlKey), settings.embeddingBaseUrl.trimmed());
     qsettings.setValue(QString::fromLatin1(kAgentEmbeddingModelKey), settings.embeddingModel.trimmed());
     qsettings.setValue(QString::fromLatin1(kAgentEmbeddingRequireApiKeyKey), settings.embeddingRequireApiKey);
@@ -555,6 +562,7 @@ void AgentSettingsStore::resetRuntimeSettings()
     settings.remove(QString::fromLatin1(kAgentModelKey));
     settings.remove(QString::fromLatin1(kAgentRequireApiKeyKey));
     settings.remove(QString::fromLatin1(kAgentPythonInterpreterPathKey));
+    settings.remove(QString::fromLatin1(kAgentEnableRestrictedPythonBackendKey));
     settings.remove(QStringLiteral("Agent/Providers"));
 }
 

@@ -16,6 +16,7 @@ class SettingsController : public QObject {
     Q_PROPERTY(QString agentModel READ agentModel WRITE setAgentModel NOTIFY agentSettingsChanged)
     Q_PROPERTY(bool agentRequireApiKey READ agentRequireApiKey WRITE setAgentRequireApiKey NOTIFY agentSettingsChanged)
     Q_PROPERTY(QString agentPythonInterpreterPath READ agentPythonInterpreterPath WRITE setAgentPythonInterpreterPath NOTIFY agentSettingsChanged)
+    Q_PROPERTY(bool agentEnableRestrictedPythonBackend READ agentEnableRestrictedPythonBackend WRITE setAgentEnableRestrictedPythonBackend NOTIFY agentSettingsChanged)
     Q_PROPERTY(QVariantMap agentPythonRuntime READ agentPythonRuntime NOTIFY agentSettingsChanged)
     Q_PROPERTY(QString agentEmbeddingBaseUrl READ agentEmbeddingBaseUrl WRITE setAgentEmbeddingBaseUrl NOTIFY agentSettingsChanged)
     Q_PROPERTY(QString agentEmbeddingApiKey READ agentEmbeddingApiKey WRITE setAgentEmbeddingApiKey NOTIFY agentSettingsChanged)
@@ -44,6 +45,8 @@ public:
 
     [[nodiscard]] QString agentPythonInterpreterPath() const;
     void setAgentPythonInterpreterPath(const QString& agentPythonInterpreterPath);
+    [[nodiscard]] bool agentEnableRestrictedPythonBackend() const;
+    void setAgentEnableRestrictedPythonBackend(bool enabled);
     [[nodiscard]] QVariantMap agentPythonRuntime() const;
 
     [[nodiscard]] QString agentEmbeddingBaseUrl() const;
@@ -71,6 +74,7 @@ public:
         const QString& model,
         bool requireApiKey,
         const QString& pythonInterpreterPath,
+        bool enableRestrictedPythonBackend,
         const QString& embeddingBaseUrl,
         const QString& embeddingApiKey,
         const QString& embeddingModel,
@@ -100,6 +104,7 @@ private:
     QString agentEmbeddingModel_;
     QString agentValidationMessage_;
     bool agentRequireApiKey_ = true;
+    bool agentEnableRestrictedPythonBackend_ = false;
     bool agentEmbeddingRequireApiKey_ = true;
 };
 

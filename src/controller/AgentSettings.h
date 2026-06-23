@@ -12,6 +12,7 @@ struct AgentSettings {
     QString model;
     bool requireApiKey = true;
     QString pythonInterpreterPath;
+    bool enableRestrictedPythonBackend = false;
     QString embeddingBaseUrl;
     QString embeddingApiKey;
     QString embeddingModel;

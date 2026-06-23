@@ -25,6 +25,9 @@ Item {
         if (name === "Summary") {
             return darkTheme ? "#52a0df" : "#5d83f4"
         }
+        if (kind === "ABC_STRINGS" || name === "Strings") {
+            return darkTheme ? "#64c0a7" : "#21866f"
+        }
         if (extension === "ets" || extension === "ts") {
             return darkTheme ? "#3f8fd2" : "#2f80c1"
         }
@@ -99,7 +102,7 @@ Item {
             height: 2
             radius: 0.5
             color: root.fileColor
-            visible: root.signatureNode || root.name === "Summary"
+            visible: root.signatureNode || root.name === "Summary" || root.kind === "ABC_STRINGS"
         }
     }
 }

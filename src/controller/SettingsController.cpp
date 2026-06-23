@@ -102,6 +102,21 @@ void SettingsController::setAgentPythonInterpreterPath(const QString& agentPytho
     emit agentSettingsChanged();
 }
 
+bool SettingsController::agentEnableRestrictedPythonBackend() const
+{
+    return agentEnableRestrictedPythonBackend_;
+}
+
+void SettingsController::setAgentEnableRestrictedPythonBackend(bool enabled)
+{
+    if (agentEnableRestrictedPythonBackend_ == enabled) {
+        return;
+    }
+
+    agentEnableRestrictedPythonBackend_ = enabled;
+    emit agentSettingsChanged();
+}
+
 QVariantMap SettingsController::agentPythonRuntime() const
 {
     return PythonRuntimeResolver::toVariantMap(
@@ -188,6 +203,7 @@ void SettingsController::reload()
     const QString previousModel = agentModel_;
     const bool previousRequireApiKey = agentRequireApiKey_;
     const QString previousPythonInterpreterPath = agentPythonInterpreterPath_;
+    const bool previousEnableRestrictedPythonBackend = agentEnableRestrictedPythonBackend_;
     const QString previousEmbeddingBaseUrl = agentEmbeddingBaseUrl_;
     const QString previousEmbeddingApiKey = agentEmbeddingApiKey_;
     const QString previousEmbeddingModel = agentEmbeddingModel_;
@@ -201,6 +217,7 @@ void SettingsController::reload()
         || agentModel_ != previousModel
         || agentRequireApiKey_ != previousRequireApiKey
         || agentPythonInterpreterPath_ != previousPythonInterpreterPath
+        || agentEnableRestrictedPythonBackend_ != previousEnableRestrictedPythonBackend
         || agentEmbeddingBaseUrl_ != previousEmbeddingBaseUrl
         || agentEmbeddingApiKey_ != previousEmbeddingApiKey
         || agentEmbeddingModel_ != previousEmbeddingModel
@@ -232,6 +249,7 @@ bool SettingsController::saveAgentSettings(
     const QString& model,
     bool requireApiKey,
     const QString& pythonInterpreterPath,
+    bool enableRestrictedPythonBackend,
     const QString& embeddingBaseUrl,
     const QString& embeddingApiKey,
     const QString& embeddingModel,
@@ -244,6 +262,7 @@ bool SettingsController::saveAgentSettings(
         .model = model.trimmed(),
         .requireApiKey = requireApiKey,
         .pythonInterpreterPath = pythonInterpreterPath.trimmed(),
+        .enableRestrictedPythonBackend = enableRestrictedPythonBackend,
         .embeddingBaseUrl = embeddingBaseUrl.trimmed(),
         .embeddingApiKey = embeddingApiKey,
         .embeddingModel = embeddingModel.trimmed(),
@@ -292,6 +311,7 @@ void SettingsController::loadAgentSettings()
     agentModel_ = settings.model;
     agentRequireApiKey_ = settings.requireApiKey;
     agentPythonInterpreterPath_ = settings.pythonInterpreterPath;
+    agentEnableRestrictedPythonBackend_ = settings.enableRestrictedPythonBackend;
     agentEmbeddingBaseUrl_ = settings.embeddingBaseUrl;
     agentEmbeddingApiKey_ = settings.embeddingApiKey;
     agentEmbeddingModel_ = settings.embeddingModel;
@@ -307,6 +327,7 @@ void SettingsController::setAgentSettings(const AgentSettings& settings)
         || agentModel_ != settings.model
         || agentRequireApiKey_ != settings.requireApiKey
         || agentPythonInterpreterPath_ != settings.pythonInterpreterPath
+        || agentEnableRestrictedPythonBackend_ != settings.enableRestrictedPythonBackend
         || agentEmbeddingBaseUrl_ != settings.embeddingBaseUrl
         || agentEmbeddingApiKey_ != settings.embeddingApiKey
         || agentEmbeddingModel_ != settings.embeddingModel
@@ -322,6 +343,7 @@ void SettingsController::setAgentSettings(const AgentSettings& settings)
     agentModel_ = settings.model;
     agentRequireApiKey_ = settings.requireApiKey;
     agentPythonInterpreterPath_ = settings.pythonInterpreterPath;
+    agentEnableRestrictedPythonBackend_ = settings.enableRestrictedPythonBackend;
     agentEmbeddingBaseUrl_ = settings.embeddingBaseUrl;
     agentEmbeddingApiKey_ = settings.embeddingApiKey;
     agentEmbeddingModel_ = settings.embeddingModel;

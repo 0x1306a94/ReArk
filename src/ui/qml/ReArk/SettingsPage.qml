@@ -341,6 +341,20 @@ Rectangle {
                                         font.pixelSize: 12
                                         wrapMode: Text.WordWrap
                                     }
+
+                                    CheckBox {
+                                        id: restrictedPythonBackendBox
+                                        text: qsTr("Use Windows restricted process when available")
+                                        font.pixelSize: 13
+                                    }
+
+                                    Label {
+                                        Layout.preferredWidth: 460
+                                        text: qsTr("Default local Python is bounded but not a file or network security sandbox. Restricted process is explicit opt-in and fails closed if unavailable.")
+                                        color: root.secondaryTextColor
+                                        font.pixelSize: 12
+                                        wrapMode: Text.WordWrap
+                                    }
                                 }
                             }
 
@@ -716,6 +730,7 @@ Rectangle {
         requireApiKeyBox.checked = settingsController.agentRequireApiKey
         embeddingBaseUrlField.text = settingsController.agentEmbeddingBaseUrl
         pythonInterpreterPathField.text = settingsController.agentPythonInterpreterPath
+        restrictedPythonBackendBox.checked = settingsController.agentEnableRestrictedPythonBackend
         embeddingModelField.text = settingsController.agentEmbeddingModel
         embeddingApiKeyField.text = settingsController.agentEmbeddingApiKey
         embeddingRequireApiKeyBox.checked = settingsController.agentEmbeddingRequireApiKey
@@ -798,6 +813,7 @@ Rectangle {
             modelField.text,
             requireApiKeyBox.checked,
             pythonInterpreterPathField.text,
+            restrictedPythonBackendBox.checked,
             embeddingBaseUrlField.text,
             embeddingApiKeyField.text,
             embeddingModelField.text,

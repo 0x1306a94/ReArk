@@ -986,6 +986,32 @@ QVariantMap CodeEditorItem::selectRange(int start, int end)
     };
 }
 
+QVariantMap CodeEditorItem::revealText(const QString& query, bool matchCase)
+{
+    const QString trimmedQuery = query.trimmed();
+    if (trimmedQuery.isEmpty() || text_.isEmpty()) {
+        return {
+            { QStringLiteral("valid"), false },
+            { QStringLiteral("query"), trimmedQuery },
+        };
+    }
+
+    const Qt::CaseSensitivity caseSensitivity = matchCase ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    const QStringMatcher matcher(trimmedQuery, caseSensitivity);
+    const int start = matcher.indexIn(text_);
+    if (start < 0) {
+        return {
+            { QStringLiteral("valid"), false },
+            { QStringLiteral("query"), trimmedQuery },
+        };
+    }
+
+    QVariantMap bounds = selectRange(start, start + textLength(trimmedQuery));
+    bounds.insert(QStringLiteral("valid"), true);
+    bounds.insert(QStringLiteral("query"), trimmedQuery);
+    return bounds;
+}
+
 QVariantMap CodeEditorItem::updateSearch(const QString& query, bool matchCase, bool wholeWord, bool regularExpression)
 {
     searchQuery_ = query;

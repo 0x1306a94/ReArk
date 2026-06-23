@@ -780,6 +780,17 @@ void SourceTreeModel::rebuildTree(std::vector<DecompiledSourceFile> files)
         }
         nodes_.push_back(std::move(signature));
 
+        TreeNode strings;
+        strings.name = QStringLiteral("Strings");
+        strings.path = QStringLiteral("Strings");
+        strings.kind = QStringLiteral("ABC_STRINGS");
+        strings.section = QStringLiteral("abc_strings");
+        strings.contentMode = QStringLiteral("abc_strings");
+        strings.depth = 0;
+        strings.parent = -1;
+        strings.lazy = true;
+        nodes_.push_back(std::move(strings));
+
         TreeNode summary;
         summary.name = QStringLiteral("Summary");
         summary.path = QStringLiteral("Summary");
@@ -797,6 +808,17 @@ void SourceTreeModel::rebuildTree(std::vector<DecompiledSourceFile> files)
         nodes_.push_back(std::move(summary));
     } else {
         const int metadataRoot = addCategory(QStringLiteral("Package metadata"), true);
+
+        TreeNode strings;
+        strings.name = QStringLiteral("Strings");
+        strings.path = QStringLiteral("Strings");
+        strings.kind = QStringLiteral("ABC_STRINGS");
+        strings.section = QStringLiteral("abc_strings");
+        strings.contentMode = QStringLiteral("abc_strings");
+        strings.depth = 0;
+        strings.parent = -1;
+        strings.lazy = true;
+        nodes_.push_back(std::move(strings));
 
         const auto addMetadataEntry = [this, &directories, &populateLeaf, metadataRoot](DecompiledSourceFile& file) {
             if (file.section != QStringLiteral("signature") && file.section != QStringLiteral("summary")) {

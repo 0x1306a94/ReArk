@@ -84,14 +84,22 @@ int main(int argc, char* argv[])
 
     const QString strings = HyleDecompiler::searchAbcStringEvidence(
         context, samplePath, pathQuery, {}, 4, 0, 40, 20000);
-    if (!hasOkStatus(strings) || !strings.contains(QStringLiteral("- match["))) {
+    if (!hasOkStatus(strings)
+        || !strings.contains(QStringLiteral("# scope: all_strings"))
+        || !strings.contains(QStringLiteral("  source: "))) {
         return fail(QStringLiteral("ABC string search returned no evidence."), strings);
     }
 
+    const QString literalStrings = HyleDecompiler::searchAbcLiteralStringEvidence(
+        context, samplePath, pathQuery, {}, 4, 0, 80, 24000);
+    if (!hasOkStatus(literalStrings) || !literalStrings.contains(QStringLiteral("# scope: literal_strings"))) {
+        return fail(QStringLiteral("ABC literal string search returned no evidence."), literalStrings);
+    }
+
     const auto literalOffsets = allCaptures(
-        strings, QStringLiteral(R"(container_offset:\s+(0[xX][0-9A-Fa-f]+))"));
+        literalStrings, QStringLiteral(R"(container_offset:\s+(0[xX][0-9A-Fa-f]+))"));
     if (literalOffsets.empty()) {
-        return fail(QStringLiteral("ABC string search produced no literal container offsets."), strings);
+        return fail(QStringLiteral("ABC literal string search produced no literal container offsets."), literalStrings);
     }
 
     QString literal;

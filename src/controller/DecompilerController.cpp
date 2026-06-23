@@ -8,7 +8,9 @@
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonParseError>
 #include <QMimeDatabase>
 #include <QProcess>
@@ -19,6 +21,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <utility>
 
 namespace {
 
@@ -102,6 +105,134 @@ QString formatCandidateLine(const QVariantMap& candidate)
         line += QStringLiteral(" | %1").arg(subtitle);
     }
     return line;
+}
+
+QString compactAbcClassName(QString className)
+{
+    className = className.trimmed();
+    if (className.startsWith(QLatin1Char('L'))) {
+        className.remove(0, 1);
+    }
+    if (className.endsWith(QLatin1Char(';'))) {
+        className.chop(1);
+    }
+    return className;
+}
+
+QString abcClassTail(const QString& className)
+{
+    const QString compact = compactAbcClassName(className);
+    const qsizetype slash = compact.lastIndexOf(QLatin1Char('/'));
+    return slash >= 0 ? compact.mid(slash + 1) : compact;
+}
+
+QString xrefLocationLabel(const QVariantMap& row)
+{
+    const QString className = abcClassTail(row.value(QStringLiteral("className")).toString());
+    const QString methodName = row.value(QStringLiteral("methodName")).toString();
+    if (!className.isEmpty() && !methodName.isEmpty()) {
+        return className + QStringLiteral("::") + methodName;
+    }
+    if (!className.isEmpty()) {
+        return className;
+    }
+    return methodName;
+}
+
+QString normalizedPathForMatch(QString path)
+{
+    path = path.trimmed();
+    path.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    while (path.contains(QStringLiteral("//"))) {
+        path.replace(QStringLiteral("//"), QStringLiteral("/"));
+    }
+    return path.toCaseFolded();
+}
+
+QVariantMap abcXrefRowToVariant(const HyleDecompiler::AbcXrefRow& row)
+{
+    QVariantMap map;
+    map.insert(QStringLiteral("index"), row.index);
+    map.insert(QStringLiteral("kind"), row.kind);
+    map.insert(QStringLiteral("targetOffset"), row.targetOffset);
+    map.insert(QStringLiteral("targetText"), row.targetText);
+    map.insert(QStringLiteral("classOffset"), row.classOffset);
+    map.insert(QStringLiteral("className"), row.className);
+    map.insert(QStringLiteral("sourceFile"), row.sourceFile);
+    map.insert(QStringLiteral("methodOffset"), row.methodOffset);
+    map.insert(QStringLiteral("methodName"), row.methodName);
+    map.insert(QStringLiteral("codeOffset"), row.codeOffset);
+    map.insert(QStringLiteral("instructionOffset"), row.instructionOffset);
+    map.insert(QStringLiteral("operandIndex"), row.operandIndex);
+    map.insert(QStringLiteral("location"), xrefLocationLabel(map));
+    const QString sourceQuery = !row.sourceFile.trimmed().isEmpty()
+        ? row.sourceFile.trimmed()
+        : abcClassTail(row.className);
+    if (!sourceQuery.isEmpty()) {
+        map.insert(QStringLiteral("sourceQuery"), sourceQuery);
+    }
+    return map;
+}
+
+QVariantList abcXrefRowsToVariantList(const std::vector<HyleDecompiler::AbcXrefRow>& rows)
+{
+    QVariantList result;
+    result.reserve(static_cast<qsizetype>(rows.size()));
+    for (const auto& row : rows) {
+        result.append(abcXrefRowToVariant(row));
+    }
+    return result;
+}
+
+QJsonObject abcStringRowToJson(const HyleDecompiler::AbcStringRow& row)
+{
+    QJsonObject object;
+    object.insert(QStringLiteral("offset"), row.offset);
+    object.insert(QStringLiteral("container_offset"), row.containerOffset);
+    object.insert(QStringLiteral("item_offset"), row.itemOffset);
+    object.insert(QStringLiteral("type"), row.type);
+    object.insert(QStringLiteral("sourceKind"), row.sourceKind);
+    object.insert(QStringLiteral("source_kind"), row.sourceKind);
+    object.insert(QStringLiteral("value"), row.value);
+    object.insert(QStringLiteral("length"), row.length);
+    object.insert(QStringLiteral("context"), row.context);
+    object.insert(QStringLiteral("classification"), row.classification);
+    return object;
+}
+
+QString abcStringRowsToJson(const HyleDecompiler::AbcStringSearchResult& result)
+{
+    QJsonArray rows;
+    for (const auto& row : result.rows) {
+        rows.append(abcStringRowToJson(row));
+    }
+
+    QJsonObject root;
+    root.insert(QStringLiteral("status"), result.error.isEmpty() ? QStringLiteral("ok") : QStringLiteral("error"));
+    root.insert(QStringLiteral("abc"), result.abcPath);
+    root.insert(QStringLiteral("error"), result.error);
+    root.insert(QStringLiteral("rows"), rows);
+    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+QVariantList abcStringRowsFromJson(const QString& content)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(content.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return {};
+    }
+
+    QVariantList rows;
+    const QJsonArray array = document.object().value(QStringLiteral("rows")).toArray();
+    rows.reserve(array.size());
+    for (const QJsonValue& value : array) {
+        if (!value.isObject()) {
+            continue;
+        }
+        rows.append(value.toObject().toVariantMap());
+    }
+    return rows;
 }
 
 } // namespace
@@ -232,6 +363,51 @@ QString DecompilerController::activeDisassemblyContent() const
     return treeModel_.nodeDisassembly(nodeIndex);
 }
 
+bool DecompilerController::abcEvidenceBusy() const
+{
+    return abcEvidenceBusy_;
+}
+
+QString DecompilerController::abcEvidenceKind() const
+{
+    return abcEvidenceKind_;
+}
+
+QString DecompilerController::abcEvidenceTitle() const
+{
+    return abcEvidenceTitle_;
+}
+
+QString DecompilerController::abcEvidenceContent() const
+{
+    return abcEvidenceContent_;
+}
+
+bool DecompilerController::abcXrefsBusy() const
+{
+    return abcXrefsBusy_;
+}
+
+QString DecompilerController::abcXrefsQuery() const
+{
+    return abcXrefsQuery_;
+}
+
+QString DecompilerController::abcXrefsKind() const
+{
+    return abcXrefsKind_;
+}
+
+QString DecompilerController::abcXrefsError() const
+{
+    return abcXrefsError_;
+}
+
+QVariantList DecompilerController::abcXrefRows() const
+{
+    return abcXrefRows_;
+}
+
 int DecompilerController::selectedIndex() const
 {
     return treeModel_.selectedIndex();
@@ -240,6 +416,8 @@ int DecompilerController::selectedIndex() const
 void DecompilerController::decompileFile(const QString& filePath)
 {
     ++openRequestId_;
+    clearAbcEvidence();
+    clearAbcXrefRows();
     if (packageContext_) {
         packageContext_->requestStop();
     }
@@ -352,6 +530,336 @@ void DecompilerController::navigateToNode(int nodeIndex)
 void DecompilerController::loadActiveDisassembly()
 {
     startDisassemblyLoad(tabsModel_.activeNodeIndex());
+}
+
+void DecompilerController::requestAbcLiteralEvidence(const QString& offset, const QString& pathOrQuery)
+{
+    const QString trimmedOffset = offset.trimmed();
+    const QString queryPath = pathOrQuery.trimmed().isEmpty()
+        ? QStringLiteral("modules.abc")
+        : pathOrQuery.trimmed();
+    const auto context = packageContext_;
+    const QString fallbackPath = packagePath_;
+    const QString title = tr("Literal %1").arg(trimmedOffset.isEmpty() ? QStringLiteral("<empty>") : trimmedOffset);
+
+    startAbcEvidenceRequest(QStringLiteral("literal"), title, [context, fallbackPath, queryPath, trimmedOffset]() {
+        return HyleDecompiler::readAbcLiteralEvidence(
+            context,
+            fallbackPath,
+            queryPath,
+            trimmedOffset,
+            24000);
+    });
+}
+
+void DecompilerController::requestAbcStringSearch(
+    const QString& pattern,
+    int minLen,
+    int maxLen,
+    int limit,
+    const QString& pathOrQuery)
+{
+    const QString trimmedPattern = pattern.trimmed();
+    const QString queryPath = pathOrQuery.trimmed().isEmpty()
+        ? QStringLiteral("modules.abc")
+        : pathOrQuery.trimmed();
+    minLen = std::clamp(minLen, 0, 4096);
+    maxLen = std::clamp(maxLen, 0, 16384);
+    if (maxLen > 0 && minLen > maxLen) {
+        std::swap(minLen, maxLen);
+    }
+    limit = std::clamp(limit, 1, 1000);
+
+    const auto context = packageContext_;
+    const QString fallbackPath = packagePath_;
+    const QString title = trimmedPattern.isEmpty()
+        ? tr("ABC strings")
+        : tr("ABC strings: %1").arg(trimmedPattern);
+
+    startAbcEvidenceRequest(QStringLiteral("strings"), title, [context, fallbackPath, queryPath, trimmedPattern, minLen, maxLen, limit]() {
+        return HyleDecompiler::searchAbcStringEvidence(
+            context,
+            fallbackPath,
+            queryPath,
+            trimmedPattern,
+            minLen,
+            maxLen,
+            limit,
+            60000);
+    });
+}
+
+void DecompilerController::requestAbcTreeEvidence(const QString& pathOrQuery, int limit)
+{
+    const QString queryPath = pathOrQuery.trimmed().isEmpty()
+        ? QStringLiteral("modules.abc")
+        : pathOrQuery.trimmed();
+    limit = std::clamp(limit, 1, 5000);
+
+    const auto context = packageContext_;
+    const QString fallbackPath = packagePath_;
+
+    startAbcEvidenceRequest(QStringLiteral("tree"), tr("ABC tree"), [context, fallbackPath, queryPath, limit]() {
+        return HyleDecompiler::readAbcTreeEvidence(
+            context,
+            fallbackPath,
+            queryPath,
+            limit,
+            60000);
+    });
+}
+
+void DecompilerController::requestAbcXrefs(
+    const QString& query,
+    const QString& kind,
+    int limit,
+    const QString& pathOrQuery)
+{
+    const QString trimmedQuery = query.trimmed();
+    const QString trimmedKind = kind.trimmed().isEmpty() ? QStringLiteral("any") : kind.trimmed();
+    const QString queryPath = pathOrQuery.trimmed().isEmpty()
+        ? QStringLiteral("modules.abc")
+        : pathOrQuery.trimmed();
+    limit = std::clamp(limit, 1, 1000);
+
+    const auto context = packageContext_;
+    const QString fallbackPath = packagePath_;
+    const QString title = trimmedQuery.isEmpty()
+        ? tr("ABC xrefs")
+        : tr("ABC xrefs: %1").arg(trimmedQuery);
+
+    startAbcEvidenceRequest(QStringLiteral("xrefs"), title, [context, fallbackPath, queryPath, trimmedQuery, trimmedKind, limit]() {
+        return HyleDecompiler::findAbcXrefEvidence(
+            context,
+            fallbackPath,
+            queryPath,
+            trimmedQuery,
+            trimmedKind,
+            limit,
+            60000);
+    });
+}
+
+void DecompilerController::requestAbcXrefRows(
+    const QString& query,
+    const QString& kind,
+    int limit,
+    const QString& pathOrQuery)
+{
+    const QString trimmedQuery = query.trimmed();
+    const QString trimmedKind = kind.trimmed().isEmpty() ? QStringLiteral("any") : kind.trimmed();
+    const QString queryPath = pathOrQuery.trimmed().isEmpty()
+        ? QStringLiteral("modules.abc")
+        : pathOrQuery.trimmed();
+    limit = std::clamp(limit, 1, 1000);
+
+    ++abcXrefsRequestId_;
+    const quint64 requestId = abcXrefsRequestId_;
+    abcXrefsBusy_ = true;
+    abcXrefsQuery_ = trimmedQuery;
+    abcXrefsKind_ = trimmedKind;
+    abcXrefsError_.clear();
+    abcXrefRows_.clear();
+    emit abcXrefsChanged();
+
+    if (!hasPackage_ || packagePath_.isEmpty()) {
+        abcXrefsBusy_ = false;
+        abcXrefsError_ = tr("Open a .hap, .app, or .abc package before querying ABC xrefs.");
+        emit abcXrefsChanged();
+        return;
+    }
+
+    const auto context = packageContext_;
+    const QString fallbackPath = packagePath_;
+    setStatus(trimmedQuery.isEmpty()
+        ? tr("Finding ABC xrefs")
+        : tr("Finding ABC xrefs: %1").arg(trimmedQuery));
+
+    auto* watcher = new QFutureWatcher<HyleDecompiler::AbcXrefSearchResult>(this);
+    connect(watcher, &QFutureWatcher<HyleDecompiler::AbcXrefSearchResult>::finished, this, [this, watcher, requestId, trimmedQuery, trimmedKind]() {
+        applyAbcXrefRowsResult(requestId, trimmedQuery, trimmedKind, watcher->result());
+        watcher->deleteLater();
+    });
+
+    watcher->setFuture(QtConcurrent::run([context, fallbackPath, queryPath, trimmedQuery, trimmedKind, limit]() {
+        return HyleDecompiler::findAbcXrefs(
+            context,
+            fallbackPath,
+            queryPath,
+            trimmedQuery,
+            trimmedKind,
+            limit);
+    }));
+}
+
+void DecompilerController::requestAbcFlows(
+    const QString& query,
+    const QString& kind,
+    int limit,
+    const QString& pathOrQuery)
+{
+    const QString trimmedQuery = query.trimmed();
+    const QString trimmedKind = kind.trimmed().isEmpty() ? QStringLiteral("any") : kind.trimmed();
+    const QString queryPath = pathOrQuery.trimmed().isEmpty()
+        ? QStringLiteral("modules.abc")
+        : pathOrQuery.trimmed();
+    limit = std::clamp(limit, 1, 1000);
+
+    const auto context = packageContext_;
+    const QString fallbackPath = packagePath_;
+    const QString title = trimmedQuery.isEmpty()
+        ? tr("Call argument flows")
+        : tr("Call argument flows: %1").arg(trimmedQuery);
+
+    startAbcEvidenceRequest(QStringLiteral("flows"), title, [context, fallbackPath, queryPath, trimmedQuery, trimmedKind, limit]() {
+        return HyleDecompiler::findAbcCallArgumentFlowEvidence(
+            context,
+            fallbackPath,
+            queryPath,
+            trimmedQuery,
+            trimmedKind,
+            limit,
+            60000);
+    });
+}
+
+void DecompilerController::clearAbcEvidence()
+{
+    ++abcEvidenceRequestId_;
+    setAbcEvidenceState({}, {}, {}, false);
+}
+
+void DecompilerController::clearAbcXrefRows()
+{
+    ++abcXrefsRequestId_;
+    if (!abcXrefsBusy_
+        && abcXrefsQuery_.isEmpty()
+        && abcXrefsKind_.isEmpty()
+        && abcXrefsError_.isEmpty()
+        && abcXrefRows_.isEmpty()) {
+        return;
+    }
+
+    abcXrefsBusy_ = false;
+    abcXrefsQuery_.clear();
+    abcXrefsKind_.clear();
+    abcXrefsError_.clear();
+    abcXrefRows_.clear();
+    emit abcXrefsChanged();
+}
+
+bool DecompilerController::navigateToAbcXref(const QVariantMap& row)
+{
+    const QString sourceFile = row.value(QStringLiteral("sourceFile")).toString().trimmed();
+    const QString classTail = abcClassTail(row.value(QStringLiteral("className")).toString());
+    QString sourceQuery = !sourceFile.isEmpty() ? sourceFile : row.value(QStringLiteral("sourceQuery")).toString().trimmed();
+    if (sourceQuery.isEmpty()) {
+        sourceQuery = classTail;
+    }
+    if (sourceQuery.isEmpty()) {
+        sourceQuery = row.value(QStringLiteral("targetText")).toString().trimmed();
+    }
+    if (sourceQuery.isEmpty()) {
+        showStatusMessage(tr("ABC xref has no source location hint."));
+        return false;
+    }
+
+    const QVariantList candidates = treeModel_.navigationCandidates(sourceQuery, 40);
+    int bestNode = -1;
+    int bestScore = -1;
+    const QString normalizedSourceFile = normalizedPathForMatch(sourceFile);
+    const QString foldedTail = classTail.toCaseFolded();
+    for (const QVariant& value : candidates) {
+        const QVariantMap candidate = value.toMap();
+        const int nodeIndex = candidateNodeIndex(candidate);
+        if (nodeIndex < 0) {
+            continue;
+        }
+
+        const QString path = candidate.value(QStringLiteral("path")).toString();
+        const QString name = candidate.value(QStringLiteral("name")).toString();
+        const QString section = candidate.value(QStringLiteral("section")).toString();
+        const QString normalizedPath = normalizedPathForMatch(path);
+        const QString foldedName = name.toCaseFolded();
+
+        int score = 0;
+        if (section == QStringLiteral("source")) {
+            score += 1000;
+        }
+        if (!normalizedSourceFile.isEmpty()) {
+            if (normalizedPath == normalizedSourceFile) {
+                score += 3000;
+            } else if (normalizedPath.endsWith(QLatin1Char('/') + normalizedSourceFile)
+                       || normalizedSourceFile.endsWith(QLatin1Char('/') + normalizedPath)) {
+                score += 2500;
+            } else if (normalizedPath.contains(normalizedSourceFile)) {
+                score += 1600;
+            }
+        }
+        if (!foldedTail.isEmpty()
+            && (foldedName == foldedTail + QStringLiteral(".ets")
+                || foldedName == foldedTail + QStringLiteral(".ts")
+                || foldedName == foldedTail + QStringLiteral(".js")
+                || foldedName == foldedTail)) {
+            score += normalizedSourceFile.isEmpty() ? 900 : 120;
+        }
+        if (!foldedTail.isEmpty()
+            && (normalizedPath.endsWith(QLatin1Char('/') + foldedTail + QStringLiteral(".ets"))
+                || normalizedPath.endsWith(QLatin1Char('/') + foldedTail + QStringLiteral(".ts"))
+                || normalizedPath.endsWith(QLatin1Char('/') + foldedTail + QStringLiteral(".js")))) {
+            score += normalizedSourceFile.isEmpty() ? 700 : 100;
+        }
+        if (normalizedPath.contains(QStringLiteral("/ets/"))) {
+            score += 160;
+        }
+        if (!foldedTail.isEmpty() && normalizedPath.contains(foldedTail)) {
+            score += 80;
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestNode = nodeIndex;
+        }
+    }
+
+    if (bestNode < 0) {
+        showStatusMessage(tr("No source file matched ABC xref location: %1").arg(sourceQuery));
+        return false;
+    }
+
+    QString searchQuery = row.value(QStringLiteral("targetText")).toString().trimmed();
+    if (searchQuery.isEmpty()) {
+        searchQuery = row.value(QStringLiteral("methodName")).toString().trimmed();
+    }
+    if (searchQuery.isEmpty()) {
+        searchQuery = sourceQuery;
+    }
+
+    QStringList revealQueries;
+    const auto appendRevealQuery = [&revealQueries](const QString& query) {
+        const QString trimmed = query.trimmed();
+        if (!trimmed.isEmpty() && !revealQueries.contains(trimmed)) {
+            revealQueries.append(trimmed);
+        }
+    };
+    appendRevealQuery(row.value(QStringLiteral("targetText")).toString());
+    appendRevealQuery(row.value(QStringLiteral("methodName")).toString());
+    appendRevealQuery(searchQuery);
+
+    navigateToNode(bestNode);
+    if (!revealQueries.isEmpty()) {
+        emit codeNavigationRevealRequested(revealQueries);
+    }
+    const QString instructionOffset = row.value(QStringLiteral("instructionOffset")).toString();
+    showStatusMessage(instructionOffset.isEmpty()
+        ? tr("Opened source candidate for %1").arg(sourceQuery)
+        : tr("Opened source candidate for %1; bytecode instruction %2").arg(sourceQuery, instructionOffset));
+    return true;
+}
+
+QVariantList DecompilerController::parseAbcStringRows(const QString& content) const
+{
+    return abcStringRowsFromJson(content);
 }
 
 void DecompilerController::showStatusMessage(const QString& message)
@@ -584,6 +1092,8 @@ DecompilerController::AgentSnapshot DecompilerController::agentSnapshot(
 void DecompilerController::clear()
 {
     ++openRequestId_;
+    clearAbcEvidence();
+    clearAbcXrefRows();
     if (packageContext_) {
         packageContext_->requestStop();
     }
@@ -830,6 +1340,47 @@ void DecompilerController::applyDisassemblyResult(quint64 requestId, HyleDecompi
     }
 }
 
+void DecompilerController::applyAbcEvidenceResult(quint64 requestId, const QString& content)
+{
+    if (requestId != abcEvidenceRequestId_) {
+        return;
+    }
+
+    abcEvidenceContent_ = content;
+    abcEvidenceBusy_ = false;
+    emit abcEvidenceChanged();
+}
+
+void DecompilerController::applyAbcXrefRowsResult(
+    quint64 requestId,
+    const QString& query,
+    const QString& kind,
+    HyleDecompiler::AbcXrefSearchResult result)
+{
+    if (requestId != abcXrefsRequestId_) {
+        return;
+    }
+
+    abcXrefsBusy_ = false;
+    abcXrefsQuery_ = query;
+    abcXrefsKind_ = kind;
+    abcXrefsError_ = std::move(result.error);
+    abcXrefRows_ = abcXrefRowsToVariantList(result.rows);
+    emit abcXrefsChanged();
+
+    if (!abcXrefsError_.isEmpty()) {
+        setStatus(abcXrefsError_);
+        return;
+    }
+
+    if (abcXrefRows_.size() == 1) {
+        navigateToAbcXref(abcXrefRows_.first().toMap());
+        return;
+    }
+
+    setStatus(tr("Found %1 ABC xref(s)").arg(abcXrefRows_.size()));
+}
+
 void DecompilerController::openFileTab(int nodeIndex)
 {
     tabsModel_.openOrActivate(
@@ -865,7 +1416,7 @@ void DecompilerController::startNodeLoad(int nodeIndex, bool foreground)
                 packageContext_,
                 treeModel_.nodeHyleId(nodeIndex),
                 treeModel_.nodePackageId(nodeIndex));
-        setStatus(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary")
+        setStatus(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary") || section == QStringLiteral("abc_strings")
             ? tr("Loading %1").arg(name)
             : cachedSource ? tr("Opening cached %1").arg(name) : tr("Decompiling %1").arg(name));
         if (alreadyForeground || alreadyBackground) {
@@ -879,10 +1430,10 @@ void DecompilerController::startNodeLoad(int nodeIndex, bool foreground)
         backgroundLoadingNodes_.insert(nodeIndex);
         ++activeBackgroundPreloads_;
         setBusy(true);
-        setStatus(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary")
+        setStatus(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary") || section == QStringLiteral("abc_strings")
             ? tr("Caching %1").arg(name)
             : tr("Pre-decompiling %1").arg(name));
-        appendActivity(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary")
+        appendActivity(section == QStringLiteral("resource") || section == QStringLiteral("signature") || section == QStringLiteral("summary") || section == QStringLiteral("abc_strings")
             ? tr("Caching %1").arg(name)
             : tr("Pre-decompiling %1").arg(name));
     }
@@ -907,6 +1458,23 @@ void DecompilerController::startNodeLoad(int nodeIndex, bool foreground)
         }
         if (section == QStringLiteral("summary")) {
             return HyleDecompiler::readSummaryContent(context, nodeIndex, name, {}, packageId);
+        }
+        if (section == QStringLiteral("abc_strings")) {
+            HyleDecompiler::SourceResult result;
+            result.nodeIndex = nodeIndex;
+            result.name = name;
+            result.kind = QStringLiteral("ABC_STRINGS");
+            result.contentMode = QStringLiteral("abc_strings");
+            const auto strings = HyleDecompiler::searchAbcStrings(
+                context,
+                {},
+                QStringLiteral("modules.abc"),
+                {},
+                1,
+                0,
+                1000);
+            result.content = abcStringRowsToJson(strings);
+            return result;
         }
         return HyleDecompiler::decompileSourceFile(context, nodeIndex, hyleId, name, {}, packageId);
     }));
@@ -940,6 +1508,53 @@ void DecompilerController::startDisassemblyLoad(int nodeIndex)
     watcher->setFuture(QtConcurrent::run([context, nodeIndex, sourceFileId, packageId, name]() {
         return HyleDecompiler::disassembleSourceFileText(context, nodeIndex, sourceFileId, name, {}, packageId);
     }));
+}
+
+void DecompilerController::startAbcEvidenceRequest(const QString& kind, const QString& title, std::function<QString()> task)
+{
+    ++abcEvidenceRequestId_;
+    const quint64 requestId = abcEvidenceRequestId_;
+    if (!hasPackage_ || packagePath_.isEmpty()) {
+        setAbcEvidenceState(
+            kind,
+            title,
+            tr("Open a .hap, .app, or .abc package before querying ABC evidence."),
+            false);
+        return;
+    }
+
+    setAbcEvidenceState(kind, title, tr("Loading ABC evidence..."), true);
+    setStatus(tr("Reading %1").arg(title));
+
+    auto* watcher = new QFutureWatcher<QString>(this);
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, requestId]() {
+        applyAbcEvidenceResult(requestId, watcher->result());
+        watcher->deleteLater();
+    });
+
+    watcher->setFuture(QtConcurrent::run([task = std::move(task)]() mutable {
+        return task();
+    }));
+}
+
+void DecompilerController::setAbcEvidenceState(
+    const QString& kind,
+    const QString& title,
+    const QString& content,
+    bool busy)
+{
+    if (abcEvidenceKind_ == kind
+        && abcEvidenceTitle_ == title
+        && abcEvidenceContent_ == content
+        && abcEvidenceBusy_ == busy) {
+        return;
+    }
+
+    abcEvidenceKind_ = kind;
+    abcEvidenceTitle_ = title;
+    abcEvidenceContent_ = content;
+    abcEvidenceBusy_ = busy;
+    emit abcEvidenceChanged();
 }
 
 void DecompilerController::resetLoadingState()

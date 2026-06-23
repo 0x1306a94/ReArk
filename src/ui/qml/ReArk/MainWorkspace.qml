@@ -22,6 +22,9 @@ Rectangle {
     readonly property color selectedColor: darkTheme ? "#2a3038" : "#d6e8e7"
     readonly property color secondaryTextColor: darkTheme ? "#a6a6a6" : "#5f6872"
     readonly property string activeKind: decompilerController.tabsModel.activeKind
+    readonly property bool activeIsAbcStrings: decompilerController.tabsModel.hasTabs
+                                                && (activeKind === "ABC_STRINGS"
+                                                    || decompilerController.tabsModel.activeContentMode === "abc_strings")
     readonly property bool activeIsText: decompilerController.tabsModel.hasTabs
                                          && decompilerController.tabsModel.activeContentMode === "text"
     readonly property bool activeIsJson: activeIsText && root.isJsonKind(activeKind)
@@ -33,8 +36,12 @@ Rectangle {
     readonly property bool fileToolsVisible: activeSupportsDisassembly
                                              || activeIsJson
                                              || activeIsResourceIndex
+                                             || hasPackage
     property string textViewMode: "raw"
     property string formattedJsonContent: ""
+    property bool abcEvidenceOpen: false
+    property string pendingNavigationSearch: ""
+    property var pendingNavigationQueries: []
 
     signal openRequested()
     signal fileDropped(url fileUrl)
@@ -69,6 +76,21 @@ Rectangle {
 
         function onSelectedContentChanged() {
             root.refreshFormattedJson()
+            root.revealPendingNavigationSearch()
+        }
+
+        function onCodeNavigationSearchRequested(query) {
+            root.pendingNavigationSearch = query || ""
+            root.pendingNavigationQueries = []
+            root.textViewMode = "raw"
+            Qt.callLater(root.revealPendingNavigationSearch)
+        }
+
+        function onCodeNavigationRevealRequested(queries) {
+            root.pendingNavigationSearch = ""
+            root.pendingNavigationQueries = queries || []
+            root.textViewMode = "raw"
+            Qt.callLater(root.revealPendingNavigationSearch)
         }
     }
 
@@ -466,6 +488,8 @@ Rectangle {
                         Layout.fillHeight: true
 
                         CodeView {
+                            id: sourceCodeView
+
                             anchors.fill: parent
                             visible: decompilerController.tabsModel.hasTabs
                                      && decompilerController.tabsModel.activeContentMode === "text"
@@ -481,6 +505,36 @@ Rectangle {
                                     : root.activeIsJson
                                     ? "JSON"
                                     : decompilerController.tabsModel.activePath
+                        }
+
+                        AbcStringsTable {
+                            anchors.fill: parent
+                            visible: root.activeIsAbcStrings
+                            rows: visible
+                                  ? decompilerController.parseAbcStringRows(decompilerController.selectedContent)
+                                  : []
+                            darkTheme: root.darkTheme
+                            xrefRows: decompilerController.abcXrefRows
+                            xrefsBusy: decompilerController.abcXrefsBusy
+                            xrefsQuery: decompilerController.abcXrefsQuery
+                            xrefsError: decompilerController.abcXrefsError
+                            onFindXrefsRequested: function(query, kind) {
+                                decompilerController.requestAbcXrefRows(query, kind, 120, "modules.abc")
+                            }
+                            onOpenXrefEvidenceRequested: function(query, kind) {
+                                root.abcEvidenceOpen = true
+                                decompilerController.requestAbcXrefs(query, kind, 120, "modules.abc")
+                            }
+                            onTraceFlowRequested: function(query, kind) {
+                                root.abcEvidenceOpen = true
+                                decompilerController.requestAbcFlows(query, kind, 120, "modules.abc")
+                            }
+                            onNavigateXrefRequested: function(row) {
+                                decompilerController.navigateToAbcXref(row)
+                            }
+                            onClearXrefsRequested: function() {
+                                decompilerController.clearAbcXrefRows()
+                            }
                         }
 
                         HexView {
@@ -598,7 +652,13 @@ Rectangle {
                             Label {
                                 text: root.activeSupportsDisassembly
                                       ? qsTr("Source")
-                                      : root.activeIsJson ? qsTr("JSON") : qsTr("Resource index")
+                                      : root.activeIsAbcStrings
+                                      ? qsTr("ABC Strings")
+                                      : root.activeIsJson
+                                      ? qsTr("JSON")
+                                      : root.activeIsResourceIndex
+                                      ? qsTr("Resource index")
+                                      : qsTr("Package")
                                 color: secondaryTextColor
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -616,6 +676,7 @@ Rectangle {
                             Row {
                                 spacing: 0
                                 Layout.preferredHeight: 24
+                                visible: !root.activeIsAbcStrings
 
                                 ToolButton {
                                     ButtonGroup.group: fileViewGroup
@@ -679,6 +740,19 @@ Rectangle {
                                 Layout.fillWidth: true
                             }
 
+                            ToolButton {
+                                checkable: true
+                                checked: root.abcEvidenceOpen
+                                text: qsTr("ABC Evidence")
+                                enabled: root.hasPackage
+                                implicitWidth: 104
+                                implicitHeight: 24
+                                padding: 0
+                                ToolTip.text: qsTr("Open ABC Evidence")
+                                ToolTip.visible: hovered
+                                onClicked: root.abcEvidenceOpen = checked
+                            }
+
                             Label {
                                 text: decompilerController.tabsModel.activePath
                                 color: secondaryTextColor
@@ -694,6 +768,26 @@ Rectangle {
 
             }
         }
+
+        Rectangle {
+            Layout.preferredWidth: root.abcEvidenceOpen ? 1 : 0
+            Layout.fillHeight: true
+            visible: root.abcEvidenceOpen
+            color: dividerColor
+        }
+
+        AbcEvidenceDrawer {
+            Layout.preferredWidth: root.abcEvidenceOpen ? Math.min(430, Math.max(340, root.width * 0.28)) : 0
+            Layout.fillHeight: true
+            visible: root.abcEvidenceOpen
+            darkTheme: root.darkTheme
+            highlightTheme: root.highlightTheme
+            activePath: decompilerController.tabsModel.activePath
+            activeText: root.textViewMode === "disassembly"
+                        ? decompilerController.activeDisassemblyContent
+                        : decompilerController.selectedContent
+            onCloseRequested: root.abcEvidenceOpen = false
+        }
     }
 
     function isJsonKind(kind) {
@@ -705,6 +799,27 @@ Rectangle {
             formattedJsonContent = decompilerController.formatJson(decompilerController.selectedContent)
         } else {
             formattedJsonContent = ""
+        }
+    }
+
+    function revealPendingNavigationSearch() {
+        const queries = pendingNavigationQueries
+        if (queries && queries.length > 0) {
+            if (!sourceCodeView.visible) {
+                return
+            }
+            if (sourceCodeView.revealSearchTexts(queries) || !decompilerController.tabsModel.activeLoading) {
+                pendingNavigationQueries = []
+            }
+            return
+        }
+
+        const query = pendingNavigationSearch
+        if (query.trim().length === 0 || !sourceCodeView.visible) {
+            return
+        }
+        if (sourceCodeView.revealSearchText(query) || !decompilerController.tabsModel.activeLoading) {
+            pendingNavigationSearch = ""
         }
     }
 }

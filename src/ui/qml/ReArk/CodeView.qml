@@ -32,6 +32,30 @@ Rectangle {
         })
     }
 
+    function revealSearchText(query) {
+        const searchText = query || ""
+        if (searchText.trim().length === 0) {
+            return false
+        }
+
+        const bounds = editor.revealText(searchText, false)
+        revealBounds(bounds)
+        return bounds && bounds.valid
+    }
+
+    function revealSearchTexts(queries) {
+        if (!queries || queries.length === 0) {
+            return false
+        }
+
+        for (let i = 0; i < queries.length; ++i) {
+            if (revealSearchText(queries[i])) {
+                return true
+            }
+        }
+        return false
+    }
+
     function closeFind() {
         findVisible = false
         findDebounce.stop()

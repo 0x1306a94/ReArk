@@ -82,6 +82,45 @@ struct DisassemblyResult {
     QString error;
 };
 
+struct AbcStringRow {
+    QString offset;
+    QString containerOffset;
+    QString itemOffset;
+    QString type;
+    QString sourceKind;
+    QString value;
+    int length = 0;
+    QString context;
+    QString classification;
+};
+
+struct AbcStringSearchResult {
+    QString error;
+    QString abcPath;
+    std::vector<AbcStringRow> rows;
+};
+
+struct AbcXrefRow {
+    int index = 0;
+    QString kind;
+    QString targetOffset;
+    QString targetText;
+    QString classOffset;
+    QString className;
+    QString sourceFile;
+    QString methodOffset;
+    QString methodName;
+    QString codeOffset;
+    QString instructionOffset;
+    int operandIndex = -1;
+};
+
+struct AbcXrefSearchResult {
+    QString error;
+    QString abcPath;
+    std::vector<AbcXrefRow> rows;
+};
+
 [[nodiscard]] OpenResult openFile(
     const QString& filePath,
     const std::shared_ptr<SessionContext>& context);
@@ -126,6 +165,25 @@ struct DisassemblyResult {
     int limit,
     int maxChars,
     std::stop_token stopToken = {});
+[[nodiscard]] QString searchAbcLiteralStringEvidence(
+    const std::shared_ptr<SessionContext>& context,
+    const QString& fallbackPackagePath,
+    const QString& pathOrQuery,
+    const QString& pattern,
+    int minLen,
+    int maxLen,
+    int limit,
+    int maxChars,
+    std::stop_token stopToken = {});
+[[nodiscard]] AbcStringSearchResult searchAbcStrings(
+    const std::shared_ptr<SessionContext>& context,
+    const QString& fallbackPackagePath,
+    const QString& pathOrQuery,
+    const QString& pattern,
+    int minLen,
+    int maxLen,
+    int limit,
+    std::stop_token stopToken = {});
 [[nodiscard]] QString readAbcTreeEvidence(
     const std::shared_ptr<SessionContext>& context,
     const QString& fallbackPackagePath,
@@ -141,6 +199,14 @@ struct DisassemblyResult {
     const QString& kind,
     int limit,
     int maxChars,
+    std::stop_token stopToken = {});
+[[nodiscard]] AbcXrefSearchResult findAbcXrefs(
+    const std::shared_ptr<SessionContext>& context,
+    const QString& fallbackPackagePath,
+    const QString& pathOrQuery,
+    const QString& query,
+    const QString& kind,
+    int limit,
     std::stop_token stopToken = {});
 [[nodiscard]] QString findAbcCallArgumentFlowEvidence(
     const std::shared_ptr<SessionContext>& context,

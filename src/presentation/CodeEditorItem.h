@@ -68,6 +68,7 @@ public:
     Q_INVOKABLE void selectCurrentLine();
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE QVariantMap selectRange(int start, int end);
+    Q_INVOKABLE QVariantMap revealText(const QString& query, bool matchCase = false);
     Q_INVOKABLE QVariantMap updateSearch(const QString& query, bool matchCase, bool wholeWord, bool regularExpression);
     Q_INVOKABLE QVariantMap moveSearchResult(int direction);
     Q_INVOKABLE QVariantMap activateSearchResult(int index);

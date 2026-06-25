@@ -67,12 +67,18 @@ public:
         bool disassemblyLoaded = false;
     };
 
+    struct AgentInstallablePackageSnapshot {
+        QString path;
+        QString displayName;
+    };
+
     struct AgentSnapshot {
         QString packageSummary;
         QString fileList;
         QString entryPoints;
         QString signatureSummary;
         QVector<AgentFileSnapshot> files;
+        QVector<AgentInstallablePackageSnapshot> installablePackages;
         QString packagePath;
         std::shared_ptr<HyleDecompiler::SessionContext> packageContext;
     };
@@ -118,12 +124,12 @@ public:
     Q_INVOKABLE QVariantList entryPointCandidates() const;
     Q_INVOKABLE void navigateToNode(int nodeIndex);
     Q_INVOKABLE void loadActiveDisassembly();
-    Q_INVOKABLE void requestAbcLiteralEvidence(const QString& offset, const QString& pathOrQuery = QStringLiteral("modules.abc"));
-    Q_INVOKABLE void requestAbcStringSearch(const QString& pattern, int minLen, int maxLen, int limit, const QString& pathOrQuery = QStringLiteral("modules.abc"));
-    Q_INVOKABLE void requestAbcTreeEvidence(const QString& pathOrQuery = QStringLiteral("modules.abc"), int limit = 200);
-    Q_INVOKABLE void requestAbcXrefs(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QStringLiteral("modules.abc"));
-    Q_INVOKABLE void requestAbcXrefRows(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QStringLiteral("modules.abc"));
-    Q_INVOKABLE void requestAbcFlows(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QStringLiteral("modules.abc"));
+    Q_INVOKABLE void requestAbcLiteralEvidence(const QString& offset, const QString& pathOrQuery = QString());
+    Q_INVOKABLE void requestAbcStringSearch(const QString& pattern, int minLen, int maxLen, int limit, const QString& pathOrQuery = QString());
+    Q_INVOKABLE void requestAbcTreeEvidence(const QString& pathOrQuery = QString(), int limit = 200);
+    Q_INVOKABLE void requestAbcXrefs(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QString());
+    Q_INVOKABLE void requestAbcXrefRows(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QString());
+    Q_INVOKABLE void requestAbcFlows(const QString& query, const QString& kind, int limit, const QString& pathOrQuery = QString());
     Q_INVOKABLE void clearAbcEvidence();
     Q_INVOKABLE void clearAbcXrefRows();
     Q_INVOKABLE bool navigateToAbcXref(const QVariantMap& row);

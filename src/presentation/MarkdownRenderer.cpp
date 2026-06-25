@@ -166,6 +166,7 @@ QString htmlInlineCode(const QString &code, bool darkTheme) {
 constexpr qsizetype kMaxCacheEntries = 96;
 
 QString markdownCacheKey(const QString &markdown, bool darkTheme);
+QString normalizeMarkdownLayout(QString markdown);
 QString extractInlineCode(const QString &line, const QString &tokenPrefix,
                           QVector<MarkdownInlineCode> *inlineCodes);
 QString inlineCodeTokenPrefix();
@@ -251,13 +252,29 @@ QString markdownCacheKey(const QString &markdown, bool darkTheme) {
   return key;
 }
 
+QString normalizeMarkdownLayout(QString markdown) {
+  markdown.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+  markdown.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+
+  static const QRegularExpression gluedHeadingPattern(
+      QStringLiteral("([^\\n])\\s+(#{1,6}\\s+)"));
+  markdown.replace(gluedHeadingPattern, QStringLiteral("\\1\n\n\\2"));
+
+  static const QRegularExpression crowdedHeadingPattern(
+      QStringLiteral("(#{1,6}[^\\n]+?)\\s+(#{1,6}\\s+)"));
+  markdown.replace(crowdedHeadingPattern, QStringLiteral("\\1\n\n\\2"));
+
+  return markdown;
+}
+
 QString renderMarkdownTextHtml(const QString &markdown, bool darkTheme) {
   QVector<MarkdownInlineCode> inlineCodes;
   const QString tokenPrefix = inlineCodeTokenPrefix();
+  const QString normalizedMarkdown = normalizeMarkdownLayout(markdown);
   QString prepared;
-  prepared.reserve(markdown.size());
+  prepared.reserve(normalizedMarkdown.size());
 
-  const QStringList lines = markdown.split(QLatin1Char('\n'));
+  const QStringList lines = normalizedMarkdown.split(QLatin1Char('\n'));
   for (const QString &line : lines) {
     prepared += extractInlineCode(line, tokenPrefix, &inlineCodes);
     prepared += QLatin1Char('\n');
@@ -509,8 +526,9 @@ QVariantList renderMarkdownBlocks(const QString &markdown, bool darkTheme) {
   bool inFence = false;
   QString fenceMarker;
   QString language;
+  const QString normalizedMarkdown = normalizeMarkdownLayout(markdown);
 
-  const QStringList lines = markdown.split(QLatin1Char('\n'));
+  const QStringList lines = normalizedMarkdown.split(QLatin1Char('\n'));
   for (const QString &line : lines) {
     QString marker;
     QString info;
@@ -704,17 +722,17 @@ body {
 h1, h2, h3, h4, h5, h6 {
   color: %1;
   font-weight: 600;
-  margin-top: 13px;
-  margin-bottom: 7px;
+  margin-top: 10px;
+  margin-bottom: 6px;
 }
 h1 {
-  font-size: 20px;
+  font-size: 17px;
 }
 h2 {
-  font-size: 18px;
+  font-size: 16px;
 }
 h3, h4, h5, h6 {
-  font-size: 15px;
+  font-size: 14px;
 }
 p {
   margin-top: 0;

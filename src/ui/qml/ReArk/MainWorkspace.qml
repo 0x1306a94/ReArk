@@ -518,16 +518,16 @@ Rectangle {
                             xrefsBusy: decompilerController.abcXrefsBusy
                             xrefsQuery: decompilerController.abcXrefsQuery
                             xrefsError: decompilerController.abcXrefsError
-                            onFindXrefsRequested: function(query, kind) {
-                                decompilerController.requestAbcXrefRows(query, kind, 120, "modules.abc")
+                            onFindXrefsRequested: function(query, kind, abcPath) {
+                                decompilerController.requestAbcXrefRows(query, kind, 120, abcPath)
                             }
-                            onOpenXrefEvidenceRequested: function(query, kind) {
+                            onOpenXrefEvidenceRequested: function(query, kind, abcPath) {
                                 root.abcEvidenceOpen = true
-                                decompilerController.requestAbcXrefs(query, kind, 120, "modules.abc")
+                                decompilerController.requestAbcXrefs(query, kind, 120, abcPath)
                             }
-                            onTraceFlowRequested: function(query, kind) {
+                            onTraceFlowRequested: function(query, kind, abcPath) {
                                 root.abcEvidenceOpen = true
-                                decompilerController.requestAbcFlows(query, kind, 120, "modules.abc")
+                                decompilerController.requestAbcFlows(query, kind, 120, abcPath)
                             }
                             onNavigateXrefRequested: function(row) {
                                 decompilerController.navigateToAbcXref(row)

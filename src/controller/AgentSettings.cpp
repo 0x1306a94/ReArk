@@ -1,5 +1,7 @@
 #include "controller/AgentSettings.h"
 
+#include "controller/ProtectedSettingsSecret.h"
+
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QSettings>
@@ -13,11 +15,6 @@
 
 #include <optional>
 #include <utility>
-
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#include <wincrypt.h>
-#endif
 
 namespace {
 
@@ -245,140 +242,6 @@ QString providerApiKeyFromEnvironment(const ProviderInfo& provider)
     return {};
 }
 
-#ifdef Q_OS_WIN
-QByteArray protectSecret(const QString& secret)
-{
-    const QByteArray plain = secret.toUtf8();
-    DATA_BLOB input {
-        .cbData = static_cast<DWORD>(plain.size()),
-        .pbData = reinterpret_cast<BYTE*>(const_cast<char*>(plain.constData()))
-    };
-    DATA_BLOB output {};
-
-    if (!CryptProtectData(
-            &input,
-            L"ReArk Agent API Key",
-            nullptr,
-            nullptr,
-            nullptr,
-            0,
-            &output)) {
-        return {};
-    }
-
-    QByteArray protectedBytes(
-        reinterpret_cast<const char*>(output.pbData),
-        static_cast<qsizetype>(output.cbData));
-    LocalFree(output.pbData);
-    return protectedBytes.toBase64();
-}
-
-QString unprotectSecret(const QString& protectedSecret)
-{
-    const QByteArray protectedBytes = QByteArray::fromBase64(protectedSecret.toUtf8());
-    if (protectedBytes.isEmpty()) {
-        return {};
-    }
-
-    DATA_BLOB input {
-        .cbData = static_cast<DWORD>(protectedBytes.size()),
-        .pbData = reinterpret_cast<BYTE*>(const_cast<char*>(protectedBytes.constData()))
-    };
-    DATA_BLOB output {};
-
-    if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, 0, &output)) {
-        return {};
-    }
-
-    const QString secret = QString::fromUtf8(
-        reinterpret_cast<const char*>(output.pbData),
-        static_cast<qsizetype>(output.cbData));
-    LocalFree(output.pbData);
-    return secret;
-}
-#else
-QByteArray protectSecret(const QString& secret)
-{
-    return secret.toUtf8().toBase64();
-}
-
-QString unprotectSecret(const QString& protectedSecret)
-{
-    return QString::fromUtf8(QByteArray::fromBase64(protectedSecret.toUtf8()));
-}
-#endif
-
-QString loadProtectedKey(
-    QSettings& settings,
-    const QString& protectedKeyName,
-    const QString& legacyKeyName,
-    const QString& fallback)
-{
-    const QString protectedKey = settings.value(protectedKeyName).toString();
-    if (!protectedKey.isEmpty()) {
-        return unprotectSecret(protectedKey);
-    }
-
-    const QString legacyPlaintextKey = settings.value(legacyKeyName).toString();
-    if (!legacyPlaintextKey.isEmpty()) {
-        settings.remove(legacyKeyName);
-        const QByteArray protectedLegacyKey = protectSecret(legacyPlaintextKey);
-        if (!protectedLegacyKey.isEmpty()) {
-            settings.setValue(protectedKeyName, QString::fromLatin1(protectedLegacyKey));
-        }
-        return legacyPlaintextKey;
-    }
-
-    return fallback;
-}
-
-QString loadProtectedKey(
-    QSettings& settings,
-    const char* protectedKeyName,
-    const char* legacyKeyName,
-    const QString& fallback)
-{
-    return loadProtectedKey(
-        settings,
-        QString::fromLatin1(protectedKeyName),
-        QString::fromLatin1(legacyKeyName),
-        fallback);
-}
-
-bool saveProtectedKey(
-    QSettings& settings,
-    const QString& protectedKeyName,
-    const QString& legacyKeyName,
-    const QString& key)
-{
-    settings.remove(legacyKeyName);
-    settings.remove(protectedKeyName);
-    if (key.isEmpty()) {
-        return true;
-    }
-
-    const QByteArray protectedKey = protectSecret(key);
-    if (protectedKey.isEmpty()) {
-        return false;
-    }
-
-    settings.setValue(protectedKeyName, QString::fromLatin1(protectedKey));
-    return true;
-}
-
-bool saveProtectedKey(
-    QSettings& settings,
-    const char* protectedKeyName,
-    const char* legacyKeyName,
-    const QString& key)
-{
-    return saveProtectedKey(
-        settings,
-        QString::fromLatin1(protectedKeyName),
-        QString::fromLatin1(legacyKeyName),
-        key);
-}
-
 bool hasProviderSettings(QSettings& settings, const QString& provider)
 {
     const QString prefix = providerKeyPrefix(provider);
@@ -401,7 +264,7 @@ bool saveProviderSettings(
     settings.setValue(providerValueKey(provider, QStringLiteral("BaseUrl")), agentSettings.baseUrl.trimmed());
     settings.setValue(providerValueKey(provider, QStringLiteral("Model")), agentSettings.model.trimmed());
     settings.setValue(providerValueKey(provider, QStringLiteral("RequireApiKey")), agentSettings.requireApiKey);
-    return saveProtectedKey(
+    return ProtectedSettingsSecret::save(
         settings,
         providerValueKey(provider, QStringLiteral("ApiKeyProtected")),
         providerValueKey(provider, QStringLiteral("ApiKey")),
@@ -434,7 +297,7 @@ AgentSettings loadProviderRuntimeSettings(QSettings& settings, const QString& pr
     result.baseUrl = settings.value(prefix + QStringLiteral("BaseUrl"), providerDefaultBaseUrl).toString().trimmed();
     result.model = settings.value(prefix + QStringLiteral("Model"), providerDefaultModel).toString().trimmed();
     result.requireApiKey = settings.value(prefix + QStringLiteral("RequireApiKey"), fallbackRequireApiKey).toBool();
-    result.apiKey = loadProtectedKey(
+    result.apiKey = ProtectedSettingsSecret::load(
         settings,
         prefix + QStringLiteral("ApiKeyProtected"),
         prefix + QStringLiteral("ApiKey"),
@@ -472,7 +335,7 @@ void migrateLegacyProviderSettings(QSettings& settings, const QString& providerI
     legacy.requireApiKey = settings.value(
         QString::fromLatin1(kAgentRequireApiKeyKey),
         providerMeta ? providerMeta->apiKeyRequired : AgentSettingsStore::defaultRequireApiKey(legacy.baseUrl)).toBool();
-    legacy.apiKey = loadProtectedKey(
+    legacy.apiKey = ProtectedSettingsSecret::load(
         settings,
         kAgentProtectedApiKeyKey,
         kAgentApiKeyKey,
@@ -501,7 +364,7 @@ AgentSettings AgentSettingsStore::load()
     result.enableRestrictedPythonBackend = settings.value(
         QString::fromLatin1(kAgentEnableRestrictedPythonBackendKey),
         envBool("REARK_ENABLE_RESTRICTED_PYTHON_BACKEND", false)).toBool();
-    result.embeddingApiKey = loadProtectedKey(
+    result.embeddingApiKey = ProtectedSettingsSecret::load(
         settings,
         kAgentProtectedEmbeddingApiKeyKey,
         kAgentEmbeddingApiKeyKey,
@@ -538,8 +401,8 @@ bool AgentSettingsStore::save(const AgentSettings& settings)
     AgentSettings providerSettings = settings;
     providerSettings.provider = provider;
     return saveProviderSettings(qsettings, providerSettings)
-        && saveProtectedKey(qsettings, kAgentProtectedApiKeyKey, kAgentApiKeyKey, settings.apiKey)
-        && saveProtectedKey(
+        && ProtectedSettingsSecret::save(qsettings, kAgentProtectedApiKeyKey, kAgentApiKeyKey, settings.apiKey)
+        && ProtectedSettingsSecret::save(
             qsettings,
             kAgentProtectedEmbeddingApiKeyKey,
             kAgentEmbeddingApiKeyKey,

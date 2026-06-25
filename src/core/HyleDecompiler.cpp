@@ -1064,6 +1064,40 @@ QString formatAbcTargetHeader(const AbcEvidenceTarget& target)
     return text;
 }
 
+QStringList availableAbcTargetQueries(
+    const std::shared_ptr<HyleDecompiler::SessionContext>& context,
+    const QString& fallbackPackagePath)
+{
+    QStringList targets;
+
+    const QFileInfo fallbackFile(fallbackPackagePath);
+    if (fallbackFile.exists() && fallbackFile.isFile() && isAbcFile(fallbackFile.filePath())) {
+        targets.append(fallbackFile.filePath());
+    }
+
+    if (context) {
+        for (const HyleDecompiler::PackageSession& package : context->packages) {
+            for (const auto& resource : package.session.resources()) {
+                if (resource.is_directory
+                    || !(resource.is_abc
+                        || resource.kind == hyle::hap::hap_resource_kind::abc
+                        || hasAbcSuffix(resource.path))) {
+                    continue;
+                }
+
+                const QString rawPath = fromUtf8(resource.path);
+                const QString displayPath = package.displayName.isEmpty()
+                    ? rawPath
+                    : package.displayName + QLatin1Char('/') + rawPath;
+                targets.append(displayPath);
+            }
+        }
+    }
+
+    targets.removeDuplicates();
+    return targets;
+}
+
 hyle::result<hyle::hap::abc_parser> openParsedAbcParser(const AbcEvidenceTarget& target)
 {
     auto parser = hyle::hap::open_abc(std::filesystem::path(toUtf8Path(target.filePath)));
@@ -1832,6 +1866,7 @@ AbcStringSearchResult searchAbcStrings(
     result.rows.reserve(entries->size());
     for (const auto& entry : *entries) {
         AbcStringRow row;
+        row.abcPath = target.displayPath;
         row.offset = hexOffset(entry.offset);
         row.sourceKind = fromUtf8(hyle::hap::abc_string_source_kind_name(entry.source_kind));
         row.type = row.sourceKind;
@@ -1841,6 +1876,69 @@ AbcStringSearchResult searchAbcStrings(
             static_cast<std::size_t>(std::numeric_limits<int>::max())));
         row.classification = fromUtf8(entry.classification);
         result.rows.push_back(std::move(row));
+    }
+
+    return result;
+}
+
+AbcStringSearchResult searchAllAbcStrings(
+    const std::shared_ptr<SessionContext>& context,
+    const QString& fallbackPackagePath,
+    const QString& pattern,
+    int minLen,
+    int maxLen,
+    int limit,
+    std::stop_token stopToken)
+{
+    PerformanceTrace trace(QStringLiteral("HyleDecompiler::searchAllAbcStrings"));
+
+    AbcStringSearchResult result;
+    const QStringList targets = availableAbcTargetQueries(context, fallbackPackagePath);
+    if (targets.isEmpty()) {
+        result.error = QObject::tr("No ABC file is available in the current target.");
+        return result;
+    }
+
+    const int boundedLimit = std::clamp(limit <= 0 ? 1000 : limit, 1, 10000);
+    result.abcPath = targets.size() == 1
+        ? targets.first()
+        : QObject::tr("%n ABC file(s)", nullptr, targets.size());
+
+    for (const QString& target : targets) {
+        if (stopToken.stop_requested() || (context && context->stopToken().stop_requested())) {
+            result.error = QObject::tr("Operation cancelled.");
+            return result;
+        }
+
+        const int remaining = boundedLimit - static_cast<int>(result.rows.size());
+        if (remaining <= 0) {
+            break;
+        }
+
+        AbcStringSearchResult partial = searchAbcStrings(
+            context,
+            fallbackPackagePath,
+            target,
+            pattern,
+            minLen,
+            maxLen,
+            remaining,
+            stopToken);
+        if (!partial.error.isEmpty()) {
+            if (result.rows.empty()) {
+                result.error = partial.error;
+                result.abcPath = partial.abcPath;
+                return result;
+            }
+            continue;
+        }
+
+        for (AbcStringRow& row : partial.rows) {
+            if (row.abcPath.isEmpty()) {
+                row.abcPath = partial.abcPath;
+            }
+            result.rows.push_back(std::move(row));
+        }
     }
 
     return result;

@@ -83,6 +83,7 @@ struct DisassemblyResult {
 };
 
 struct AbcStringRow {
+    QString abcPath;
     QString offset;
     QString containerOffset;
     QString itemOffset;
@@ -179,6 +180,14 @@ struct AbcXrefSearchResult {
     const std::shared_ptr<SessionContext>& context,
     const QString& fallbackPackagePath,
     const QString& pathOrQuery,
+    const QString& pattern,
+    int minLen,
+    int maxLen,
+    int limit,
+    std::stop_token stopToken = {});
+[[nodiscard]] AbcStringSearchResult searchAllAbcStrings(
+    const std::shared_ptr<SessionContext>& context,
+    const QString& fallbackPackagePath,
     const QString& pattern,
     int minLen,
     int maxLen,

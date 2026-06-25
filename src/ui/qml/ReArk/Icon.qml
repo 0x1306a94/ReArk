@@ -28,6 +28,15 @@ Item {
         if (name === "copy") {
             return "qrc:/icons/fontawesome/copy.svg"
         }
+        if (name === "folder-open") {
+            return "qrc:/icons/folder-open-white.svg"
+        }
+        if (name === "eye") {
+            return "qrc:/icons/eye.svg"
+        }
+        if (name === "eye-off") {
+            return "qrc:/icons/eye-off.svg"
+        }
         if (name === "check") {
             return "qrc:/icons/fontawesome/check.svg"
         }

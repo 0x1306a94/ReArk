@@ -24,6 +24,7 @@ Rectangle {
     property bool xrefsBusy: false
     property string xrefsQuery: ""
     property string xrefsError: ""
+    property string xrefsTarget: ""
     property var contextXrefRow: ({})
 
     readonly property int offsetWidth: 96
@@ -32,9 +33,9 @@ Rectangle {
     readonly property int xrefBytecodeWidth: 112
     readonly property int xrefOperandWidth: 56
 
-    signal findXrefsRequested(string query, string kind)
-    signal traceFlowRequested(string query, string kind)
-    signal openXrefEvidenceRequested(string query, string kind)
+    signal findXrefsRequested(string query, string kind, string abcPath)
+    signal traceFlowRequested(string query, string kind, string abcPath)
+    signal openXrefEvidenceRequested(string query, string kind, string abcPath)
     signal navigateXrefRequested(var row)
     signal clearXrefsRequested()
 
@@ -61,6 +62,7 @@ Rectangle {
                 continue
             }
             const haystack = [
+                row.abc || row.abcPath || "",
                 row.offset || "",
                 row.sourceKind || row.source_kind || "",
                 row.type || "",
@@ -89,6 +91,7 @@ Rectangle {
 
     function copyRowTsv(row) {
         decompilerController.copyTextToClipboard([
+            row.abc || row.abcPath || "",
             row.offset || "",
             row.length === undefined ? "" : row.length,
             sourceFor(row),
@@ -138,11 +141,47 @@ Rectangle {
         stringsContextMenu.popup(owner, x, y)
     }
 
+    function abcFor(row) {
+        return row.abc || row.abcPath || ""
+    }
+
+    function requestXrefs(row) {
+        xrefsTarget = abcFor(row)
+        findXrefsRequested(row.value || "", "string", xrefsTarget)
+    }
+
+    function openXrefEvidence(row) {
+        xrefsTarget = abcFor(row)
+        openXrefEvidenceRequested(row.value || "", "string", xrefsTarget)
+    }
+
+    function traceFlow(row) {
+        xrefsTarget = abcFor(row)
+        traceFlowRequested(row.value || "", "string", xrefsTarget)
+    }
+
     function hasXrefPanel() {
         return xrefsBusy
                 || xrefsQuery.length > 0
                 || xrefRows.length > 0
                 || xrefsError.length > 0
+    }
+
+    function xrefsStatusText() {
+        if (root.xrefsBusy) {
+            return root.xrefsTarget.length > 0
+                    ? qsTr("Searching %1 in %2").arg(root.xrefsQuery).arg(root.xrefsTarget)
+                    : qsTr("Searching %1").arg(root.xrefsQuery)
+        }
+        if (root.xrefsError.length > 0) {
+            return root.xrefsError
+        }
+        if (root.xrefsQuery.length > 0) {
+            return root.xrefsTarget.length > 0
+                    ? qsTr("%1 result(s) for %2 in %3").arg(root.xrefRows.length).arg(root.xrefsQuery).arg(root.xrefsTarget)
+                    : qsTr("%1 result(s) for %2").arg(root.xrefRows.length).arg(root.xrefsQuery)
+        }
+        return ""
     }
 
     component HeaderLabel: Label {
@@ -176,6 +215,39 @@ Rectangle {
                    : button.hovered ? root.hoverColor : "transparent"
             border.width: button.checked ? 1 : 0
             border.color: root.accentColor
+        }
+    }
+
+    component PanelToolButton: AbstractButton {
+        id: button
+
+        property int labelPixelSize: 11
+
+        implicitWidth: Math.max(28, buttonLabel.implicitWidth + 16)
+        implicitHeight: 24
+        padding: 0
+        hoverEnabled: true
+
+        contentItem: Label {
+            id: buttonLabel
+
+            text: button.text
+            color: button.enabled ? Material.foreground : root.mutedTextColor
+            opacity: button.enabled ? 1.0 : 0.48
+            font.pixelSize: button.labelPixelSize
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        background: Rectangle {
+            radius: 3
+            color: !button.enabled
+                   ? "transparent"
+                   : button.down
+                     ? root.selectedColor
+                     : (button.hovered ? root.hoverColor : "transparent")
+            border.width: 0
         }
     }
 
@@ -416,19 +488,19 @@ Rectangle {
                 Action {
                     text: qsTr("Find XRefs")
                     enabled: (root.contextRow.value || "").length > 0
-                    onTriggered: root.findXrefsRequested(root.contextRow.value || "", "string")
+                    onTriggered: root.requestXrefs(root.contextRow)
                 }
 
                 Action {
                     text: qsTr("Open XRef Evidence")
                     enabled: (root.contextRow.value || "").length > 0
-                    onTriggered: root.openXrefEvidenceRequested(root.contextRow.value || "", "string")
+                    onTriggered: root.openXrefEvidence(root.contextRow)
                 }
 
                 Action {
                     text: qsTr("Trace Call Args Evidence")
                     enabled: (root.contextRow.value || "").length > 0
-                    onTriggered: root.traceFlowRequested(root.contextRow.value || "", "string")
+                    onTriggered: root.traceFlow(root.contextRow)
                 }
             }
 
@@ -478,13 +550,7 @@ Rectangle {
 
                         Label {
                             Layout.fillWidth: true
-                            text: root.xrefsBusy
-                                  ? qsTr("Searching %1").arg(root.xrefsQuery)
-                                  : root.xrefsError.length > 0
-                                  ? root.xrefsError
-                                  : root.xrefsQuery.length > 0
-                                  ? qsTr("%1 result(s) for %2").arg(root.xrefRows.length).arg(root.xrefsQuery)
-                                  : ""
+                            text: root.xrefsStatusText()
                             color: root.xrefsError.length > 0 ? "#c45b55" : root.mutedTextColor
                             font.pixelSize: 11
                             elide: Text.ElideMiddle
@@ -498,24 +564,21 @@ Rectangle {
                             visible: running
                         }
 
-                        ToolButton {
+                        PanelToolButton {
                             Layout.preferredWidth: 62
                             Layout.preferredHeight: 24
-                            padding: 0
                             text: qsTr("Evidence")
                             enabled: root.xrefsQuery.length > 0
-                            font.pixelSize: 11
                             ToolTip.text: qsTr("Open Raw XRef Evidence")
                             ToolTip.visible: hovered
-                            onClicked: root.openXrefEvidenceRequested(root.xrefsQuery, "string")
+                            onClicked: root.openXrefEvidenceRequested(root.xrefsQuery, "string", root.xrefsTarget)
                         }
 
-                        ToolButton {
+                        PanelToolButton {
                             Layout.preferredWidth: 28
                             Layout.preferredHeight: 24
-                            padding: 0
                             text: "×"
-                            font.pixelSize: 15
+                            labelPixelSize: 15
                             ToolTip.text: qsTr("Close XRefs")
                             ToolTip.visible: hovered
                             onClicked: root.clearXrefsRequested()
@@ -705,7 +768,7 @@ Rectangle {
                         Action {
                             text: qsTr("Open XRef Evidence")
                             enabled: root.xrefsQuery.length > 0
-                            onTriggered: root.openXrefEvidenceRequested(root.xrefsQuery, "string")
+                            onTriggered: root.openXrefEvidenceRequested(root.xrefsQuery, "string", root.xrefsTarget)
                         }
                     }
 

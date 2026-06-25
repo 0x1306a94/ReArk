@@ -1,4 +1,5 @@
 build/
+build-device-agent/
 build_*/
 deploy/
 deploy_*/
@@ -6,3 +7,8 @@ deploy_*/
 .codex/
 .policy/
 .vscode/
+device_agent/reark_screen_agent_hap/.hvigor/
+device_agent/reark_screen_agent_hap/**/build/
+device_agent/reark_screen_agent_hap/oh_modules/
+device_agent/reark_screen_agent_hap/**/oh_modules/
+plugin/device-agent/*-unsigned.hap

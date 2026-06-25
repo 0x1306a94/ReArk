@@ -17,6 +17,7 @@ ApplicationWindow {
 
     property string currentTheme: "dark"
     property var settingsController: null
+    property var signingController: null
     property var closeCallback: null
     readonly property bool darkTheme: currentTheme === "system"
                                       ? Qt.styleHints.colorScheme === Qt.Dark
@@ -34,5 +35,6 @@ ApplicationWindow {
     SettingsPage {
         anchors.fill: parent
         settingsController: settingsWindow.settingsController
+        signingController: settingsWindow.signingController
     }
 }

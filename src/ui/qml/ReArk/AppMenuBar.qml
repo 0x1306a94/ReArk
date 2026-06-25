@@ -24,6 +24,7 @@ Rectangle {
     signal settingsRequested()
     signal themeRequested(string theme)
     signal highlightThemeRequested(string theme)
+    signal deviceRuntimeRequested()
 
     implicitWidth: menuRow.implicitWidth
     implicitHeight: embedded ? 32 : 30
@@ -46,6 +47,9 @@ Rectangle {
         if (navigationMenu !== menu) {
             navigationMenu.close()
         }
+        if (deviceMenu !== menu) {
+            deviceMenu.close()
+        }
         if (helpMenu !== menu) {
             helpMenu.close()
         }
@@ -58,7 +62,7 @@ Rectangle {
     }
 
     function anyMenuVisible() {
-        return fileMenu.visible || viewMenu.visible || navigationMenu.visible || helpMenu.visible
+        return fileMenu.visible || viewMenu.visible || navigationMenu.visible || deviceMenu.visible || helpMenu.visible
     }
 
     function leaveMenuNavigationWhenClosed() {
@@ -189,6 +193,16 @@ Rectangle {
         }
 
         MenuBarButton {
+            id: deviceButton
+
+            text: qsTr("Device")
+            menu: deviceMenu
+            embedded: root.embedded
+            menuNavigationActive: root.menuNavigationActive
+            onMenuRequested: function(source, menu, toggle) { root.showMenu(source, menu, toggle) }
+        }
+
+        MenuBarButton {
             id: helpButton
 
             text: qsTr("Help")
@@ -212,6 +226,11 @@ Rectangle {
     Shortcut {
         sequence: "Alt+N"
         onActivated: root.showMenu(navigationButton, navigationMenu, false)
+    }
+
+    Shortcut {
+        sequence: "Alt+D"
+        onActivated: root.showMenu(deviceButton, deviceMenu, false)
     }
 
     Shortcut {
@@ -578,6 +597,17 @@ Rectangle {
                     entryPointsMenu.removeAction(object)
                 }
             }
+        }
+    }
+
+    CompactMenu {
+        id: deviceMenu
+        minimumItemWidth: 210
+        onClosed: root.leaveMenuNavigationWhenClosed()
+
+        Action {
+            text: qsTr("Device Runtime")
+            onTriggered: root.deviceRuntimeRequested()
         }
     }
 

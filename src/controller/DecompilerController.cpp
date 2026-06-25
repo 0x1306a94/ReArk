@@ -187,6 +187,8 @@ QVariantList abcXrefRowsToVariantList(const std::vector<HyleDecompiler::AbcXrefR
 QJsonObject abcStringRowToJson(const HyleDecompiler::AbcStringRow& row)
 {
     QJsonObject object;
+    object.insert(QStringLiteral("abc"), row.abcPath);
+    object.insert(QStringLiteral("abcPath"), row.abcPath);
     object.insert(QStringLiteral("offset"), row.offset);
     object.insert(QStringLiteral("container_offset"), row.containerOffset);
     object.insert(QStringLiteral("item_offset"), row.itemOffset);
@@ -535,9 +537,7 @@ void DecompilerController::loadActiveDisassembly()
 void DecompilerController::requestAbcLiteralEvidence(const QString& offset, const QString& pathOrQuery)
 {
     const QString trimmedOffset = offset.trimmed();
-    const QString queryPath = pathOrQuery.trimmed().isEmpty()
-        ? QStringLiteral("modules.abc")
-        : pathOrQuery.trimmed();
+    const QString queryPath = pathOrQuery.trimmed();
     const auto context = packageContext_;
     const QString fallbackPath = packagePath_;
     const QString title = tr("Literal %1").arg(trimmedOffset.isEmpty() ? QStringLiteral("<empty>") : trimmedOffset);
@@ -560,9 +560,7 @@ void DecompilerController::requestAbcStringSearch(
     const QString& pathOrQuery)
 {
     const QString trimmedPattern = pattern.trimmed();
-    const QString queryPath = pathOrQuery.trimmed().isEmpty()
-        ? QStringLiteral("modules.abc")
-        : pathOrQuery.trimmed();
+    const QString queryPath = pathOrQuery.trimmed();
     minLen = std::clamp(minLen, 0, 4096);
     maxLen = std::clamp(maxLen, 0, 16384);
     if (maxLen > 0 && minLen > maxLen) {
@@ -591,9 +589,7 @@ void DecompilerController::requestAbcStringSearch(
 
 void DecompilerController::requestAbcTreeEvidence(const QString& pathOrQuery, int limit)
 {
-    const QString queryPath = pathOrQuery.trimmed().isEmpty()
-        ? QStringLiteral("modules.abc")
-        : pathOrQuery.trimmed();
+    const QString queryPath = pathOrQuery.trimmed();
     limit = std::clamp(limit, 1, 5000);
 
     const auto context = packageContext_;
@@ -617,9 +613,7 @@ void DecompilerController::requestAbcXrefs(
 {
     const QString trimmedQuery = query.trimmed();
     const QString trimmedKind = kind.trimmed().isEmpty() ? QStringLiteral("any") : kind.trimmed();
-    const QString queryPath = pathOrQuery.trimmed().isEmpty()
-        ? QStringLiteral("modules.abc")
-        : pathOrQuery.trimmed();
+    const QString queryPath = pathOrQuery.trimmed();
     limit = std::clamp(limit, 1, 1000);
 
     const auto context = packageContext_;
@@ -648,9 +642,7 @@ void DecompilerController::requestAbcXrefRows(
 {
     const QString trimmedQuery = query.trimmed();
     const QString trimmedKind = kind.trimmed().isEmpty() ? QStringLiteral("any") : kind.trimmed();
-    const QString queryPath = pathOrQuery.trimmed().isEmpty()
-        ? QStringLiteral("modules.abc")
-        : pathOrQuery.trimmed();
+    const QString queryPath = pathOrQuery.trimmed();
     limit = std::clamp(limit, 1, 1000);
 
     ++abcXrefsRequestId_;
@@ -700,9 +692,7 @@ void DecompilerController::requestAbcFlows(
 {
     const QString trimmedQuery = query.trimmed();
     const QString trimmedKind = kind.trimmed().isEmpty() ? QStringLiteral("any") : kind.trimmed();
-    const QString queryPath = pathOrQuery.trimmed().isEmpty()
-        ? QStringLiteral("modules.abc")
-        : pathOrQuery.trimmed();
+    const QString queryPath = pathOrQuery.trimmed();
     limit = std::clamp(limit, 1, 1000);
 
     const auto context = packageContext_;
@@ -1056,6 +1046,15 @@ DecompilerController::AgentSnapshot DecompilerController::agentSnapshot(
     snapshot.signatureSummary = agentSignatureSummary(maxContentChars);
     snapshot.packagePath = packagePath_;
     snapshot.packageContext = packageContext_;
+    if (packageContext_) {
+        snapshot.installablePackages.reserve(static_cast<qsizetype>(packageContext_->packages.size()));
+        for (const HyleDecompiler::PackageSession& package : packageContext_->packages) {
+            snapshot.installablePackages.push_back({
+                .path = package.path,
+                .displayName = package.displayName
+            });
+        }
+    }
 
     const QVariantList candidates = treeModel_.navigationCandidates({}, maxFiles <= 0 ? 500 : maxFiles);
     snapshot.files.reserve(candidates.size());
@@ -1465,10 +1464,9 @@ void DecompilerController::startNodeLoad(int nodeIndex, bool foreground)
             result.name = name;
             result.kind = QStringLiteral("ABC_STRINGS");
             result.contentMode = QStringLiteral("abc_strings");
-            const auto strings = HyleDecompiler::searchAbcStrings(
+            const auto strings = HyleDecompiler::searchAllAbcStrings(
                 context,
                 {},
-                QStringLiteral("modules.abc"),
                 {},
                 1,
                 0,

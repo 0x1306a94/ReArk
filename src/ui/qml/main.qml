@@ -38,7 +38,7 @@ ApplicationWindow {
 
     onEffectiveDarkThemeChanged: syncHighlightThemeWithAppTheme()
     onHasPackageChanged: {
-        if (activeView !== "smartAnalysis") {
+        if (activeView !== "smartAnalysis" && activeView !== "deviceRuntime") {
             activeView = hasPackage ? "workspace" : "start"
         }
     }
@@ -66,6 +66,7 @@ ApplicationWindow {
             onThemeRequested: function(theme) { mainWindow.applyTheme(theme) }
             onHighlightThemeRequested: function(theme) { mainWindow.currentHighlightTheme = theme }
             onSmartAnalysisRequested: mainWindow.toggleSmartAnalysisView()
+            onDeviceRuntimeRequested: mainWindow.openDeviceRuntimeView()
             onSystemMenuRequested: function(globalPosition) {
                 windowChrome.showSystemMenu(mainWindow, globalPosition)
             }
@@ -103,6 +104,15 @@ ApplicationWindow {
                 visible: mainWindow.activeView === "smartAnalysis"
                 agentController: rearkAgentController
                 agentKnowledgeController: rearkAgentKnowledgeController
+            }
+
+            RK.DeviceRuntimeWorkspace {
+                anchors.fill: parent
+                visible: mainWindow.activeView === "deviceRuntime"
+                controller: deviceRuntimeController
+                packagePath: mainWindow.currentFilePath
+                packageName: mainWindow.currentFileName
+                onBackRequested: mainWindow.activeView = mainWindow.hasPackage ? "workspace" : "start"
             }
         }
     }
@@ -258,10 +268,16 @@ ApplicationWindow {
         activeView = "smartAnalysis"
     }
 
+    function openDeviceRuntimeView() {
+        activeView = "deviceRuntime"
+        deviceRuntimeController.refreshDevices()
+    }
+
     function openSettingsWindow() {
         if (settingsWindow !== null) {
             settingsWindow.currentTheme = mainWindow.currentTheme
             settingsWindow.settingsController = rearkSettingsController
+            settingsWindow.signingController = rearkSigningController
             settingsWindow.show()
             settingsWindow.raise()
             settingsWindow.requestActivate()
@@ -273,6 +289,7 @@ ApplicationWindow {
             var window = factory.createObject(mainWindow, {
                 "currentTheme": mainWindow.currentTheme,
                 "settingsController": rearkSettingsController,
+                "signingController": rearkSigningController,
                 "closeCallback": function() {
                     if (mainWindow.settingsWindow === window) {
                         mainWindow.settingsWindow = null

@@ -90,6 +90,20 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("ABC string search returned no evidence."), strings);
     }
 
+    const auto allStrings = HyleDecompiler::searchAllAbcStrings(
+        context,
+        samplePath,
+        {},
+        4,
+        0,
+        1000);
+    if (!allStrings.error.isEmpty() || allStrings.rows.empty()) {
+        return fail(QStringLiteral("All-ABC string index returned no rows."), allStrings.error);
+    }
+    if (allStrings.rows.front().abcPath.trimmed().isEmpty()) {
+        return fail(QStringLiteral("All-ABC string rows should retain their ABC source."));
+    }
+
     const QString literalStrings = HyleDecompiler::searchAbcLiteralStringEvidence(
         context, samplePath, pathQuery, {}, 4, 0, 80, 24000);
     if (!hasOkStatus(literalStrings) || !literalStrings.contains(QStringLiteral("# scope: literal_strings"))) {

@@ -6,8 +6,19 @@ add_library(reark_core STATIC
     core/HyleDecompiler.h
     core/PerformanceTrace.cpp
     core/PerformanceTrace.h
+    core/CommandRunner.cpp
+    core/CommandRunner.h
+    device/HdcDeviceBackend.cpp
+    device/HdcDeviceBackend.h
+    device/InstallablePackageResolver.cpp
+    device/InstallablePackageResolver.h
+    device/UiAutomationBackend.cpp
+    device/UiAutomationBackend.h
     model/DocumentContent.h
-    model/SourceTreeModel.h
+    signing/HarmonyHapSigner.cpp
+    signing/HarmonyHapSigner.h
+    signing/SigningMaterialInspector.cpp
+    signing/SigningMaterialInspector.h
 )
 target_include_directories(reark_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -18,6 +29,7 @@ target_link_libraries(reark_core
         hyle::hyle
     PRIVATE
         Qt6::Gui
+        Qt6::Network
 )
 
 qt_add_executable(${PROJECT_NAME}
@@ -40,10 +52,18 @@ qt_add_executable(${PROJECT_NAME}
     controller/DecompilerController.h
     controller/AgentSettings.cpp
     controller/AgentSettings.h
+    controller/ProtectedSettingsSecret.cpp
+    controller/ProtectedSettingsSecret.h
+    controller/SigningSettings.cpp
+    controller/SigningSettings.h
+    controller/SigningController.cpp
+    controller/SigningController.h
     controller/AgentKnowledgeController.cpp
     controller/AgentKnowledgeController.h
     controller/AgentController.cpp
     controller/AgentController.h
+    controller/DeviceRuntimeController.cpp
+    controller/DeviceRuntimeController.h
     controller/PythonRuntimeResolver.cpp
     controller/PythonRuntimeResolver.h
     controller/LanguageController.cpp
@@ -122,6 +142,8 @@ qt_add_resources(${PROJECT_NAME} "icons"
         "${CMAKE_SOURCE_DIR}/resources/icons/chevron-down.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/chevron-up.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/close-small.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/eye.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/eye-off.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/arrow-up.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/check.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/copy.svg"
@@ -347,6 +369,46 @@ if(WIN32)
     endif()
 endif()
 
+set(REARK_BUNDLED_HDC_FILES
+    "${CMAKE_SOURCE_DIR}/plugin/hdc/hdc.exe"
+    "${CMAKE_SOURCE_DIR}/plugin/hdc/libusb_shared.dll"
+)
+if(WIN32)
+    foreach(_reark_hdc_file IN LISTS REARK_BUNDLED_HDC_FILES)
+        if(NOT EXISTS "${_reark_hdc_file}")
+            message(FATAL_ERROR "Bundled HDC runtime file is required: ${_reark_hdc_file}")
+        endif()
+    endforeach()
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/plugin/hdc/hdc.exe")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugin/hdc"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${REARK_BUNDLED_HDC_FILES}
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugin/hdc"
+        COMMENT "Copying bundled HDC runtime"
+    )
+endif()
+
+set(REARK_HARMONY_TOOL_FILES
+    "${CMAKE_SOURCE_DIR}/plugin/harmony-tools/lib/hap-sign-tool.jar"
+    "${CMAKE_SOURCE_DIR}/plugin/harmony-tools/lib/app_packing_tool.jar"
+)
+foreach(_reark_harmony_tool_file IN LISTS REARK_HARMONY_TOOL_FILES)
+    if(NOT EXISTS "${_reark_harmony_tool_file}")
+        message(FATAL_ERROR "Bundled Harmony signing tool is required: ${_reark_harmony_tool_file}")
+    endif()
+endforeach()
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugin/harmony-tools/lib"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${REARK_HARMONY_TOOL_FILES}
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugin/harmony-tools/lib"
+    COMMENT "Copying bundled Harmony signing tools"
+)
+
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:/Od>
@@ -391,4 +453,66 @@ if(BUILD_TESTING AND EXISTS "${REARK_ABC_EVIDENCE_SAMPLE}")
     endif()
     add_test(NAME reark_hyle_abc_evidence_test
         COMMAND reark_hyle_abc_evidence_test "${REARK_ABC_EVIDENCE_SAMPLE}")
+endif()
+
+if(BUILD_TESTING)
+    qt_add_executable(reark_hdc_device_backend_test
+        tests/HdcDeviceBackendTest.cpp
+    )
+    target_include_directories(reark_hdc_device_backend_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_hdc_device_backend_test PRIVATE
+        reark_core
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_hdc_device_backend_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_hdc_device_backend_test>
+                $<TARGET_FILE_DIR:reark_hdc_device_backend_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    add_test(NAME reark_hdc_device_backend_test
+        COMMAND reark_hdc_device_backend_test)
+
+    qt_add_executable(reark_ui_automation_backend_test
+        tests/UiAutomationBackendTest.cpp
+    )
+    target_include_directories(reark_ui_automation_backend_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_ui_automation_backend_test PRIVATE
+        reark_core
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_ui_automation_backend_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_ui_automation_backend_test>
+                $<TARGET_FILE_DIR:reark_ui_automation_backend_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    add_test(NAME reark_ui_automation_backend_test
+        COMMAND reark_ui_automation_backend_test)
+
+    qt_add_executable(reark_harmony_hap_signer_test
+        tests/HarmonyHapSignerTest.cpp
+    )
+    target_include_directories(reark_harmony_hap_signer_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_harmony_hap_signer_test PRIVATE
+        reark_core
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_harmony_hap_signer_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_harmony_hap_signer_test>
+                $<TARGET_FILE_DIR:reark_harmony_hap_signer_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    add_test(NAME reark_harmony_hap_signer_test
+        COMMAND reark_harmony_hap_signer_test)
 endif()

@@ -1,12 +1,14 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 Rectangle {
     id: root
 
     property var settingsController: null
+    property var signingController: null
 
     readonly property bool darkTheme: Material.theme === Material.Dark
     readonly property color pageColor: darkTheme ? "#1e1e1e" : "#f3f3f3"
@@ -23,11 +25,18 @@ Rectangle {
     readonly property color buttonColor: darkTheme ? "#3f8fd2" : "#2f80c1"
     readonly property color buttonHoverColor: darkTheme ? "#52a0df" : "#2b72ad"
     readonly property color dangerTextColor: darkTheme ? "#f48771" : "#a1260d"
+    readonly property color successTextColor: darkTheme ? "#89d185" : "#187c31"
+    readonly property color warningTextColor: darkTheme ? "#d7ba7d" : "#996f00"
 
     property bool showApiKey: false
     property bool showEmbeddingApiKey: false
+    property bool showHarmonyKeystorePassword: false
+    property bool showHarmonyKeyPassword: false
     property string searchQuery: ""
     property string saveMessage: ""
+    property string signingSaveMessage: ""
+    property string signingMaterialStatusText: ""
+    property string signingMaterialStatusTone: "error"
     property string activeProviderDraftId: ""
     property var providerDrafts: ({})
     property bool loadingDraft: false
@@ -36,6 +45,9 @@ Rectangle {
             : []
     readonly property string validationMessage: settingsController !== null
             ? settingsController.agentValidationMessage
+            : ""
+    readonly property string signingValidationMessage: signingController !== null
+            ? signingController.harmonySigningValidationMessage
             : ""
     readonly property var pythonRuntime: settingsController !== null
             ? settingsController.agentPythonRuntime
@@ -141,6 +153,9 @@ Rectangle {
                             ListElement {
                                 title: "Knowledge"
                             }
+                            ListElement {
+                                title: "Signing"
+                            }
                         }
 
                         delegate: ItemDelegate {
@@ -168,7 +183,9 @@ Rectangle {
                                 verticalAlignment: Text.AlignVCenter
                                 text: navDelegate.title === "Agent"
                                       ? qsTr("Agent")
-                                      : (navDelegate.title === "Knowledge" ? qsTr("Knowledge") : navDelegate.title)
+                                      : (navDelegate.title === "Knowledge"
+                                         ? qsTr("Knowledge")
+                                         : (navDelegate.title === "Signing" ? qsTr("Signing") : navDelegate.title))
                                 color: settingsNavigation.currentIndex === navDelegate.index
                                        ? root.titleTextColor
                                        : root.secondaryTextColor
@@ -294,12 +311,11 @@ Rectangle {
                                             echoMode: root.showApiKey ? TextInput.Normal : TextInput.Password
                                         }
 
-                                        CheckBox {
+                                        SettingsCheckBox {
                                             id: showApiKeyBox
                                             text: qsTr("Show")
                                             checked: root.showApiKey
                                             onToggled: root.showApiKey = checked
-                                            font.pixelSize: 13
                                         }
                                     }
                                 }
@@ -311,10 +327,9 @@ Rectangle {
                                 title: qsTr("Agent: Require API Key")
                                 description: qsTr("Require an API key for remote model endpoints.")
 
-                                CheckBox {
+                                SettingsCheckBox {
                                     id: requireApiKeyBox
                                     text: qsTr("Require API key")
-                                    font.pixelSize: 13
                                 }
                             }
 
@@ -342,10 +357,9 @@ Rectangle {
                                         wrapMode: Text.WordWrap
                                     }
 
-                                    CheckBox {
+                                    SettingsCheckBox {
                                         id: restrictedPythonBackendBox
                                         text: qsTr("Use Windows restricted process when available")
-                                        font.pixelSize: 13
                                     }
 
                                     Label {
@@ -382,28 +396,17 @@ Rectangle {
                                 spacing: 10
                                 visible: root.anyAgentSettingVisible()
 
-                                Button {
+                                SettingsButton {
                                     id: agentSaveButton
 
                                     text: qsTr("Save")
-                                    hoverEnabled: true
                                     onClicked: root.saveAgentSettings()
-                                    contentItem: Label {
-                                        text: agentSaveButton.text
-                                        color: "#ffffff"
-                                        font.pixelSize: 13
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        radius: 2
-                                        color: agentSaveButton.hovered ? root.buttonHoverColor : root.buttonColor
-                                    }
+                                    tone: "primary"
                                 }
 
-                                Button {
+                                SettingsButton {
                                     text: qsTr("Reset")
-                                    flat: true
+                                    tone: "quiet"
                                     onClicked: {
                                         if (root.settingsController !== null) {
                                             root.settingsController.resetAgentRuntimeSettings()
@@ -508,12 +511,11 @@ Rectangle {
                                         echoMode: root.showEmbeddingApiKey ? TextInput.Normal : TextInput.Password
                                     }
 
-                                    CheckBox {
+                                    SettingsCheckBox {
                                         id: showEmbeddingApiKeyBox
                                         text: qsTr("Show")
                                         checked: root.showEmbeddingApiKey
                                         onToggled: root.showEmbeddingApiKey = checked
-                                        font.pixelSize: 13
                                     }
                                 }
                             }
@@ -524,10 +526,9 @@ Rectangle {
                                 title: qsTr("Knowledge: Embedding API Key Required")
                                 description: qsTr("Require an API key before indexing reference knowledge.")
 
-                                CheckBox {
+                                SettingsCheckBox {
                                     id: embeddingRequireApiKeyBox
                                     text: qsTr("Require embedding API key")
-                                    font.pixelSize: 13
                                 }
                             }
 
@@ -555,28 +556,17 @@ Rectangle {
                                 spacing: 10
                                 visible: root.anyKnowledgeSettingVisible()
 
-                                Button {
+                                SettingsButton {
                                     id: knowledgeSaveButton
 
                                     text: qsTr("Save")
-                                    hoverEnabled: true
                                     onClicked: root.saveAgentSettings()
-                                    contentItem: Label {
-                                        text: knowledgeSaveButton.text
-                                        color: "#ffffff"
-                                        font.pixelSize: 13
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    background: Rectangle {
-                                        radius: 2
-                                        color: knowledgeSaveButton.hovered ? root.buttonHoverColor : root.buttonColor
-                                    }
+                                    tone: "primary"
                                 }
 
-                                Button {
+                                SettingsButton {
                                     text: qsTr("Reset")
-                                    flat: true
+                                    tone: "quiet"
                                     onClicked: {
                                         if (root.settingsController !== null) {
                                             root.settingsController.resetKnowledgeSettings()
@@ -598,6 +588,276 @@ Rectangle {
 
                         ScrollBar.vertical: ScrollBar {
                             id: knowledgeScrollBar
+
+                            policy: ScrollBar.AsNeeded
+                        }
+                    }
+                }
+
+                Item {
+                    id: signingPage
+
+                    Flickable {
+                        id: signingFlickable
+
+                        anchors.fill: parent
+                        clip: true
+                        contentWidth: width
+                        contentHeight: signingContent.implicitHeight + 44
+                        boundsBehavior: Flickable.StopAtBounds
+
+                        ColumnLayout {
+                            id: signingContent
+
+                            width: Math.min(980, Math.max(560, signingFlickable.width - signingScrollBar.width - 72))
+                            x: 38
+                            y: 28
+                            spacing: 0
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("Application Signing")
+                                color: root.titleTextColor
+                                font.pixelSize: 26
+                                font.weight: Font.DemiBold
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 8
+                                Layout.bottomMargin: 24
+                                text: qsTr("Configure Harmony / HAP signing material for packaging and device deployment workflows.")
+                                color: root.secondaryTextColor
+                                font.pixelSize: 13
+                                wrapMode: Text.WordWrap
+                            }
+
+                            SettingRow {
+                                id: harmonyKeystorePathRow
+
+                                title: qsTr("Harmony: Keystore (.p12)")
+                                description: qsTr("Private keystore used by the Harmony signing tool.")
+
+                                RowLayout {
+                                    spacing: 8
+
+                                    SettingsTextField {
+                                        id: harmonyKeystorePathField
+                                        Layout.preferredWidth: 460
+                                        onTextChanged: root.refreshSigningMaterialStatus()
+                                    }
+
+                                    SettingsIconButton {
+                                        toolTipText: qsTr("Select keystore")
+                                        onClicked: root.openSigningFileDialog(harmonyKeystorePathField, [qsTr("Harmony keystore (*.p12)")])
+                                    }
+                                }
+                            }
+
+                            SettingRow {
+                                id: harmonyKeystorePasswordRow
+
+                                title: qsTr("Harmony: Keystore Password")
+                                description: qsTr("Stored with the same local protection used for ReArk secrets.")
+
+                                RowLayout {
+                                    spacing: 8
+
+                                    SettingsTextField {
+                                        id: harmonyKeystorePasswordField
+                                        Layout.preferredWidth: 460
+                                        echoMode: root.showHarmonyKeystorePassword ? TextInput.Normal : TextInput.Password
+                                        onTextChanged: root.refreshSigningMaterialStatus()
+                                    }
+
+                                    SettingsIconButton {
+                                        iconName: root.showHarmonyKeystorePassword ? "eye-off" : "eye"
+                                        toolTipText: root.showHarmonyKeystorePassword
+                                                     ? qsTr("Hide password")
+                                                     : qsTr("Show password")
+                                        checkable: true
+                                        checked: root.showHarmonyKeystorePassword
+                                        onClicked: root.showHarmonyKeystorePassword = checked
+                                    }
+                                }
+                            }
+
+                            SettingRow {
+                                id: harmonyKeyAliasRow
+
+                                title: qsTr("Harmony: Key Alias")
+                                description: qsTr("Alias of the private key inside the keystore.")
+
+                                SettingsTextField {
+                                    id: harmonyKeyAliasField
+                                    Layout.preferredWidth: 460
+                                    onTextChanged: root.refreshSigningMaterialStatus()
+                                }
+                            }
+
+                            SettingRow {
+                                id: harmonyKeyPasswordRow
+
+                                title: qsTr("Harmony: Key Password")
+                                description: qsTr("Optional key password. Leave empty to omit -keyPwd.")
+
+                                RowLayout {
+                                    spacing: 8
+
+                                    SettingsTextField {
+                                        id: harmonyKeyPasswordField
+                                        Layout.preferredWidth: 460
+                                        echoMode: root.showHarmonyKeyPassword ? TextInput.Normal : TextInput.Password
+                                    }
+
+                                    SettingsIconButton {
+                                        iconName: root.showHarmonyKeyPassword ? "eye-off" : "eye"
+                                        toolTipText: root.showHarmonyKeyPassword
+                                                     ? qsTr("Hide password")
+                                                     : qsTr("Show password")
+                                        checkable: true
+                                        checked: root.showHarmonyKeyPassword
+                                        onClicked: root.showHarmonyKeyPassword = checked
+                                    }
+                                }
+                            }
+
+                            SettingRow {
+                                id: harmonyProfilePathRow
+
+                                title: qsTr("Harmony: Profile (.p7b)")
+                                description: qsTr("Provision profile issued for the app bundle and signing certificate.")
+
+                                RowLayout {
+                                    spacing: 8
+
+                                    SettingsTextField {
+                                        id: harmonyProfilePathField
+                                        Layout.preferredWidth: 460
+                                        onTextChanged: root.refreshSigningMaterialStatus()
+                                    }
+
+                                    SettingsIconButton {
+                                        toolTipText: qsTr("Select profile")
+                                        onClicked: root.openSigningFileDialog(harmonyProfilePathField, [qsTr("Harmony profile (*.p7b)")])
+                                    }
+                                }
+                            }
+
+                            SettingRow {
+                                id: harmonyCertificatePathRow
+
+                                title: qsTr("Harmony: Certificate (.cer)")
+                                description: qsTr("Application signing certificate paired with the keystore key.")
+
+                                RowLayout {
+                                    spacing: 8
+
+                                    SettingsTextField {
+                                        id: harmonyCertificatePathField
+                                        Layout.preferredWidth: 460
+                                        onTextChanged: root.refreshSigningMaterialStatus()
+                                    }
+
+                                    SettingsIconButton {
+                                        toolTipText: qsTr("Select certificate")
+                                        onClicked: root.openSigningFileDialog(harmonyCertificatePathField, [qsTr("Harmony certificate (*.cer)")])
+                                    }
+                                }
+                            }
+
+                            SettingRow {
+                                id: signingMaterialStatusRow
+
+                                title: qsTr("Harmony: Signing Status")
+                                description: qsTr("Local status check for signing files, profile validity, and certificate validity.")
+
+                                RowLayout {
+                                    spacing: 8
+
+                                    Rectangle {
+                                        Layout.preferredWidth: 8
+                                        Layout.preferredHeight: 8
+                                        radius: 4
+                                        color: root.signingMaterialStatusTone === "ok"
+                                               ? root.successTextColor
+                                               : root.signingMaterialStatusTone === "warning"
+                                                 ? root.warningTextColor
+                                                 : root.dangerTextColor
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: root.signingMaterialStatusText
+                                        color: root.signingMaterialStatusTone === "ok"
+                                               ? root.successTextColor
+                                               : root.signingMaterialStatusTone === "warning"
+                                                 ? root.warningTextColor
+                                                 : root.dangerTextColor
+                                        font.pixelSize: 13
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 1
+                                Layout.topMargin: 8
+                                visible: root.anySigningSettingVisible()
+                                color: root.borderColor
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 12
+                                Layout.bottomMargin: 18
+                                visible: !root.anySigningSettingVisible()
+                                text: qsTr("No settings found")
+                                color: root.secondaryTextColor
+                                font.pixelSize: 13
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 18
+                                spacing: 10
+                                visible: root.anySigningSettingVisible()
+
+                                SettingsButton {
+                                    id: signingSaveButton
+
+                                    text: qsTr("Save")
+                                    onClicked: root.saveHarmonySigningSettings()
+                                    tone: "primary"
+                                }
+
+                                SettingsButton {
+                                    text: qsTr("Reset")
+                                    tone: "quiet"
+                                    onClicked: {
+                                        if (root.signingController !== null) {
+                                            root.signingController.resetHarmonySigningSettings()
+                                        }
+                                        root.loadDraft()
+                                        root.signingSaveMessage = qsTr("Harmony signing settings reset.")
+                                    }
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: root.signingValidationMessage.length > 0
+                                          ? root.signingValidationMessage
+                                          : root.signingSaveMessage
+                                    color: root.signingValidationMessage.length > 0 ? root.dangerTextColor : root.subtleTextColor
+                                    font.pixelSize: 12
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+
+                        ScrollBar.vertical: ScrollBar {
+                            id: signingScrollBar
 
                             policy: ScrollBar.AsNeeded
                         }
@@ -678,6 +938,148 @@ Rectangle {
         }
     }
 
+    component SettingsButton: AbstractButton {
+        id: buttonRoot
+
+        property string tone: "normal"
+
+        implicitWidth: Math.max(72, buttonLabel.implicitWidth + 28)
+        implicitHeight: 32
+        Layout.preferredHeight: implicitHeight
+        leftPadding: 14
+        rightPadding: 14
+        topPadding: 0
+        bottomPadding: 0
+        hoverEnabled: true
+
+        contentItem: Label {
+            id: buttonLabel
+
+            text: buttonRoot.text
+            color: !buttonRoot.enabled
+                   ? root.subtleTextColor
+                   : buttonRoot.tone === "quiet"
+                     ? root.primaryTextColor
+                     : "#ffffff"
+            font.pixelSize: 13
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        background: Rectangle {
+            radius: 2
+            color: !buttonRoot.enabled
+                   ? (root.darkTheme ? "#25272b" : "#eeeeee")
+                   : buttonRoot.tone === "quiet"
+                       ? (buttonRoot.hovered ? root.rowHoverColor : "transparent")
+                       : (buttonRoot.hovered ? root.buttonHoverColor : root.buttonColor)
+            border.width: 0
+        }
+    }
+
+    component SettingsCheckBox: CheckBox {
+        id: checkRoot
+
+        implicitHeight: 24
+        spacing: 8
+        hoverEnabled: true
+        font.pixelSize: 13
+
+        indicator: Rectangle {
+            implicitWidth: 16
+            implicitHeight: 16
+            x: 0
+            y: Math.round((checkRoot.height - height) / 2)
+            radius: 2
+            color: checkRoot.checked
+                   ? root.buttonColor
+                   : (checkRoot.hovered ? root.rowHoverColor : root.inputColor)
+            border.width: 1
+            border.color: checkRoot.checked
+                          ? root.buttonColor
+                          : (checkRoot.activeFocus ? root.inputFocusColor : root.borderColor)
+
+            Item {
+                anchors.centerIn: parent
+                width: 10
+                height: 8
+                visible: checkRoot.checked
+
+                Rectangle {
+                    x: 1
+                    y: 4
+                    width: 2
+                    height: 5
+                    radius: 1
+                    rotation: -45
+                    color: "#ffffff"
+                }
+
+                Rectangle {
+                    x: 5
+                    y: 0
+                    width: 2
+                    height: 10
+                    radius: 1
+                    rotation: 45
+                    color: "#ffffff"
+                }
+            }
+        }
+
+        contentItem: Text {
+            leftPadding: checkRoot.indicator.width + checkRoot.spacing
+            text: checkRoot.text
+            color: checkRoot.enabled ? root.primaryTextColor : root.subtleTextColor
+            font: checkRoot.font
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+    }
+
+    component SettingsIconButton: AbstractButton {
+        id: iconButtonRoot
+
+        property string toolTipText: ""
+        property string iconName: "folder-open"
+
+        implicitWidth: 32
+        implicitHeight: 32
+        Layout.preferredWidth: implicitWidth
+        Layout.preferredHeight: implicitHeight
+        hoverEnabled: true
+
+        contentItem: Item {
+            Icon {
+                anchors.centerIn: parent
+                width: 16
+                height: 16
+                name: iconButtonRoot.iconName
+                color: iconButtonRoot.enabled
+                       ? (iconButtonRoot.checked || iconButtonRoot.hovered ? root.primaryTextColor : root.secondaryTextColor)
+                       : root.subtleTextColor
+                opacity: iconButtonRoot.enabled ? 1.0 : 0.45
+            }
+        }
+
+        background: Rectangle {
+            radius: 2
+            color: !iconButtonRoot.enabled
+                   ? "transparent"
+                   : iconButtonRoot.down
+                     ? root.rowSelectedColor
+                     : (iconButtonRoot.checked
+                        ? root.rowSelectedColor
+                        : (iconButtonRoot.hovered ? root.rowHoverColor : "transparent"))
+            border.width: 0
+        }
+
+        ToolTip.text: iconButtonRoot.toolTipText
+        ToolTip.visible: iconButtonRoot.hovered && iconButtonRoot.toolTipText.length > 0
+        ToolTip.delay: 450
+    }
+
     component SettingsComboBox: ComboBox {
         id: comboRoot
 
@@ -704,6 +1106,22 @@ Rectangle {
         }
     }
 
+    FileDialog {
+        id: signingFileDialog
+
+        property var targetField: null
+
+        title: qsTr("Select signing file")
+        fileMode: FileDialog.OpenFile
+        onAccepted: {
+            if (targetField !== null) {
+                targetField.text = root.localPathFromUrl(selectedFile)
+            }
+            targetField = null
+        }
+        onRejected: targetField = null
+    }
+
     Connections {
         target: root.settingsController
         ignoreUnknownSignals: true
@@ -713,28 +1131,48 @@ Rectangle {
                 root.loadDraft()
             }
         }
+
+    }
+
+    Connections {
+        target: root.signingController
+        ignoreUnknownSignals: true
+
+        function onSigningSettingsChanged() {
+            if (root.visible) {
+                root.loadDraft()
+            }
+        }
     }
 
     function loadDraft() {
-        if (settingsController === null) {
-            return
-        }
-
         loadingDraft = true
-        providerDrafts = ({})
-        root.setProviderCurrent(settingsController.agentProvider)
-        activeProviderDraftId = settingsController.agentProvider
-        baseUrlField.text = settingsController.agentBaseUrl
-        modelField.text = settingsController.agentModel
-        apiKeyField.text = settingsController.agentApiKey
-        requireApiKeyBox.checked = settingsController.agentRequireApiKey
-        embeddingBaseUrlField.text = settingsController.agentEmbeddingBaseUrl
-        pythonInterpreterPathField.text = settingsController.agentPythonInterpreterPath
-        restrictedPythonBackendBox.checked = settingsController.agentEnableRestrictedPythonBackend
-        embeddingModelField.text = settingsController.agentEmbeddingModel
-        embeddingApiKeyField.text = settingsController.agentEmbeddingApiKey
-        embeddingRequireApiKeyBox.checked = settingsController.agentEmbeddingRequireApiKey
-        saveMessage = ""
+        if (settingsController !== null) {
+            providerDrafts = ({})
+            root.setProviderCurrent(settingsController.agentProvider)
+            activeProviderDraftId = settingsController.agentProvider
+            baseUrlField.text = settingsController.agentBaseUrl
+            modelField.text = settingsController.agentModel
+            apiKeyField.text = settingsController.agentApiKey
+            requireApiKeyBox.checked = settingsController.agentRequireApiKey
+            embeddingBaseUrlField.text = settingsController.agentEmbeddingBaseUrl
+            pythonInterpreterPathField.text = settingsController.agentPythonInterpreterPath
+            restrictedPythonBackendBox.checked = settingsController.agentEnableRestrictedPythonBackend
+            embeddingModelField.text = settingsController.agentEmbeddingModel
+            embeddingApiKeyField.text = settingsController.agentEmbeddingApiKey
+            embeddingRequireApiKeyBox.checked = settingsController.agentEmbeddingRequireApiKey
+            saveMessage = ""
+        }
+        if (signingController !== null) {
+            harmonyKeystorePathField.text = signingController.harmonySigningKeystorePath
+            harmonyKeystorePasswordField.text = signingController.harmonySigningKeystorePassword
+            harmonyKeyAliasField.text = signingController.harmonySigningKeyAlias
+            harmonyKeyPasswordField.text = signingController.harmonySigningKeyPassword
+            harmonyProfilePathField.text = signingController.harmonySigningProfilePath
+            harmonyCertificatePathField.text = signingController.harmonySigningCertificatePath
+            signingSaveMessage = ""
+            root.refreshSigningMaterialStatus()
+        }
         loadingDraft = false
     }
 
@@ -762,6 +1200,16 @@ Rectangle {
             || embeddingModelRow.visible
             || embeddingApiKeyRow.visible
             || embeddingRequireApiKeyRow.visible
+    }
+
+    function anySigningSettingVisible() {
+        return harmonyKeystorePathRow.visible
+            || harmonyKeystorePasswordRow.visible
+            || harmonyKeyAliasRow.visible
+            || harmonyKeyPasswordRow.visible
+            || harmonyProfilePathRow.visible
+            || harmonyCertificatePathRow.visible
+            || signingMaterialStatusRow.visible
     }
 
     function pythonRuntimeOk() {
@@ -820,6 +1268,61 @@ Rectangle {
             embeddingRequireApiKeyBox.checked)
         saveMessage = saved ? qsTr("Agent settings saved.") : ""
         return saved
+    }
+
+    function saveHarmonySigningSettings() {
+        if (signingController === null) {
+            return false
+        }
+
+        const saved = signingController.saveHarmonySigningSettings(
+            harmonyKeystorePathField.text,
+            harmonyKeystorePasswordField.text,
+            harmonyKeyAliasField.text,
+            harmonyKeyPasswordField.text,
+            harmonyProfilePathField.text,
+            harmonyCertificatePathField.text)
+        signingSaveMessage = saved ? qsTr("Harmony signing settings saved.") : ""
+        root.refreshSigningMaterialStatus()
+        return saved
+    }
+
+    function refreshSigningMaterialStatus() {
+        if (signingController === null
+                || harmonyKeystorePathField === null
+                || harmonyKeystorePasswordField === null
+                || harmonyKeyAliasField === null
+                || harmonyProfilePathField === null
+                || harmonyCertificatePathField === null) {
+            signingMaterialStatusTone = "error"
+            signingMaterialStatusText = qsTr("Signing status is unavailable.")
+            return
+        }
+
+        const status = signingController.inspectHarmonySigningSettings(
+            harmonyKeystorePathField.text,
+            harmonyKeystorePasswordField.text,
+            harmonyKeyAliasField.text,
+            harmonyProfilePathField.text,
+            harmonyCertificatePathField.text)
+        signingMaterialStatusTone = status.tone !== undefined ? status.tone : "error"
+        signingMaterialStatusText = status.summary !== undefined ? status.summary : qsTr("Signing status is unavailable.")
+    }
+
+    function openSigningFileDialog(targetField, filters) {
+        signingFileDialog.targetField = targetField
+        signingFileDialog.nameFilters = filters
+        signingFileDialog.open()
+    }
+
+    function localPathFromUrl(url) {
+        let value = String(url)
+        if (value.startsWith("file:///")) {
+            value = value.substring(8)
+        } else if (value.startsWith("file://")) {
+            value = value.substring(7)
+        }
+        return decodeURIComponent(value).replace(/\//g, "\\")
     }
 
     function providerIdAt(index) {

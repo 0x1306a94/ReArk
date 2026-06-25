@@ -21,14 +21,24 @@
 #include "controller/AgentKnowledgeController.h"
 #include "controller/DecompilerController.h"
 #include "controller/PythonRuntimeResolver.h"
+#include "controller/SigningSettings.h"
+#include "device/HdcDeviceBackend.h"
+#include "device/InstallablePackageResolver.h"
+#include "device/UiAutomationBackend.h"
 #include "model/AgentMessageModel.h"
+#include "signing/HarmonyHapSigner.h"
+#include "signing/SigningMaterialInspector.h"
 
 #include <QClipboard>
+#include <QDateTime>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QMetaObject>
 #include <QPointer>
 #include <QRegularExpression>
+#include <QStandardPaths>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QTime>
@@ -121,6 +131,39 @@ QString toolDisplayName(const std::string& name)
     }
     if (name == "read_signature_summary") {
         return AgentController::tr("signature summary");
+    }
+    if (name == "list_harmony_devices") {
+        return AgentController::tr("HarmonyOS devices");
+    }
+    if (name == "install_current_hap") {
+        return AgentController::tr("HAP install");
+    }
+    if (name == "start_harmony_app") {
+        return AgentController::tr("HarmonyOS app launch");
+    }
+    if (name == "read_hilog") {
+        return AgentController::tr("device hilog");
+    }
+    if (name == "capture_device_screenshot") {
+        return AgentController::tr("device screenshot");
+    }
+    if (name == "dump_ui_layout") {
+        return AgentController::tr("UI layout");
+    }
+    if (name == "tap_ui") {
+        return AgentController::tr("UI tap");
+    }
+    if (name == "tap_ui_text") {
+        return AgentController::tr("UI text tap");
+    }
+    if (name == "input_ui_text") {
+        return AgentController::tr("UI text input");
+    }
+    if (name == "press_device_key") {
+        return AgentController::tr("device key");
+    }
+    if (name == "swipe_device") {
+        return AgentController::tr("UI swipe");
     }
     if (isScriptToolName(name)) {
         return AgentController::tr("local analysis script");
@@ -905,6 +948,224 @@ QString readSnapshotDisassembly(
     return boundedSnapshotText(text, maxChars);
 }
 
+HdcDeviceBackend agentDeviceBackend()
+{
+    return HdcDeviceBackend();
+}
+
+UiAutomationBackend agentUiBackend()
+{
+    return UiAutomationBackend(agentDeviceBackend());
+}
+
+std::string deviceCommandToolContent(
+    const QString& title,
+    const CommandResult& result,
+    const QString& extra = {},
+    bool success = false,
+    bool useExplicitSuccess = false)
+{
+    const bool ok = useExplicitSuccess ? success : result.succeeded();
+    QString text;
+    text += QStringLiteral("# status: %1\n").arg(ok ? QStringLiteral("ok") : QStringLiteral("error"));
+    text += QStringLiteral("# operation: %1\n").arg(title);
+    if (!extra.isEmpty()) {
+        text += extra.trimmed() + QStringLiteral("\n");
+    }
+    text += HdcDeviceBackend::resultSummary(result);
+    return toStdString(boundedSnapshotText(text, 24000));
+}
+
+bool isMissingSignatureInstallFailure(const CommandResult& result)
+{
+    const QString text = QStringLiteral("%1\n%2\n%3")
+        .arg(result.standardOutput, result.standardError, result.errorMessage)
+        .toCaseFolded();
+    return text.contains(QStringLiteral("no signature file"))
+        || text.contains(QStringLiteral("signature file"))
+        || text.contains(QStringLiteral("not signed"))
+        || text.contains(QStringLiteral("verify signature"))
+        || text.contains(QStringLiteral("signature verify"));
+}
+
+bool signatureSummaryLooksUnsigned(const QString& summary)
+{
+    const QString folded = summary.toCaseFolded();
+    return folded.contains(QStringLiteral("unsigned"))
+        || folded.contains(QStringLiteral("not signed"))
+        || folded.contains(QStringLiteral("no signature"))
+        || folded.contains(QStringLiteral("signature file"))
+        || folded.contains(QStringLiteral("签名文件"))
+        || folded.contains(QStringLiteral("未签名"));
+}
+
+QString signingSettingsStatusLine(const QString& validationMessage)
+{
+    return validationMessage.trimmed().isEmpty()
+        ? QStringLiteral("# signing_settings: configured")
+        : QStringLiteral("# signing_settings: invalid\n# signing_settings_error: %1").arg(validationMessage);
+}
+
+QString agentSignedHapFileName(const QString& sourcePath)
+{
+    const QFileInfo info(sourcePath);
+    QString baseName = info.completeBaseName().trimmed();
+    if (baseName.isEmpty()) {
+        baseName = QStringLiteral("reark-agent");
+    }
+    return baseName + QStringLiteral("-signed.hap");
+}
+
+QString packageBundleNameFromSummary(const QString& summary)
+{
+    static const QRegularExpression bundleNamePattern(
+        QStringLiteral("\"bundleName\"\\s*:\\s*\"([^\"]+)\""));
+    QRegularExpressionMatch match = bundleNamePattern.match(summary);
+    if (match.hasMatch()) {
+        return match.captured(1).trimmed();
+    }
+
+    static const QRegularExpression profileBundleNamePattern(
+        QStringLiteral("\"bundle-name\"\\s*:\\s*\"([^\"]+)\""));
+    match = profileBundleNamePattern.match(summary);
+    return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+QString packageCompatibleVersionFromSummary(const QString& summary)
+{
+    static const QRegularExpression compatiblePattern(
+        QStringLiteral("\"compatible\"\\s*:\\s*(\\d+)"));
+    const QRegularExpressionMatch match = compatiblePattern.match(summary);
+    return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+std::string installWithAutoSignToolContent(
+    const CommandResult& initialInstall,
+    const CommandResult& signResult,
+    const CommandResult& signedInstall,
+    const QString& extra)
+{
+    const bool signedInstallOk = HdcDeviceBackend::installSucceeded(signedInstall);
+    QString text;
+    text += QStringLiteral("# status: %1\n").arg(signedInstallOk ? QStringLiteral("ok") : QStringLiteral("error"));
+    text += QStringLiteral("# operation: install_current_hap\n");
+    if (!extra.trimmed().isEmpty()) {
+        text += extra.trimmed() + QStringLiteral("\n");
+    }
+    text += QStringLiteral("\n[initial install]\n%1\n").arg(HdcDeviceBackend::resultSummary(initialInstall));
+    text += QStringLiteral("\n[sign]\n%1\n").arg(HarmonyHapSigner::resultSummary(signResult));
+    text += QStringLiteral("\n[signed install]\n%1").arg(HdcDeviceBackend::resultSummary(signedInstall));
+    return toStdString(boundedSnapshotText(text, 30000));
+}
+
+QList<InstallablePackageCandidate> installablePackageCandidates(
+    const DecompilerController::AgentSnapshot& snapshot)
+{
+    QList<InstallablePackageCandidate> candidates;
+    for (const DecompilerController::AgentInstallablePackageSnapshot& item : snapshot.installablePackages) {
+        candidates.append({
+            .path = item.path,
+            .displayName = item.displayName
+        });
+    }
+    return candidates;
+}
+
+QString agentScreenshotPath()
+{
+    QString root = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    if (root.isEmpty()) {
+        root = QDir::tempPath();
+    }
+    QDir dir(root);
+    dir.mkpath(QStringLiteral("ReArk"));
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    return dir.filePath(QStringLiteral("ReArk/reark-agent-device-%1.jpeg").arg(timestamp));
+}
+
+QString agentLayoutPath()
+{
+    QDir dir(QDir::tempPath());
+    dir.mkpath(QStringLiteral("ReArk"));
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    return dir.filePath(QStringLiteral("ReArk/reark-agent-ui-layout-%1.json").arg(timestamp));
+}
+
+struct AgentUiLayoutEvidence {
+    CommandResult dump;
+    CommandResult receive;
+    QList<UiAutomationNode> nodes;
+    QByteArray rawLayout;
+    QString localPath;
+
+    [[nodiscard]] bool succeeded() const
+    {
+        return dump.succeeded() && receive.succeeded() && !rawLayout.isEmpty();
+    }
+};
+
+AgentUiLayoutEvidence dumpUiLayoutForAgent(
+    const QString& target,
+    const QString& bundleName = {})
+{
+    UiAutomationBackend backend = agentUiBackend();
+    HdcDeviceBackend deviceBackend = agentDeviceBackend();
+    const QString remotePath = QStringLiteral("/data/local/tmp/reark-agent-ui-layout.json");
+    AgentUiLayoutEvidence evidence;
+    evidence.localPath = agentLayoutPath();
+    evidence.dump = CommandRunner::runBlocking(
+        backend.dumpLayoutRequest(remotePath, target, bundleName));
+    if (!evidence.dump.succeeded()) {
+        return evidence;
+    }
+
+    evidence.receive = CommandRunner::runBlocking(
+        deviceBackend.receiveFileRequest(remotePath, evidence.localPath, target));
+    (void)CommandRunner::runBlocking(deviceBackend.removeRemoteFileRequest(remotePath, target));
+    if (!evidence.receive.succeeded()) {
+        return evidence;
+    }
+
+    QFile file(evidence.localPath);
+    if (file.open(QIODevice::ReadOnly)) {
+        evidence.rawLayout = file.readAll();
+        evidence.nodes = UiAutomationBackend::parseLayout(evidence.rawLayout);
+    }
+    return evidence;
+}
+
+UiNodeSelector makeUiNodeSelector(
+    const std::string& query,
+    const std::string& text,
+    const std::string& id,
+    const std::string& type,
+    bool exactText,
+    bool exactId,
+    bool exactType,
+    bool clickableOnly,
+    bool enabledOnly,
+    bool visibleOnly)
+{
+    UiNodeSelector selector;
+    selector.query = QString::fromStdString(query);
+    selector.text = QString::fromStdString(text);
+    selector.id = QString::fromStdString(id);
+    selector.type = QString::fromStdString(type);
+    selector.exactText = exactText;
+    selector.exactId = exactId;
+    selector.exactType = exactType;
+    if (clickableOnly) {
+        selector.clickable = true;
+    }
+    if (enabledOnly) {
+        selector.enabled = true;
+    }
+    if (visibleOnly) {
+        selector.visible = true;
+    }
+    return selector;
+}
+
 std::optional<wuwe::llm_tool_result> cancelledToolResult(const ReArkToolContext& context)
 {
     if (!context.stopToken.stop_requested()) {
@@ -1061,8 +1322,8 @@ struct read_abc_literal {
         .description = "ABC literal offset, for example 0x5757 or literal@0x00005757."
     };
     wuwe::field<std::string> path_or_query {
-        .default_value = "modules.abc",
-        .description = "ABC file path or query. Use modules.abc for the primary HarmonyOS bytecode file."
+        .default_value = std::string {},
+        .description = "Optional ABC file path or query. Leave empty for ReArk's current primary ABC, or pass a value such as modules.abc when a package has multiple ABC files."
     };
     wuwe::field<int> max_chars {
         .default_value = 12000,
@@ -1094,8 +1355,8 @@ struct search_abc_strings {
         "Search the full decoded ABC string index, including class, bytecode, literal, annotation, and debug strings, with optional regex filtering.";
 
     wuwe::field<std::string> path_or_query {
-        .default_value = "modules.abc",
-        .description = "ABC file path or query. Use modules.abc for the primary HarmonyOS bytecode file."
+        .default_value = std::string {},
+        .description = "Optional ABC file path or query. Leave empty for ReArk's current primary ABC, or pass a value such as modules.abc when a package has multiple ABC files."
     };
     wuwe::field<std::string> pattern {
         .default_value = std::string {},
@@ -1146,8 +1407,8 @@ struct read_abc_tree {
         "Read the structured ABC class, method, field, code, string, and literal tree from the current ReArk target.";
 
     wuwe::field<std::string> path_or_query {
-        .default_value = "modules.abc",
-        .description = "ABC file path or query."
+        .default_value = std::string {},
+        .description = "Optional ABC file path or query. Leave empty for ReArk's current primary ABC."
     };
     wuwe::field<int> limit {
         .default_value = 80,
@@ -1186,8 +1447,8 @@ struct find_abc_xrefs {
         .description = "String/method text to search, or an offset such as 0x5757."
     };
     wuwe::field<std::string> path_or_query {
-        .default_value = "modules.abc",
-        .description = "ABC file path or query."
+        .default_value = std::string {},
+        .description = "Optional ABC file path or query. Leave empty for ReArk's current primary ABC."
     };
     wuwe::field<std::string> kind {
         .default_value = "any",
@@ -1232,8 +1493,8 @@ struct find_abc_call_argument_flows {
         .description = "String/method text to search, or an offset such as 0x5757."
     };
     wuwe::field<std::string> path_or_query {
-        .default_value = "modules.abc",
-        .description = "ABC file path or query."
+        .default_value = std::string {},
+        .description = "Optional ABC file path or query. Leave empty for ReArk's current primary ABC."
     };
     wuwe::field<std::string> kind {
         .default_value = "any",
@@ -1311,6 +1572,751 @@ struct explain_signature {
     }
 };
 
+struct list_harmony_devices {
+    static constexpr std::string_view description =
+        "List HarmonyOS devices visible through ReArk's bundled hdc executable. This is a fixed ReArk device operation, not a shell.";
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        HdcDeviceBackend backend = agentDeviceBackend();
+        const CommandResult result = CommandRunner::runBlocking(backend.listTargetsRequest());
+        const QList<HdcDeviceTarget> targets = HdcDeviceBackend::parseTargets(result.standardOutput);
+
+        QString extra = QStringLiteral("# hdc: %1\n# target_count: %2").arg(
+            backend.resolvedProgram()).arg(targets.size());
+        for (const HdcDeviceTarget& target : targets) {
+            extra += QStringLiteral("\n- %1 [%2]").arg(target.id, target.state);
+        }
+
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("list_harmony_devices"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct install_current_hap {
+    static constexpr std::string_view description =
+        "Install the currently loaded ReArk package to a HarmonyOS target through hdc. If the active package is an APP container, ReArk installs the resolved inner HAP module. If hdc rejects the HAP because it is unsigned and Harmony signing is configured in Settings, ReArk signs the HAP with the configured local signing material and retries installation automatically. For multi-HAP APP packages, pass module to choose a module from the tool's candidate list.";
+
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id. Leave empty to let hdc use its default target."
+    };
+    wuwe::field<std::string> module {
+        .default_value = std::string {},
+        .description = "Optional module display name, file name, or path when the active APP contains multiple HAP modules."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        if (!context.snapshot || context.snapshot->packagePath.trimmed().isEmpty()) {
+            return { .content = "No active ReArk package is loaded." };
+        }
+
+        HdcDeviceBackend backend = agentDeviceBackend();
+        InstallablePackageSelection selection = InstallablePackageResolver::select(
+            installablePackageCandidates(*context.snapshot),
+            context.snapshot->packagePath,
+            QString::fromStdString(module.value));
+        if (!selection.ok) {
+            return {
+                .content = toStdString(selection.diagnostic),
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        const QString targetId = QString::fromStdString(target_id.value);
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.installRequest(selection.path, targetId));
+        const bool installOk = HdcDeviceBackend::installSucceeded(result);
+        const QString extra = QStringLiteral("# active_package: %1\n# installable_hap: %2\n# source_module: %3\n# hdc: %4").arg(
+            context.snapshot->packagePath,
+            selection.path,
+            selection.displayName,
+            backend.resolvedProgram());
+        const bool missingSignatureFailure = isMissingSignatureInstallFailure(result);
+        const bool packageAppearsUnsigned = signatureSummaryLooksUnsigned(context.snapshot->signatureSummary);
+        if (!installOk && (missingSignatureFailure || packageAppearsUnsigned)) {
+            const HarmonySigningSettings signingSettings = SigningSettingsStore::loadHarmony();
+            const QString validationMessage = SigningSettingsStore::harmonyValidationMessage(signingSettings);
+            if (!validationMessage.isEmpty()) {
+                QString text;
+                text += QStringLiteral("# status: error\n");
+                text += QStringLiteral("# operation: install_current_hap\n");
+                text += extra.trimmed() + QStringLiteral("\n");
+                text += QStringLiteral("# auto_sign: unavailable\n");
+                text += signingSettingsStatusLine(validationMessage) + QStringLiteral("\n\n");
+                text += HdcDeviceBackend::resultSummary(result);
+                text += QStringLiteral("\n\nInstallation failed because the HAP is unsigned. Configure Harmony signing in Settings, then retry install_current_hap.");
+                return {
+                    .content = toStdString(boundedSnapshotText(text, 26000)),
+                    .error_code = std::make_error_code(std::errc::io_error)
+                };
+            }
+
+            const SigningMaterialStatus materialStatus =
+                SigningMaterialInspector::inspectHarmony(signingSettings);
+            const QString packageBundleName =
+                packageBundleNameFromSummary(context.snapshot->packageSummary);
+            if (!packageBundleName.isEmpty()
+                && !materialStatus.profileBundleName.isEmpty()
+                && packageBundleName != materialStatus.profileBundleName) {
+                QString text;
+                text += QStringLiteral("# status: error\n");
+                text += QStringLiteral("# operation: install_current_hap\n");
+                text += extra.trimmed() + QStringLiteral("\n");
+                text += QStringLiteral("# auto_sign: unavailable\n");
+                text += signingSettingsStatusLine(validationMessage) + QStringLiteral("\n");
+                text += QStringLiteral("# package_bundle: %1\n").arg(packageBundleName);
+                text += QStringLiteral("# signing_profile_bundle: %1\n\n").arg(materialStatus.profileBundleName);
+                text += HdcDeviceBackend::resultSummary(result);
+                text += QStringLiteral("\n\nInstallation failed because the configured Harmony profile is bound to a different bundle name. Generate or configure a debug profile for this package, then retry install_current_hap.");
+                return {
+                    .content = toStdString(boundedSnapshotText(text, 26000)),
+                    .error_code = std::make_error_code(std::errc::io_error)
+                };
+            }
+
+            QTemporaryDir signedDir(QDir::temp().filePath(QStringLiteral("ReArk-agent-signed-hap-XXXXXX")));
+            if (!signedDir.isValid()) {
+                QString text;
+                text += QStringLiteral("# status: error\n");
+                text += QStringLiteral("# operation: install_current_hap\n");
+                text += extra.trimmed() + QStringLiteral("\n");
+                text += QStringLiteral("# auto_sign: failed\n");
+                text += QStringLiteral("# error: Could not create temporary signed HAP directory.\n\n");
+                text += HdcDeviceBackend::resultSummary(result);
+                return {
+                    .content = toStdString(boundedSnapshotText(text, 26000)),
+                    .error_code = std::make_error_code(std::errc::io_error)
+                };
+            }
+
+            const QString signedHapPath = signedDir.filePath(agentSignedHapFileName(selection.path));
+            const CommandResult signResult = CommandRunner::runBlocking(HarmonyHapSigner::signCommand({
+                .javaProgram = HarmonyHapSigner::resolvedJavaProgram(),
+                .signToolPath = HarmonyHapSigner::bundledSignToolPath(),
+                .keystorePath = signingSettings.keystorePath,
+                .keystorePassword = signingSettings.keystorePassword,
+                .keyAlias = signingSettings.keyAlias,
+                .keyPassword = signingSettings.keyPassword,
+                .profilePath = signingSettings.profilePath,
+                .certificatePath = signingSettings.certificatePath,
+                .inputHapPath = selection.path,
+                .outputHapPath = signedHapPath,
+                .compatibleVersion = packageCompatibleVersionFromSummary(context.snapshot->packageSummary)
+            }));
+            if (!signResult.succeeded()) {
+                const QString signedExtra = extra
+                    + QStringLiteral("\n# auto_sign: failed")
+                    + QStringLiteral("\n%1").arg(signingSettingsStatusLine(validationMessage))
+                    + QStringLiteral("\n# signed_hap: %1").arg(signedHapPath);
+                return {
+                    .content = installWithAutoSignToolContent(result, signResult, {}, signedExtra),
+                    .error_code = std::make_error_code(std::errc::io_error)
+                };
+            }
+
+            const CommandResult signedInstallResult = CommandRunner::runBlocking(
+                backend.installRequest(signedHapPath, targetId));
+            const bool signedInstallOk = HdcDeviceBackend::installSucceeded(signedInstallResult);
+            if (!signedInstallOk) {
+                signedDir.setAutoRemove(false);
+            }
+            const QString signedExtra = extra
+                + QStringLiteral("\n# auto_sign: used")
+                + QStringLiteral("\n%1").arg(signingSettingsStatusLine(validationMessage))
+                + (signedInstallOk
+                    ? QStringLiteral("\n# signed_hap: temporary")
+                    : QStringLiteral("\n# signed_hap: %1").arg(signedHapPath));
+            return {
+                .content = installWithAutoSignToolContent(result, signResult, signedInstallResult, signedExtra),
+                .error_code = signedInstallOk
+                    ? std::error_code {}
+                    : std::make_error_code(std::errc::io_error)
+            };
+        }
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("install_current_hap"), result, extra, installOk, true),
+            .error_code = installOk
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct start_harmony_app {
+    static constexpr std::string_view description =
+        "Start a HarmonyOS bundle/ability through hdc aa start. Requires explicit bundle name and optional ability name.";
+
+    wuwe::field<std::string> bundle_name {
+        .description = "HarmonyOS bundle name, for example com.example.app."
+    };
+    wuwe::field<std::string> ability_name {
+        .default_value = std::string {},
+        .description = "Optional ability name, for example EntryAbility."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        const QString bundle = QString::fromStdString(bundle_name.value).trimmed();
+        if (bundle.isEmpty()) {
+            return {
+                .content = "bundle_name is required.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        HdcDeviceBackend backend = agentDeviceBackend();
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.startAbilityRequest(
+                bundle,
+                QString::fromStdString(ability_name.value),
+                QString::fromStdString(target_id.value)));
+        const QString extra = QStringLiteral("# bundle: %1\n# ability: %2\n# hdc: %3").arg(
+            bundle,
+            QString::fromStdString(ability_name.value).trimmed(),
+            backend.resolvedProgram());
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("start_harmony_app"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct read_hilog {
+    static constexpr std::string_view description =
+        "Read bounded HarmonyOS hilog output through hdc and optionally filter lines by a substring.";
+
+    wuwe::field<std::string> filter {
+        .default_value = std::string {},
+        .description = "Optional substring filter applied by ReArk after capture."
+    };
+    wuwe::field<int> max_lines {
+        .default_value = 500,
+        .description = "Maximum number of final lines to return."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        HdcDeviceBackend backend = agentDeviceBackend();
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.hilogRequest(QString::fromStdString(target_id.value)));
+        const QString filtered = HdcDeviceBackend::filterHilog(
+            result.standardOutput + result.standardError,
+            QString::fromStdString(filter.value),
+            max_lines.value);
+        QString extra = QStringLiteral("# hdc: %1\n# filter: %2\n# lines_returned: %3")
+            .arg(backend.resolvedProgram())
+            .arg(QString::fromStdString(filter.value))
+            .arg(filtered.isEmpty() ? 0 : filtered.count(QLatin1Char('\n')) + 1);
+        if (!filtered.isEmpty()) {
+            extra += QStringLiteral("\n\n[filtered_hilog]\n%1").arg(filtered);
+        }
+
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("read_hilog"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct capture_device_screenshot {
+    static constexpr std::string_view description =
+        "Capture a HarmonyOS device screenshot through hdc snapshot_display and download it to the local ReArk screenshots folder.";
+
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        HdcDeviceBackend backend = agentDeviceBackend();
+        const QString target = QString::fromStdString(target_id.value);
+        const QString remotePath = QStringLiteral("/data/local/tmp/reark-agent-screenshot.jpeg");
+        const QString localPath = agentScreenshotPath();
+        const CommandResult capture = CommandRunner::runBlocking(
+            backend.screenshotCaptureRequest(remotePath, target));
+        if (!capture.succeeded()) {
+            return {
+                .content = deviceCommandToolContent(QStringLiteral("capture_device_screenshot"), capture),
+                .error_code = std::make_error_code(std::errc::io_error)
+            };
+        }
+
+        const CommandResult receive = CommandRunner::runBlocking(
+            backend.receiveFileRequest(remotePath, localPath, target));
+        (void)CommandRunner::runBlocking(backend.removeRemoteFileRequest(remotePath, target));
+
+        QString text;
+        text += QStringLiteral("# status: %1\n").arg(receive.succeeded() ? QStringLiteral("ok") : QStringLiteral("error"));
+        text += QStringLiteral("# operation: capture_device_screenshot\n");
+        text += QStringLiteral("# local_path: %1\n\n").arg(localPath);
+        text += QStringLiteral("[capture]\n%1\n\n[receive]\n%2").arg(
+            HdcDeviceBackend::resultSummary(capture),
+            HdcDeviceBackend::resultSummary(receive));
+
+        return {
+            .content = toStdString(boundedSnapshotText(text, 24000)),
+            .error_code = receive.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct dump_ui_layout {
+    static constexpr std::string_view description =
+        "Dump the current HarmonyOS UI layout through uitest, parse it into stable node evidence, and optionally filter nodes by structured selector fields.";
+
+    wuwe::field<std::string> query {
+        .default_value = std::string {},
+        .description = "Optional case-insensitive query matched against node text, id, key, type, description, bundle, or ability."
+    };
+    wuwe::field<std::string> text {
+        .default_value = std::string {},
+        .description = "Optional node text/originalText selector."
+    };
+    wuwe::field<std::string> id {
+        .default_value = std::string {},
+        .description = "Optional node id/key selector."
+    };
+    wuwe::field<std::string> type {
+        .default_value = std::string {},
+        .description = "Optional node type selector."
+    };
+    wuwe::field<bool> exact_text {
+        .default_value = false,
+        .description = "Use exact text matching instead of contains."
+    };
+    wuwe::field<bool> exact_id {
+        .default_value = false,
+        .description = "Use exact id/key matching instead of contains."
+    };
+    wuwe::field<bool> exact_type {
+        .default_value = false,
+        .description = "Use exact type matching instead of contains."
+    };
+    wuwe::field<bool> clickable_only {
+        .default_value = false,
+        .description = "Only return clickable nodes."
+    };
+    wuwe::field<bool> enabled_only {
+        .default_value = false,
+        .description = "Only return enabled nodes."
+    };
+    wuwe::field<bool> visible_only {
+        .default_value = false,
+        .description = "Only return visible nodes."
+    };
+    wuwe::field<std::string> bundle_name {
+        .default_value = std::string {},
+        .description = "Optional bundle name used to narrow the target window."
+    };
+    wuwe::field<int> max_nodes {
+        .default_value = 80,
+        .description = "Maximum parsed nodes to include in the textual evidence."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        const AgentUiLayoutEvidence evidence = dumpUiLayoutForAgent(
+            QString::fromStdString(target_id.value),
+            QString::fromStdString(bundle_name.value));
+        QList<UiAutomationNode> nodes = evidence.nodes;
+        const UiNodeSelector selector = makeUiNodeSelector(
+            query.value,
+            text.value,
+            id.value,
+            type.value,
+            exact_text.value,
+            exact_id.value,
+            exact_type.value,
+            clickable_only.value,
+            enabled_only.value,
+            visible_only.value);
+        nodes = UiAutomationBackend::findNodes(nodes, selector, max_nodes.value);
+
+        QString text;
+        text += QStringLiteral("# status: %1\n").arg(evidence.succeeded() ? QStringLiteral("ok") : QStringLiteral("error"));
+        text += QStringLiteral("# operation: dump_ui_layout\n");
+        text += QStringLiteral("# node_count: %1\n").arg(evidence.nodes.size());
+        text += QStringLiteral("# returned_nodes: %1\n").arg(nodes.size());
+        text += QStringLiteral("# local_path: %1\n\n").arg(evidence.localPath);
+        text += QStringLiteral("[dump]\n%1\n\n[receive]\n%2\n\n[nodes]\n%3").arg(
+            HdcDeviceBackend::resultSummary(evidence.dump),
+            HdcDeviceBackend::resultSummary(evidence.receive),
+            UiAutomationBackend::nodesSummary(nodes, max_nodes.value));
+
+        return {
+            .content = toStdString(boundedSnapshotText(text, 24000)),
+            .error_code = evidence.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct tap_ui {
+    static constexpr std::string_view description =
+        "Tap fixed screen coordinates through HarmonyOS uitest uiInput. Prefer tap_ui_text when a stable UI node can be selected.";
+
+    wuwe::field<int> x {
+        .description = "Screen x coordinate."
+    };
+    wuwe::field<int> y {
+        .description = "Screen y coordinate."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        UiAutomationBackend backend = agentUiBackend();
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.tapRequest(x.value, y.value, QString::fromStdString(target_id.value)));
+        const QString extra = QStringLiteral("# x: %1\n# y: %2").arg(x.value).arg(y.value);
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("tap_ui"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct tap_ui_text {
+    static constexpr std::string_view description =
+        "Dump the UI layout, find a node by structured selector, and tap the matched node center. This avoids coordinate guessing.";
+
+    wuwe::field<std::string> query {
+        .default_value = std::string {},
+        .description = "Optional broad query matched against node text, id, key, type, description, bundle, or ability."
+    };
+    wuwe::field<std::string> text {
+        .default_value = std::string {},
+        .description = "Optional node text/originalText selector."
+    };
+    wuwe::field<std::string> id {
+        .default_value = std::string {},
+        .description = "Optional node id/key selector."
+    };
+    wuwe::field<std::string> type {
+        .default_value = std::string {},
+        .description = "Optional node type selector."
+    };
+    wuwe::field<bool> exact_text {
+        .default_value = false,
+        .description = "Use exact text matching instead of contains."
+    };
+    wuwe::field<bool> exact_id {
+        .default_value = false,
+        .description = "Use exact id/key matching instead of contains."
+    };
+    wuwe::field<bool> exact_type {
+        .default_value = false,
+        .description = "Use exact type matching instead of contains."
+    };
+    wuwe::field<bool> clickable_only {
+        .default_value = false,
+        .description = "Only match clickable nodes."
+    };
+    wuwe::field<bool> enabled_only {
+        .default_value = true,
+        .description = "Only match enabled nodes."
+    };
+    wuwe::field<bool> visible_only {
+        .default_value = true,
+        .description = "Only match visible nodes."
+    };
+    wuwe::field<std::string> bundle_name {
+        .default_value = std::string {},
+        .description = "Optional bundle name used to narrow the target window."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        const bool hasSelector = !QString::fromStdString(query.value).trimmed().isEmpty()
+            || !QString::fromStdString(text.value).trimmed().isEmpty()
+            || !QString::fromStdString(id.value).trimmed().isEmpty()
+            || !QString::fromStdString(type.value).trimmed().isEmpty();
+        if (!hasSelector) {
+            return {
+                .content = "At least one selector field is required.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        const QString target = QString::fromStdString(target_id.value);
+        const AgentUiLayoutEvidence evidence = dumpUiLayoutForAgent(
+            target,
+            QString::fromStdString(bundle_name.value));
+        if (!evidence.succeeded()) {
+            QString text;
+            text += QStringLiteral("# status: error\n# operation: tap_ui_text\n\n[dump]\n%1\n\n[receive]\n%2").arg(
+                HdcDeviceBackend::resultSummary(evidence.dump),
+                HdcDeviceBackend::resultSummary(evidence.receive));
+            return {
+                .content = toStdString(boundedSnapshotText(text, 24000)),
+                .error_code = std::make_error_code(std::errc::io_error)
+            };
+        }
+
+        const UiNodeSelector selector = makeUiNodeSelector(
+            query.value,
+            text.value,
+            id.value,
+            type.value,
+            exact_text.value,
+            exact_id.value,
+            exact_type.value,
+            clickable_only.value,
+            enabled_only.value,
+            visible_only.value);
+        QList<UiAutomationNode> matches = UiAutomationBackend::findNodes(evidence.nodes, selector, 25);
+        if (matches.isEmpty()) {
+            QString output;
+            output += QStringLiteral("# status: error\n# operation: tap_ui_text\n# query: %1\n# text: %2\n# id: %3\n# type: %4\n# node_count: %5\n\n[nodes]\n%6")
+                .arg(QString::fromStdString(query.value))
+                .arg(QString::fromStdString(text.value))
+                .arg(QString::fromStdString(id.value))
+                .arg(QString::fromStdString(type.value))
+                .arg(evidence.nodes.size())
+                .arg(UiAutomationBackend::nodesSummary(evidence.nodes, 80));
+            return {
+                .content = toStdString(boundedSnapshotText(output, 24000)),
+                .error_code = std::make_error_code(std::errc::no_such_file_or_directory)
+            };
+        }
+
+        auto selected = std::find_if(matches.cbegin(), matches.cend(), [](const UiAutomationNode& node) {
+            return node.clickable && node.enabled && node.visible;
+        });
+        if (selected == matches.cend()) {
+            selected = matches.cbegin();
+        }
+
+        UiAutomationBackend backend = agentUiBackend();
+        const QPoint point = selected->center();
+        const CommandResult tap = CommandRunner::runBlocking(
+            backend.tapRequest(point.x(), point.y(), target));
+
+        QString output;
+        output += QStringLiteral("# status: %1\n").arg(tap.succeeded() ? QStringLiteral("ok") : QStringLiteral("error"));
+        output += QStringLiteral("# operation: tap_ui_text\n# query: %1\n# text: %2\n# id: %3\n# type: %4\n# selected_node: %5\n# tap: (%6,%7)\n\n")
+            .arg(QString::fromStdString(query.value))
+            .arg(QString::fromStdString(text.value))
+            .arg(QString::fromStdString(id.value))
+            .arg(QString::fromStdString(type.value))
+            .arg(selected->index)
+            .arg(point.x())
+            .arg(point.y());
+        output += QStringLiteral("[matches]\n%1\n\n[tap]\n%2").arg(
+            UiAutomationBackend::nodesSummary(matches, 25),
+            HdcDeviceBackend::resultSummary(tap));
+
+        return {
+            .content = toStdString(boundedSnapshotText(output, 24000)),
+            .error_code = tap.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct input_ui_text {
+    static constexpr std::string_view description =
+        "Input text through HarmonyOS uitest. Use x/y to focus a coordinate first, or omit them to type into the currently focused field.";
+
+    wuwe::field<std::string> text {
+        .description = "Text to input."
+    };
+    wuwe::field<int> x {
+        .default_value = -1,
+        .description = "Optional screen x coordinate. Use -1 to type into the focused field."
+    };
+    wuwe::field<int> y {
+        .default_value = -1,
+        .description = "Optional screen y coordinate. Use -1 to type into the focused field."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        if (text.value.empty()) {
+            return {
+                .content = "text is required.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        UiAutomationBackend backend = agentUiBackend();
+        const QString target = QString::fromStdString(target_id.value);
+        const QString value = QString::fromStdString(text.value);
+        const bool hasPoint = x.value >= 0 && y.value >= 0;
+        const CommandResult result = CommandRunner::runBlocking(
+            hasPoint
+                ? backend.inputTextAtRequest(x.value, y.value, value, target)
+                : backend.inputFocusedTextRequest(value, target));
+        const QString extra = QStringLiteral("# mode: %1\n# x: %2\n# y: %3")
+            .arg(hasPoint ? QStringLiteral("coordinate") : QStringLiteral("focused"))
+            .arg(x.value)
+            .arg(y.value);
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("input_ui_text"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct press_device_key {
+    static constexpr std::string_view description =
+        "Send a fixed HarmonyOS uitest key event such as Back, Home, Power, or a numeric key id.";
+
+    wuwe::field<std::string> key {
+        .description = "Key name or id, for example Back, Home, Power, or 2."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        const QString value = QString::fromStdString(key.value).trimmed();
+        if (value.isEmpty()) {
+            return {
+                .content = "key is required.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        UiAutomationBackend backend = agentUiBackend();
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.keyEventRequest(value, QString::fromStdString(target_id.value)));
+        const QString extra = QStringLiteral("# key: %1").arg(value);
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("press_device_key"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct swipe_device {
+    static constexpr std::string_view description =
+        "Swipe between two screen coordinates through HarmonyOS uitest uiInput.";
+
+    wuwe::field<int> from_x { .description = "Start x coordinate." };
+    wuwe::field<int> from_y { .description = "Start y coordinate." };
+    wuwe::field<int> to_x { .description = "End x coordinate." };
+    wuwe::field<int> to_y { .description = "End y coordinate." };
+    wuwe::field<int> velocity {
+        .default_value = 600,
+        .description = "Swipe velocity from 200 to 40000."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        UiAutomationBackend backend = agentUiBackend();
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.swipeRequest(
+                from_x.value,
+                from_y.value,
+                to_x.value,
+                to_y.value,
+                QString::fromStdString(target_id.value),
+                velocity.value));
+        const QString extra = QStringLiteral("# from: (%1,%2)\n# to: (%3,%4)\n# velocity: %5")
+            .arg(from_x.value)
+            .arg(from_y.value)
+            .arg(to_x.value)
+            .arg(to_y.value)
+            .arg(velocity.value);
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("swipe_device"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
 class ReArkToolProvider {
 public:
     explicit ReArkToolProvider(std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot)
@@ -1328,6 +2334,17 @@ public:
         registerTool<find_abc_call_argument_flows>();
         registerTool<inspect_entry_points>();
         registerTool<explain_signature>();
+        registerTool<list_harmony_devices>();
+        registerTool<install_current_hap>();
+        registerTool<start_harmony_app>();
+        registerTool<read_hilog>();
+        registerTool<capture_device_screenshot>();
+        registerTool<dump_ui_layout>();
+        registerTool<tap_ui>();
+        registerTool<tap_ui_text>();
+        registerTool<input_ui_text>();
+        registerTool<press_device_key>();
+        registerTool<swipe_device>();
     }
 
     std::vector<wuwe::llm_tool> tools() const
@@ -1934,9 +2951,15 @@ void AgentController::ask(const QString& question)
             "but do not keep calling tools after you have enough evidence to answer. "
             "For overview questions such as app purpose, features, entry points, pages, permissions, or architecture, "
             "first use the current snapshot, important files, and entry-point list below, then call only the tools that are truly needed. "
+            "When the user asks to verify on a connected HarmonyOS device, use ReArk's fixed device runtime tools for HDC target listing, current package installation, app launch, bounded hilog capture, screenshots, UI layout dumps, and controlled UI input; "
+            "Do not use run_analysis_script for HDC installation, launch, screenshots, UI input, or other device I/O; it is only for short local Python analysis. "
+            "prefer UI layout selectors over guessed coordinates, and do not claim to have arbitrary shell, hook, breakpoint, packet capture, or dynamic debugging unless a dedicated ReArk tool exists for that action. "
             "If a tool reports that a file is unavailable, unsupported, or not matched, do not retry the same unavailable path repeatedly; "
             "answer from the available evidence and clearly state what could not be read. "
             "Always produce a useful final answer, even if some optional evidence is missing. "
+            "Keep final answers visually calm inside the ReArk chat: avoid oversized report-style headings, avoid long scripted step transcripts, and do not chain multiple Markdown headings on one line. "
+            "When using Markdown headings or tables, put a blank line before and after them; if unsure, prefer short paragraphs or simple bullet lists over headings. "
+            "Do not write demo-style progress sections such as 'Step 1', 'Step 2', etc. in the final answer unless the user explicitly asked for a walkthrough; summarize what happened and what it means. "
             "Match the language of the user's latest question for both intermediate process narration and final answers. "
             "If the user writes in Chinese, answer in Chinese; if the user writes in French, answer in French; "
             "if the user writes in any other language, answer in that language when reasonably possible. "

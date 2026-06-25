@@ -21,6 +21,7 @@ Rectangle {
     signal themeRequested(string theme)
     signal highlightThemeRequested(string theme)
     signal smartAnalysisRequested()
+    signal deviceRuntimeRequested()
     signal systemMenuRequested(point globalPosition)
 
     implicitHeight: 32
@@ -117,6 +118,7 @@ Rectangle {
             onSettingsRequested: root.settingsRequested()
             onThemeRequested: function(theme) { root.themeRequested(theme) }
             onHighlightThemeRequested: function(theme) { root.highlightThemeRequested(theme) }
+            onDeviceRuntimeRequested: root.deviceRuntimeRequested()
         }
 
         Item {

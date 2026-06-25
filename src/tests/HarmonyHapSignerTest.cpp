@@ -85,6 +85,38 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("sign-app argv changed unexpectedly"));
     }
 
+    HarmonyHapPackingRequest packingRequest;
+    packingRequest.javaProgram = QStringLiteral("java");
+    packingRequest.packingToolPath = packingToolPath;
+    packingRequest.unpackedDirectory = QStringLiteral("D:/packages/unpacked");
+    packingRequest.outputHapPath = QStringLiteral("D:/packages/repacked.hap");
+    const CommandRequest packCommand = HarmonyHapSigner::packCommand(packingRequest);
+    const QStringList expectedPack {
+        QStringLiteral("-jar"),
+        QStringLiteral("D:/ReArk/bin/plugin/harmony-tools/lib/app_packing_tool.jar"),
+        QStringLiteral("--mode"),
+        QStringLiteral("hap"),
+        QStringLiteral("--json-path"),
+        QStringLiteral("D:/packages/unpacked/module.json"),
+        QStringLiteral("--ets-path"),
+        QStringLiteral("D:/packages/unpacked/ets"),
+        QStringLiteral("--lib-path"),
+        QStringLiteral("D:/packages/unpacked/libs"),
+        QStringLiteral("--resources-path"),
+        QStringLiteral("D:/packages/unpacked/resources"),
+        QStringLiteral("--pack-info-path"),
+        QStringLiteral("D:/packages/unpacked/pack.info"),
+        QStringLiteral("--index-path"),
+        QStringLiteral("D:/packages/unpacked/resources.index"),
+        QStringLiteral("--out-path"),
+        QStringLiteral("D:/packages/repacked.hap"),
+        QStringLiteral("--force"),
+        QStringLiteral("true")
+    };
+    if (packCommand.program != QStringLiteral("java") || packCommand.arguments != expectedPack) {
+        return fail(QStringLiteral("app packing argv changed unexpectedly"));
+    }
+
     request.keyPassword = QStringLiteral("key-secret");
     const QStringList explicitKeyPasswordArgs = HarmonyHapSigner::signCommand(request).arguments;
     if (!explicitKeyPasswordArgs.contains(QStringLiteral("-keyPwd"))

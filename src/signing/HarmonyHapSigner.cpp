@@ -133,6 +133,46 @@ CommandRequest HarmonyHapSigner::signCommand(const HarmonyHapSigningRequest& req
     };
 }
 
+CommandRequest HarmonyHapSigner::packCommand(const HarmonyHapPackingRequest& request)
+{
+    const QDir root(cleanFilePath(request.unpackedDirectory));
+    QStringList arguments {
+        QStringLiteral("-jar"),
+        cleanFilePath(request.packingToolPath),
+        QStringLiteral("--mode"),
+        QStringLiteral("hap"),
+        QStringLiteral("--json-path"),
+        cleanFilePath(root.filePath(QStringLiteral("module.json"))),
+        QStringLiteral("--ets-path"),
+        cleanFilePath(root.filePath(QStringLiteral("ets"))),
+        QStringLiteral("--lib-path"),
+        cleanFilePath(root.filePath(QStringLiteral("libs"))),
+        QStringLiteral("--resources-path"),
+        cleanFilePath(root.filePath(QStringLiteral("resources"))),
+        QStringLiteral("--pack-info-path"),
+        cleanFilePath(root.filePath(QStringLiteral("pack.info"))),
+        QStringLiteral("--index-path"),
+        cleanFilePath(root.filePath(QStringLiteral("resources.index"))),
+        QStringLiteral("--out-path"),
+        cleanFilePath(request.outputHapPath),
+        QStringLiteral("--force"),
+        QStringLiteral("true")
+    };
+
+    const QString pkgContextPath = cleanFilePath(root.filePath(QStringLiteral("pkgContextInfo.json")));
+    if (QFileInfo::exists(pkgContextPath)) {
+        arguments << QStringLiteral("--pkg-context-path") << pkgContextPath;
+    }
+
+    return {
+        .program = request.javaProgram.trimmed().isEmpty()
+            ? resolvedJavaProgram()
+            : request.javaProgram.trimmed(),
+        .arguments = arguments,
+        .timeoutMs = request.timeoutMs
+    };
+}
+
 QString HarmonyHapSigner::bundledSignToolPath()
 {
     return bundledSignToolPathForApplicationDir(QCoreApplication::applicationDirPath());

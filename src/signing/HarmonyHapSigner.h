@@ -21,8 +21,17 @@ struct HarmonyHapSigningRequest {
     int timeoutMs = 120000;
 };
 
+struct HarmonyHapPackingRequest {
+    QString javaProgram;
+    QString packingToolPath;
+    QString unpackedDirectory;
+    QString outputHapPath;
+    int timeoutMs = 120000;
+};
+
 class HarmonyHapSigner {
 public:
+    [[nodiscard]] static CommandRequest packCommand(const HarmonyHapPackingRequest& request);
     [[nodiscard]] static CommandRequest signCommand(const HarmonyHapSigningRequest& request);
     [[nodiscard]] static QString bundledSignToolPath();
     [[nodiscard]] static QString bundledSignToolPathForApplicationDir(const QString& applicationDir);

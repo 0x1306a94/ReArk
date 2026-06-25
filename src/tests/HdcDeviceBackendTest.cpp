@@ -72,6 +72,7 @@ int main(int argc, char* argv[])
     const CommandRequest startRequest = backend.startAbilityRequest(
         QStringLiteral("com.example.app"),
         QStringLiteral("EntryAbility"),
+        QStringLiteral("entry"),
         QStringLiteral("target-1"));
     if (startRequest.arguments != QStringList({
             QStringLiteral("-t"),
@@ -82,8 +83,32 @@ int main(int argc, char* argv[])
             QStringLiteral("-b"),
             QStringLiteral("com.example.app"),
             QStringLiteral("-a"),
-            QStringLiteral("EntryAbility") })) {
+            QStringLiteral("EntryAbility"),
+            QStringLiteral("-m"),
+            QStringLiteral("entry"),
+            QStringLiteral("-W") })) {
         return fail(QStringLiteral("aa start argv changed unexpectedly"));
+    }
+
+    const CommandRequest missionRequest = backend.missionListRequest(QStringLiteral("target-1"));
+    if (missionRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("aa"),
+            QStringLiteral("dump"),
+            QStringLiteral("-l") })) {
+        return fail(QStringLiteral("aa mission dump argv changed unexpectedly"));
+    }
+
+    const CommandRequest processRequest = backend.processListRequest(QStringLiteral("target-1"));
+    if (processRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("ps"),
+            QStringLiteral("-ef") })) {
+        return fail(QStringLiteral("process list argv changed unexpectedly"));
     }
 
     const CommandRequest screenshotRequest = backend.screenshotCaptureRequest(
@@ -132,6 +157,33 @@ int main(int argc, char* argv[])
         1);
     if (filtered != QStringLiteral("Bridge: done")) {
         return fail(QStringLiteral("hilog filtering should be case-insensitive and keep the newest bounded lines"));
+    }
+
+    const QString startingMissionDump = QStringLiteral(
+        "Mission ID #66  mission name #[#com.example.arks:entry:EntryAbility]\n"
+        "  AbilityRecord ID #7490\n"
+        "    app name [com.example.arks]\n"
+        "    bundle name [com.example.arks]\n"
+        "    state #INITIAL\n"
+        "    app state #BEGIN\n"
+        "    ready #0  window attached #0\n");
+    if (!HdcDeviceBackend::missionDumpHasBundleRecord(startingMissionDump, QStringLiteral("com.example.arks"))) {
+        return fail(QStringLiteral("mission parser should detect bundle records"));
+    }
+    if (HdcDeviceBackend::missionDumpShowsVisibleBundle(startingMissionDump, QStringLiteral("com.example.arks"))) {
+        return fail(QStringLiteral("INITIAL/BEGIN mission records must not be treated as visible launches"));
+    }
+
+    const QString visibleMissionDump = QStringLiteral(
+        "Mission ID #72  mission name #[#com.example.arks:entry:EntryAbility]\n"
+        "  AbilityRecord ID #7500\n"
+        "    app name [com.example.arks]\n"
+        "    bundle name [com.example.arks]\n"
+        "    state #FOREGROUND\n"
+        "    app state #FOREGROUND\n"
+        "    ready #1  window attached #1\n");
+    if (!HdcDeviceBackend::missionDumpShowsVisibleBundle(visibleMissionDump, QStringLiteral("com.example.arks"))) {
+        return fail(QStringLiteral("ready attached mission records should be treated as visible launches"));
     }
 
     CommandResult result;

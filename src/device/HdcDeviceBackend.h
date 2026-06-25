@@ -26,8 +26,15 @@ public:
     [[nodiscard]] CommandRequest startAbilityRequest(
         const QString& bundleName,
         const QString& abilityName,
+        const QString& moduleName,
         const QString& targetId,
         int timeoutMs = 10000) const;
+    [[nodiscard]] CommandRequest missionListRequest(
+        const QString& targetId,
+        int timeoutMs = 5000) const;
+    [[nodiscard]] CommandRequest processListRequest(
+        const QString& targetId,
+        int timeoutMs = 5000) const;
     [[nodiscard]] CommandRequest hilogRequest(
         const QString& targetId,
         int timeoutMs = 10000) const;
@@ -55,6 +62,8 @@ public:
     [[nodiscard]] static QList<HdcDeviceTarget> parseTargets(const QString& output);
     [[nodiscard]] static QVariantList targetsToVariantList(const QList<HdcDeviceTarget>& targets);
     [[nodiscard]] static QString filterHilog(const QString& output, const QString& filter, int maxLines);
+    [[nodiscard]] static bool missionDumpHasBundleRecord(const QString& output, const QString& bundleName);
+    [[nodiscard]] static bool missionDumpShowsVisibleBundle(const QString& output, const QString& bundleName);
     [[nodiscard]] static bool installSucceeded(const CommandResult& result);
     [[nodiscard]] static bool installOutputReportsFailure(const CommandResult& result);
     [[nodiscard]] static QString resultSummary(const CommandResult& result);

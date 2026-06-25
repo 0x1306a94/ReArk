@@ -23,6 +23,7 @@
 #include "controller/PythonRuntimeResolver.h"
 #include "controller/SigningSettings.h"
 #include "device/HdcDeviceBackend.h"
+#include "device/HarmonyPackageRewriter.h"
 #include "device/InstallablePackageResolver.h"
 #include "device/UiAutomationBackend.h"
 #include "model/AgentMessageModel.h"
@@ -982,7 +983,8 @@ bool isMissingSignatureInstallFailure(const CommandResult& result)
         .arg(result.standardOutput, result.standardError, result.errorMessage)
         .toCaseFolded();
     return text.contains(QStringLiteral("no signature file"))
-        || text.contains(QStringLiteral("signature file"))
+        || text.contains(QStringLiteral("missing signature"))
+        || text.contains(QStringLiteral("signature file not found"))
         || text.contains(QStringLiteral("not signed"))
         || text.contains(QStringLiteral("verify signature"))
         || text.contains(QStringLiteral("signature verify"));
@@ -991,11 +993,14 @@ bool isMissingSignatureInstallFailure(const CommandResult& result)
 bool signatureSummaryLooksUnsigned(const QString& summary)
 {
     const QString folded = summary.toCaseFolded();
-    return folded.contains(QStringLiteral("unsigned"))
+    static const QRegularExpression signedFalsePattern(
+        QStringLiteral("(^|\\n)\\s*signed\\s*:\\s*(false|no|0)\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+    return signedFalsePattern.match(summary).hasMatch()
+        || folded.contains(QStringLiteral("status: unsigned"))
+        || folded.contains(QStringLiteral("unsigned"))
         || folded.contains(QStringLiteral("not signed"))
         || folded.contains(QStringLiteral("no signature"))
-        || folded.contains(QStringLiteral("signature file"))
-        || folded.contains(QStringLiteral("签名文件"))
         || folded.contains(QStringLiteral("未签名"));
 }
 
@@ -1014,6 +1019,16 @@ QString agentSignedHapFileName(const QString& sourcePath)
         baseName = QStringLiteral("reark-agent");
     }
     return baseName + QStringLiteral("-signed.hap");
+}
+
+QString agentRewrittenHapFileName(const QString& sourcePath)
+{
+    const QFileInfo info(sourcePath);
+    QString baseName = info.completeBaseName().trimmed();
+    if (baseName.isEmpty()) {
+        baseName = QStringLiteral("reark-agent");
+    }
+    return baseName + QStringLiteral("-rebundle-unsigned.hap");
 }
 
 QString packageBundleNameFromSummary(const QString& summary)
@@ -1054,7 +1069,124 @@ std::string installWithAutoSignToolContent(
     }
     text += QStringLiteral("\n[initial install]\n%1\n").arg(HdcDeviceBackend::resultSummary(initialInstall));
     text += QStringLiteral("\n[sign]\n%1\n").arg(HarmonyHapSigner::resultSummary(signResult));
-    text += QStringLiteral("\n[signed install]\n%1").arg(HdcDeviceBackend::resultSummary(signedInstall));
+    if (signedInstall.started || !signedInstall.program.isEmpty()) {
+        text += QStringLiteral("\n[signed install]\n%1").arg(HdcDeviceBackend::resultSummary(signedInstall));
+    }
+    return toStdString(boundedSnapshotText(text, 30000));
+}
+
+std::string installWithRewriteSignToolContent(
+    const CommandResult& initialInstall,
+    const HarmonyBundleRewriteResult& rewriteResult,
+    const CommandResult& signResult,
+    const CommandResult& signedInstall,
+    const QString& extra)
+{
+    const bool signedInstallOk = HdcDeviceBackend::installSucceeded(signedInstall);
+    QString text;
+    text += QStringLiteral("# status: %1\n").arg(signedInstallOk ? QStringLiteral("ok") : QStringLiteral("error"));
+    text += QStringLiteral("# operation: install_current_hap\n");
+    if (!extra.trimmed().isEmpty()) {
+        text += extra.trimmed() + QStringLiteral("\n");
+    }
+    text += QStringLiteral("\n[initial install]\n%1\n").arg(HdcDeviceBackend::resultSummary(initialInstall));
+    text += QStringLiteral("\n[bundle rewrite]\n");
+    text += QStringLiteral("# status: %1\n").arg(rewriteResult.ok ? QStringLiteral("ok") : QStringLiteral("error"));
+    text += QStringLiteral("# input_hap: %1\n").arg(rewriteResult.inputHapPath);
+    text += QStringLiteral("# output_hap: %1\n").arg(rewriteResult.outputHapPath);
+    if (!rewriteResult.unpackedDirectory.trimmed().isEmpty() && !rewriteResult.ok) {
+        text += QStringLiteral("# unpacked_dir: %1\n").arg(rewriteResult.unpackedDirectory);
+    }
+    if (!rewriteResult.error.trimmed().isEmpty()) {
+        text += QStringLiteral("# error: %1\n").arg(rewriteResult.error.trimmed());
+    }
+    if (!rewriteResult.report.trimmed().isEmpty()) {
+        text += QStringLiteral("\n%1\n").arg(rewriteResult.report.trimmed());
+    }
+    if (rewriteResult.packingResult.started || !rewriteResult.packingResult.program.isEmpty()) {
+        text += QStringLiteral("\n[pack]\n%1\n").arg(HarmonyHapSigner::resultSummary(rewriteResult.packingResult));
+    }
+    text += QStringLiteral("\n[sign]\n%1\n").arg(HarmonyHapSigner::resultSummary(signResult));
+    if (signedInstall.started || !signedInstall.program.isEmpty()) {
+        text += QStringLiteral("\n[signed install]\n%1").arg(HdcDeviceBackend::resultSummary(signedInstall));
+    }
+    return toStdString(boundedSnapshotText(text, 36000));
+}
+
+bool commandOutputContains(const CommandResult& result, const QString& needle)
+{
+    const QString trimmedNeedle = needle.trimmed();
+    if (trimmedNeedle.isEmpty()) {
+        return false;
+    }
+    return (result.standardOutput + QLatin1Char('\n') + result.standardError)
+        .toCaseFolded()
+        .contains(trimmedNeedle.toCaseFolded());
+}
+
+bool startWaitOutputLooksLaunched(const CommandResult& result, const QString& bundleName)
+{
+    if (!result.succeeded()) {
+        return false;
+    }
+
+    const QString output = (result.standardOutput + QLatin1Char('\n') + result.standardError).toCaseFolded();
+    if (output.contains(QStringLiteral("error"))
+        || output.contains(QStringLiteral("failed"))
+        || output.contains(QStringLiteral("not found"))) {
+        return false;
+    }
+
+    const bool hasWaitDetails = output.contains(QStringLiteral("startmode:"))
+        || output.contains(QStringLiteral("totaltime:"))
+        || output.contains(QStringLiteral("thiswaittime:"))
+        || output.contains(QStringLiteral("abilityname:"));
+    if (!hasWaitDetails) {
+        return false;
+    }
+
+    const QString foldedBundle = bundleName.trimmed().toCaseFolded();
+    return foldedBundle.isEmpty() || output.contains(foldedBundle);
+}
+
+std::string startHarmonyAppToolContent(
+    const CommandResult& startResult,
+    const CommandResult& missionResult,
+    const CommandResult& processResult,
+    const QString& bundleName,
+    const QString& extra)
+{
+    const bool commandAccepted = startResult.succeeded();
+    const bool startWaitReportedLaunch = startWaitOutputLooksLaunched(startResult, bundleName);
+    const QString missionOutput = missionResult.standardOutput + QLatin1Char('\n') + missionResult.standardError;
+    const bool hasMissionRecord = HdcDeviceBackend::missionDumpHasBundleRecord(missionOutput, bundleName);
+    const bool hasVisibleMission = HdcDeviceBackend::missionDumpShowsVisibleBundle(missionOutput, bundleName);
+    const bool hasProcess = commandOutputContains(processResult, bundleName);
+    const bool visibleLaunch = commandAccepted && (startWaitReportedLaunch || hasVisibleMission);
+
+    QString text;
+    text += QStringLiteral("# status: %1\n").arg(visibleLaunch ? QStringLiteral("ok") : QStringLiteral("error"));
+    text += QStringLiteral("# operation: start_harmony_app\n");
+    if (!extra.trimmed().isEmpty()) {
+        text += extra.trimmed() + QStringLiteral("\n");
+    }
+    text += QStringLiteral("# command_accepted: %1\n").arg(commandAccepted ? QStringLiteral("true") : QStringLiteral("false"));
+    text += QStringLiteral("# start_wait_reported_launch: %1\n").arg(startWaitReportedLaunch ? QStringLiteral("true") : QStringLiteral("false"));
+    text += QStringLiteral("# mission_record_found: %1\n").arg(hasMissionRecord ? QStringLiteral("true") : QStringLiteral("false"));
+    text += QStringLiteral("# visible_mission_found: %1\n").arg(hasVisibleMission ? QStringLiteral("true") : QStringLiteral("false"));
+    text += QStringLiteral("# process_found: %1\n").arg(hasProcess ? QStringLiteral("true") : QStringLiteral("false"));
+    if (commandAccepted && !visibleLaunch) {
+        text += QStringLiteral("# diagnosis: aa start accepted the request, but ReArk did not observe start -W launch details or a ready attached mission for this bundle.\n");
+        if (hasMissionRecord) {
+            text += QStringLiteral("# note: a mission record exists, but it is not ready and attached, so it is not treated as proof that the UI opened.\n");
+        }
+        if (hasProcess) {
+            text += QStringLiteral("# note: a process is present, but that alone is not treated as proof that the UI opened.\n");
+        }
+    }
+    text += QStringLiteral("\n[start]\n%1\n").arg(HdcDeviceBackend::resultSummary(startResult));
+    text += QStringLiteral("\n[missions]\n%1\n").arg(HdcDeviceBackend::resultSummary(missionResult));
+    text += QStringLiteral("\n[processes]\n%1").arg(HdcDeviceBackend::resultSummary(processResult));
     return toStdString(boundedSnapshotText(text, 30000));
 }
 
@@ -1668,24 +1800,6 @@ struct install_current_hap {
                 SigningMaterialInspector::inspectHarmony(signingSettings);
             const QString packageBundleName =
                 packageBundleNameFromSummary(context.snapshot->packageSummary);
-            if (!packageBundleName.isEmpty()
-                && !materialStatus.profileBundleName.isEmpty()
-                && packageBundleName != materialStatus.profileBundleName) {
-                QString text;
-                text += QStringLiteral("# status: error\n");
-                text += QStringLiteral("# operation: install_current_hap\n");
-                text += extra.trimmed() + QStringLiteral("\n");
-                text += QStringLiteral("# auto_sign: unavailable\n");
-                text += signingSettingsStatusLine(validationMessage) + QStringLiteral("\n");
-                text += QStringLiteral("# package_bundle: %1\n").arg(packageBundleName);
-                text += QStringLiteral("# signing_profile_bundle: %1\n\n").arg(materialStatus.profileBundleName);
-                text += HdcDeviceBackend::resultSummary(result);
-                text += QStringLiteral("\n\nInstallation failed because the configured Harmony profile is bound to a different bundle name. Generate or configure a debug profile for this package, then retry install_current_hap.");
-                return {
-                    .content = toStdString(boundedSnapshotText(text, 26000)),
-                    .error_code = std::make_error_code(std::errc::io_error)
-                };
-            }
 
             QTemporaryDir signedDir(QDir::temp().filePath(QStringLiteral("ReArk-agent-signed-hap-XXXXXX")));
             if (!signedDir.isValid()) {
@@ -1702,7 +1816,55 @@ struct install_current_hap {
                 };
             }
 
-            const QString signedHapPath = signedDir.filePath(agentSignedHapFileName(selection.path));
+            QString signInputHapPath = selection.path;
+            HarmonyBundleRewriteResult rewriteResult;
+            bool bundleRewriteUsed = false;
+            if (!packageBundleName.isEmpty()
+                && !materialStatus.profileBundleName.isEmpty()
+                && packageBundleName != materialStatus.profileBundleName) {
+                bundleRewriteUsed = true;
+                const QString rewrittenHapPath =
+                    signedDir.filePath(agentRewrittenHapFileName(selection.path));
+                rewriteResult = HarmonyPackageRewriter::rewriteBundleIdentity({
+                    .inputHapPath = selection.path,
+                    .outputHapPath = rewrittenHapPath,
+                    .oldBundleName = packageBundleName,
+                    .newBundleName = materialStatus.profileBundleName,
+                    .javaProgram = HarmonyHapSigner::resolvedJavaProgram(),
+                    .packingToolPath = HarmonyHapSigner::bundledPackingToolPath()
+                });
+                if (!rewriteResult.ok) {
+                    signedDir.setAutoRemove(false);
+                    QString text;
+                    text += QStringLiteral("# status: error\n");
+                    text += QStringLiteral("# operation: install_current_hap\n");
+                    text += extra.trimmed() + QStringLiteral("\n");
+                    text += QStringLiteral("# auto_sign: blocked\n");
+                    text += QStringLiteral("# bundle_rewrite: failed\n");
+                    text += signingSettingsStatusLine(validationMessage) + QStringLiteral("\n");
+                    text += QStringLiteral("# package_bundle: %1\n").arg(packageBundleName);
+                    text += QStringLiteral("# signing_profile_bundle: %1\n").arg(materialStatus.profileBundleName);
+                    text += QStringLiteral("# rewritten_hap: %1\n\n").arg(rewrittenHapPath);
+                    text += HdcDeviceBackend::resultSummary(result);
+                    text += QStringLiteral("\n\n[bundle rewrite]\n");
+                    text += QStringLiteral("# status: error\n# error: %1\n").arg(rewriteResult.error.trimmed());
+                    if (!rewriteResult.report.trimmed().isEmpty()) {
+                        text += QStringLiteral("\n%1\n").arg(rewriteResult.report.trimmed());
+                    }
+                    if (rewriteResult.packingResult.started || !rewriteResult.packingResult.program.isEmpty()) {
+                        text += QStringLiteral("\n[pack]\n%1\n").arg(
+                            HarmonyHapSigner::resultSummary(rewriteResult.packingResult));
+                    }
+                    text += QStringLiteral("\nInstallation failed because ReArk could not rewrite the HAP bundle identity to match the configured Harmony profile.");
+                    return {
+                        .content = toStdString(boundedSnapshotText(text, 32000)),
+                        .error_code = std::make_error_code(std::errc::io_error)
+                    };
+                }
+                signInputHapPath = rewrittenHapPath;
+            }
+
+            const QString signedHapPath = signedDir.filePath(agentSignedHapFileName(signInputHapPath));
             const CommandResult signResult = CommandRunner::runBlocking(HarmonyHapSigner::signCommand({
                 .javaProgram = HarmonyHapSigner::resolvedJavaProgram(),
                 .signToolPath = HarmonyHapSigner::bundledSignToolPath(),
@@ -1712,17 +1874,25 @@ struct install_current_hap {
                 .keyPassword = signingSettings.keyPassword,
                 .profilePath = signingSettings.profilePath,
                 .certificatePath = signingSettings.certificatePath,
-                .inputHapPath = selection.path,
+                .inputHapPath = signInputHapPath,
                 .outputHapPath = signedHapPath,
                 .compatibleVersion = packageCompatibleVersionFromSummary(context.snapshot->packageSummary)
             }));
             if (!signResult.succeeded()) {
+                signedDir.setAutoRemove(false);
                 const QString signedExtra = extra
                     + QStringLiteral("\n# auto_sign: failed")
+                    + QStringLiteral("\n# bundle_rewrite: %1").arg(bundleRewriteUsed ? QStringLiteral("used") : QStringLiteral("not_needed"))
+                    + (bundleRewriteUsed
+                        ? QStringLiteral("\n# package_bundle: %1\n# signing_profile_bundle: %2\n# rewritten_hap: %3")
+                            .arg(packageBundleName, materialStatus.profileBundleName, signInputHapPath)
+                        : QString())
                     + QStringLiteral("\n%1").arg(signingSettingsStatusLine(validationMessage))
                     + QStringLiteral("\n# signed_hap: %1").arg(signedHapPath);
                 return {
-                    .content = installWithAutoSignToolContent(result, signResult, {}, signedExtra),
+                    .content = bundleRewriteUsed
+                        ? installWithRewriteSignToolContent(result, rewriteResult, signResult, {}, signedExtra)
+                        : installWithAutoSignToolContent(result, signResult, {}, signedExtra),
                     .error_code = std::make_error_code(std::errc::io_error)
                 };
             }
@@ -1735,12 +1905,19 @@ struct install_current_hap {
             }
             const QString signedExtra = extra
                 + QStringLiteral("\n# auto_sign: used")
+                + QStringLiteral("\n# bundle_rewrite: %1").arg(bundleRewriteUsed ? QStringLiteral("used") : QStringLiteral("not_needed"))
+                + (bundleRewriteUsed
+                    ? QStringLiteral("\n# package_bundle: %1\n# signing_profile_bundle: %2\n# installed_bundle: %2")
+                        .arg(packageBundleName, materialStatus.profileBundleName)
+                    : QString())
                 + QStringLiteral("\n%1").arg(signingSettingsStatusLine(validationMessage))
                 + (signedInstallOk
                     ? QStringLiteral("\n# signed_hap: temporary")
                     : QStringLiteral("\n# signed_hap: %1").arg(signedHapPath));
             return {
-                .content = installWithAutoSignToolContent(result, signResult, signedInstallResult, signedExtra),
+                .content = bundleRewriteUsed
+                    ? installWithRewriteSignToolContent(result, rewriteResult, signResult, signedInstallResult, signedExtra)
+                    : installWithAutoSignToolContent(result, signResult, signedInstallResult, signedExtra),
                 .error_code = signedInstallOk
                     ? std::error_code {}
                     : std::make_error_code(std::errc::io_error)
@@ -1766,6 +1943,10 @@ struct start_harmony_app {
         .default_value = std::string {},
         .description = "Optional ability name, for example EntryAbility."
     };
+    wuwe::field<std::string> module_name {
+        .default_value = "entry",
+        .description = "Optional module name. Defaults to entry for standard entry HAP modules."
+    };
     wuwe::field<std::string> target_id {
         .default_value = std::string {},
         .description = "Optional hdc target id."
@@ -1785,18 +1966,31 @@ struct start_harmony_app {
         }
 
         HdcDeviceBackend backend = agentDeviceBackend();
+        const QString target = QString::fromStdString(target_id.value);
+        const QString ability = QString::fromStdString(ability_name.value).trimmed();
+        const QString module = QString::fromStdString(module_name.value).trimmed();
         const CommandResult result = CommandRunner::runBlocking(
             backend.startAbilityRequest(
                 bundle,
-                QString::fromStdString(ability_name.value),
-                QString::fromStdString(target_id.value)));
-        const QString extra = QStringLiteral("# bundle: %1\n# ability: %2\n# hdc: %3").arg(
+                ability,
+                module,
+                target));
+        const CommandResult missionResult = CommandRunner::runBlocking(
+            backend.missionListRequest(target));
+        const CommandResult processResult = CommandRunner::runBlocking(
+            backend.processListRequest(target));
+        const QString missionOutput = missionResult.standardOutput + QLatin1Char('\n') + missionResult.standardError;
+        const bool visibleLaunch = result.succeeded()
+            && (startWaitOutputLooksLaunched(result, bundle)
+                || HdcDeviceBackend::missionDumpShowsVisibleBundle(missionOutput, bundle));
+        const QString extra = QStringLiteral("# bundle: %1\n# ability: %2\n# module: %3\n# hdc: %4").arg(
             bundle,
-            QString::fromStdString(ability_name.value).trimmed(),
+            ability,
+            module,
             backend.resolvedProgram());
         return {
-            .content = deviceCommandToolContent(QStringLiteral("start_harmony_app"), result, extra),
-            .error_code = result.succeeded()
+            .content = startHarmonyAppToolContent(result, missionResult, processResult, bundle, extra),
+            .error_code = visibleLaunch
                 ? std::error_code {}
                 : std::make_error_code(std::errc::io_error)
         };

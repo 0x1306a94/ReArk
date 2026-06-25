@@ -180,10 +180,10 @@ void DeviceRuntimeController::startAbility(const QString& bundleName, const QStr
 
     runOperation(
         tr("Start ability"),
-        backend_.startAbilityRequest(bundle, abilityName, currentTargetId()),
+        backend_.startAbilityRequest(bundle, abilityName, QStringLiteral("entry"), currentTargetId()),
         [this](const CommandResult& result) {
             if (result.succeeded()) {
-                setStatus(tr("Start command completed."));
+                setStatus(tr("Start command accepted."));
             }
         });
 }

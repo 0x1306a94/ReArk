@@ -10,6 +10,8 @@ add_library(reark_core STATIC
     core/CommandRunner.h
     device/HdcDeviceBackend.cpp
     device/HdcDeviceBackend.h
+    device/HarmonyPackageRewriter.cpp
+    device/HarmonyPackageRewriter.h
     device/InstallablePackageResolver.cpp
     device/InstallablePackageResolver.h
     device/UiAutomationBackend.cpp
@@ -429,6 +431,7 @@ set(REARK_ABC_EVIDENCE_SAMPLE "${CMAKE_SOURCE_DIR}/samples/Bridge.hap")
 if(NOT EXISTS "${REARK_ABC_EVIDENCE_SAMPLE}")
     set(REARK_ABC_EVIDENCE_SAMPLE "${CMAKE_SOURCE_DIR}/samples/遥遥领先.hap")
 endif()
+set(REARK_HARMONY_PACKING_TOOL "${CMAKE_SOURCE_DIR}/plugin/harmony-tools/lib/app_packing_tool.jar")
 
 if(BUILD_TESTING AND EXISTS "${REARK_ABC_EVIDENCE_SAMPLE}")
     qt_add_executable(reark_hyle_abc_evidence_test
@@ -515,4 +518,28 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reark_harmony_hap_signer_test
         COMMAND reark_harmony_hap_signer_test)
+
+    qt_add_executable(reark_harmony_package_rewriter_test
+        tests/HarmonyPackageRewriterTest.cpp
+    )
+    target_include_directories(reark_harmony_package_rewriter_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_harmony_package_rewriter_test PRIVATE
+        reark_core
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_harmony_package_rewriter_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_harmony_package_rewriter_test>
+                $<TARGET_FILE_DIR:reark_harmony_package_rewriter_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    if(EXISTS "${REARK_ABC_EVIDENCE_SAMPLE}" AND EXISTS "${REARK_HARMONY_PACKING_TOOL}")
+        add_test(NAME reark_harmony_package_rewriter_test
+            COMMAND reark_harmony_package_rewriter_test
+                "${REARK_ABC_EVIDENCE_SAMPLE}"
+                "${REARK_HARMONY_PACKING_TOOL}")
+    endif()
 endif()

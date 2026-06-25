@@ -51,6 +51,20 @@ QString commandOutputText(const CommandResult& result)
         .arg(result.standardOutput, result.standardError, result.errorMessage);
 }
 
+QStringList missionRecordBlocks(const QString& output)
+{
+    return output
+        .toCaseFolded()
+        .split(QRegularExpression(QStringLiteral("(?=abilityrecord\\s+id\\s+#)")), Qt::SkipEmptyParts);
+}
+
+bool missionBlockContainsBundle(const QString& block, const QString& foldedBundle)
+{
+    return block.contains(QStringLiteral("bundle name [%1]").arg(foldedBundle))
+        || block.contains(QStringLiteral("app name [%1]").arg(foldedBundle))
+        || block.contains(QStringLiteral("#%1:").arg(foldedBundle));
+}
+
 } // namespace
 
 QVariantMap HdcDeviceTarget::toVariantMap() const
@@ -96,6 +110,7 @@ CommandRequest HdcDeviceBackend::installRequest(
 CommandRequest HdcDeviceBackend::startAbilityRequest(
     const QString& bundleName,
     const QString& abilityName,
+    const QString& moduleName,
     const QString& targetId,
     int timeoutMs) const
 {
@@ -108,6 +123,37 @@ CommandRequest HdcDeviceBackend::startAbilityRequest(
     if (!abilityName.trimmed().isEmpty()) {
         arguments << QStringLiteral("-a") << abilityName.trimmed();
     }
+    if (!moduleName.trimmed().isEmpty()) {
+        arguments << QStringLiteral("-m") << moduleName.trimmed();
+    }
+    arguments << QStringLiteral("-W");
+    return {
+        .program = resolvedProgram(),
+        .arguments = arguments,
+        .timeoutMs = timeoutMs
+    };
+}
+
+CommandRequest HdcDeviceBackend::missionListRequest(const QString& targetId, int timeoutMs) const
+{
+    QStringList arguments = targetArguments(targetId);
+    arguments << QStringLiteral("shell")
+              << QStringLiteral("aa")
+              << QStringLiteral("dump")
+              << QStringLiteral("-l");
+    return {
+        .program = resolvedProgram(),
+        .arguments = arguments,
+        .timeoutMs = timeoutMs
+    };
+}
+
+CommandRequest HdcDeviceBackend::processListRequest(const QString& targetId, int timeoutMs) const
+{
+    QStringList arguments = targetArguments(targetId);
+    arguments << QStringLiteral("shell")
+              << QStringLiteral("ps")
+              << QStringLiteral("-ef");
     return {
         .program = resolvedProgram(),
         .arguments = arguments,
@@ -262,6 +308,42 @@ QString HdcDeviceBackend::filterHilog(const QString& output, const QString& filt
         lines = lines.mid(lines.size() - boundedMaxLines);
     }
     return lines.join(QLatin1Char('\n'));
+}
+
+bool HdcDeviceBackend::missionDumpHasBundleRecord(const QString& output, const QString& bundleName)
+{
+    const QString foldedBundle = bundleName.trimmed().toCaseFolded();
+    if (foldedBundle.isEmpty()) {
+        return false;
+    }
+
+    const QString foldedOutput = output.toCaseFolded();
+    return foldedOutput.contains(QStringLiteral("bundle name [%1]").arg(foldedBundle))
+        || foldedOutput.contains(QStringLiteral("app name [%1]").arg(foldedBundle))
+        || foldedOutput.contains(QStringLiteral("#%1:").arg(foldedBundle));
+}
+
+bool HdcDeviceBackend::missionDumpShowsVisibleBundle(const QString& output, const QString& bundleName)
+{
+    const QString foldedBundle = bundleName.trimmed().toCaseFolded();
+    if (foldedBundle.isEmpty()) {
+        return false;
+    }
+
+    for (const QString& block : missionRecordBlocks(output)) {
+        if (!missionBlockContainsBundle(block, foldedBundle)) {
+            continue;
+        }
+
+        const bool ready = block.contains(QStringLiteral("ready #1"));
+        const bool windowAttached = block.contains(QStringLiteral("window attached #1"));
+        const bool stillStarting = block.contains(QStringLiteral("state #initial"))
+            || block.contains(QStringLiteral("app state #begin"));
+        if (ready && windowAttached && !stillStarting) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool HdcDeviceBackend::installSucceeded(const CommandResult& result)

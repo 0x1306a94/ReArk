@@ -311,11 +311,15 @@ Rectangle {
                                             echoMode: root.showApiKey ? TextInput.Normal : TextInput.Password
                                         }
 
-                                        SettingsCheckBox {
+                                        SettingsIconButton {
                                             id: showApiKeyBox
-                                            text: qsTr("Show")
+                                            iconName: root.showApiKey ? "eye-off" : "eye"
+                                            toolTipText: root.showApiKey
+                                                         ? qsTr("Hide password")
+                                                         : qsTr("Show password")
+                                            checkable: true
                                             checked: root.showApiKey
-                                            onToggled: root.showApiKey = checked
+                                            onClicked: root.showApiKey = checked
                                         }
                                     }
                                 }
@@ -511,11 +515,15 @@ Rectangle {
                                         echoMode: root.showEmbeddingApiKey ? TextInput.Normal : TextInput.Password
                                     }
 
-                                    SettingsCheckBox {
+                                    SettingsIconButton {
                                         id: showEmbeddingApiKeyBox
-                                        text: qsTr("Show")
+                                        iconName: root.showEmbeddingApiKey ? "eye-off" : "eye"
+                                        toolTipText: root.showEmbeddingApiKey
+                                                     ? qsTr("Hide password")
+                                                     : qsTr("Show password")
+                                        checkable: true
                                         checked: root.showEmbeddingApiKey
-                                        onToggled: root.showEmbeddingApiKey = checked
+                                        onClicked: root.showEmbeddingApiKey = checked
                                     }
                                 }
                             }

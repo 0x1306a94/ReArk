@@ -8,8 +8,27 @@
 #include <QElapsedTimer>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+
+enum class DeviceInstallStatus {
+    None,
+    Installed,
+    SignedInstalled,
+    SignedRewrittenInstalled,
+    RequiresSigning
+};
+
+enum class DeviceInstallError {
+    None,
+    InstallFailed,
+    UnsignedWithoutSigning,
+    TemporaryDirectoryFailed,
+    BundleRewriteFailed,
+    SigningFailed,
+    SignedInstallFailed
+};
 
 class DeviceRuntimeController : public QObject {
     Q_OBJECT
@@ -22,6 +41,9 @@ class DeviceRuntimeController : public QObject {
     Q_PROPERTY(QString commandLog READ commandLog NOTIFY commandLogChanged)
     Q_PROPERTY(QString hilogText READ hilogText NOTIFY hilogTextChanged)
     Q_PROPERTY(QString screenshotPath READ screenshotPath NOTIFY screenshotPathChanged)
+    Q_PROPERTY(QString launchBundleName READ launchBundleName NOTIFY launchMetadataChanged)
+    Q_PROPERTY(QString launchModuleName READ launchModuleName NOTIFY launchMetadataChanged)
+    Q_PROPERTY(QString launchAbilityName READ launchAbilityName NOTIFY launchMetadataChanged)
     Q_PROPERTY(QVariantList uiNodes READ uiNodes NOTIFY uiNodesChanged)
     Q_PROPERTY(QVariantList filteredUiNodes READ filteredUiNodes NOTIFY uiNodesChanged)
     Q_PROPERTY(QString uiNodeSummary READ uiNodeSummary NOTIFY uiNodesChanged)
@@ -33,6 +55,7 @@ class DeviceRuntimeController : public QObject {
 
 public:
     explicit DeviceRuntimeController(QObject* parent = nullptr);
+    ~DeviceRuntimeController() override;
 
     [[nodiscard]] QVariantList devices() const;
     [[nodiscard]] QString selectedDeviceId() const;
@@ -45,6 +68,9 @@ public:
     [[nodiscard]] QString commandLog() const;
     [[nodiscard]] QString hilogText() const;
     [[nodiscard]] QString screenshotPath() const;
+    [[nodiscard]] QString launchBundleName() const;
+    [[nodiscard]] QString launchModuleName() const;
+    [[nodiscard]] QString launchAbilityName() const;
     [[nodiscard]] QVariantList uiNodes() const;
     [[nodiscard]] QVariantList filteredUiNodes() const;
     [[nodiscard]] QString uiNodeSummary() const;
@@ -56,9 +82,12 @@ public:
     [[nodiscard]] double screenRefreshFps() const;
 
     Q_INVOKABLE void refreshDevices();
+    Q_INVOKABLE void refreshLaunchMetadata(const QString& packagePath);
     Q_INVOKABLE void installPackage(const QString& packagePath);
+    Q_INVOKABLE void approveResignInstall();
+    Q_INVOKABLE void rejectResignInstall();
     Q_INVOKABLE void startAbility(const QString& bundleName, const QString& abilityName);
-    Q_INVOKABLE void readHilog(const QString& filter = QString(), int maxLines = 500);
+    Q_INVOKABLE void readHilog(const QString& filter = QString(), const QString& level = QString(), int maxLines = 500);
     Q_INVOKABLE void captureScreenshot();
     Q_INVOKABLE void captureUiSnapshot(const QString& bundleName = QString());
     Q_INVOKABLE void refreshUiLayout(const QString& bundleName = QString());
@@ -82,11 +111,13 @@ signals:
     void commandLogChanged();
     void hilogTextChanged();
     void screenshotPathChanged();
+    void launchMetadataChanged();
     void uiNodesChanged();
     void uiNodeFilterChanged();
     void screenRefreshStateChanged();
     void screenRefreshStatusChanged();
     void screenRefreshFrameChanged();
+    void resignInstallConfirmationRequested(const QString& title, const QString& message);
 
 private:
     enum class ScreenshotRequestKind {
@@ -108,9 +139,18 @@ private:
     void setDevices(const QList<HdcDeviceTarget>& targets);
     void setUiNodes(const QList<UiAutomationNode>& nodes);
     void refreshFilteredUiNodes();
+    void clearDeviceSessionState();
+    [[nodiscard]] bool ensureDeviceAvailable();
+    [[nodiscard]] QString translatedInstallStatus(DeviceInstallStatus status) const;
+    [[nodiscard]] QString translatedInstallError(DeviceInstallError error) const;
+    [[nodiscard]] QString translatedDeviceState(const QString& state) const;
     [[nodiscard]] QString currentTargetId() const;
     [[nodiscard]] QString makeLocalScreenshotPath() const;
     [[nodiscard]] QString makeLocalLayoutPath() const;
+    void rememberTemporaryLocalFile(const QString& path);
+    void cleanupTemporaryLocalFiles(const QString& keepPath = {});
+    void cleanupStaleTemporaryLocalFiles() const;
+    void setLaunchMetadata(const QString& bundleName, const QString& moduleName, const QString& abilityName);
 
     CommandRunner runner_;
     HdcDeviceBackend backend_;
@@ -128,13 +168,23 @@ private:
     QString commandLog_;
     QString hilogText_;
     QString screenshotPath_;
+    QString launchBundleName_;
+    QString launchModuleName_;
+    QString launchAbilityName_;
+    QString launchMetadataPackagePath_;
+    QStringList temporaryLocalFiles_;
+    QString pendingSigningPackagePath_;
+    QString pendingSigningTargetId_;
+    CommandResult pendingSigningInitialInstall_;
     QString uiNodeSummary_;
     QString uiNodeFilter_;
     QString screenRefreshStatus_;
     int screenRefreshFrameCount_ = 0;
     double screenRefreshFps_ = 0.0;
     int activeCommandId_ = 0;
+    int launchMetadataRequestId_ = 0;
     bool busy_ = false;
+    bool hasPendingSigningInstall_ = false;
 };
 
 #endif // REARK_DEVICE_RUNTIME_CONTROLLER_H

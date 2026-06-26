@@ -146,6 +146,7 @@ qt_add_resources(${PROJECT_NAME} "icons"
         "${CMAKE_SOURCE_DIR}/resources/icons/close-small.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/eye.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/eye-off.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/arrow-left.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/arrow-up.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/check.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/copy.svg"
@@ -530,6 +531,40 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reark_ui_automation_backend_test
         COMMAND reark_ui_automation_backend_test)
+
+    qt_add_executable(reark_device_runtime_controller_test
+        tests/DeviceRuntimeControllerTest.cpp
+        controller/DeviceRuntimeController.cpp
+        controller/DeviceRuntimeController.h
+        controller/ProtectedSettingsSecret.cpp
+        controller/ProtectedSettingsSecret.h
+        controller/SigningSettings.cpp
+        controller/SigningSettings.h
+    )
+    target_include_directories(reark_device_runtime_controller_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_device_runtime_controller_test PRIVATE
+        reark_core
+        Qt6::Concurrent
+    )
+    if(WIN32)
+        target_link_libraries(reark_device_runtime_controller_test PRIVATE Crypt32)
+    endif()
+    if(WIN32)
+        add_custom_command(TARGET reark_device_runtime_controller_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_device_runtime_controller_test>
+                $<TARGET_FILE_DIR:reark_device_runtime_controller_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    if(EXISTS "${REARK_ABC_EVIDENCE_SAMPLE}" AND EXISTS "${REARK_HARMONY_PACKING_TOOL}")
+        add_test(NAME reark_device_runtime_controller_test
+            COMMAND reark_device_runtime_controller_test
+                "${REARK_ABC_EVIDENCE_SAMPLE}"
+                "${REARK_HARMONY_PACKING_TOOL}")
+    endif()
 
     qt_add_executable(reark_harmony_hap_signer_test
         tests/HarmonyHapSignerTest.cpp

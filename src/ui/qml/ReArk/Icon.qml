@@ -19,6 +19,9 @@ Item {
         if (name === "arrow-up") {
             return "qrc:/icons/fontawesome/arrow-up.svg"
         }
+        if (name === "arrow-left") {
+            return "qrc:/icons/fontawesome/arrow-left.svg"
+        }
         if (name === "close") {
             return "qrc:/icons/close-small.svg"
         }

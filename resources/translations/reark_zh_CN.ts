@@ -288,6 +288,11 @@
         <translation>帮助</translation>
     </message>
     <message>
+        <location filename="../../src/ui/qml/ReArk/AppMenuBar.qml" line="198"/>
+        <source>Device</source>
+        <translation>设备</translation>
+    </message>
+    <message>
         <location filename="../../src/ui/qml/ReArk/AppMenuBar.qml" line="222"/>
         <source>New Window</source>
         <translation>新窗口</translation>
@@ -388,6 +393,11 @@
         <location filename="../../src/ui/qml/ReArk/AppMenuBar.qml" line="573"/>
         <source>User Guide</source>
         <translation>使用教程</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/AppMenuBar.qml" line="609"/>
+        <source>Device Runtime</source>
+        <translation>设备运行时</translation>
     </message>
     <message>
         <location filename="../../src/ui/qml/ReArk/AppMenuBar.qml" line="578"/>
@@ -667,6 +677,617 @@
         <location filename="../../src/controller/DecompilerController.cpp" line="327"/>
         <source>Failed to reveal package file: %1</source>
         <translation>无法在文件管理器中显示包文件: %1</translation>
+    </message>
+</context>
+<context>
+    <name>DeviceRuntimeController</name>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="491"/>
+        <source>Ready</source>
+        <translation>就绪</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="494"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1162"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1167"/>
+        <source>Screen refresh stopped.</source>
+        <translation>屏幕刷新已停止。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="632"/>
+        <source>Refresh devices</source>
+        <translation>刷新设备</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="639"/>
+        <source>No HDC targets found.</source>
+        <translation>未找到 HDC 设备。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="639"/>
+        <source>No device is connected.</source>
+        <translation>未连接设备。</translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="640"/>
+        <source>Found %n HDC target(s).</source>
+        <translation>
+            <numerusform>找到 %n 台 HDC 设备。</numerusform>
+        </translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="677"/>
+        <source>No package is loaded.</source>
+        <translation>尚未加载包。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="681"/>
+        <source>Package does not exist: %1</source>
+        <translation>包不存在：%1</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="685"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="743"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="869"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="937"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1024"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1212"/>
+        <source>Another device operation is still running.</source>
+        <translation>另一个设备操作仍在运行。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="692"/>
+        <source>Install package</source>
+        <translation>安装包</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="709"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="777"/>
+        <source>Package installed.</source>
+        <translation>包已安装。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="709"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="777"/>
+        <source>Package signed, rewritten, and installed.</source>
+        <translation>包已重写、签名并安装。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="709"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="777"/>
+        <source>Package signed and installed.</source>
+        <translation>包已签名并安装。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="709"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="777"/>
+        <source>Install requires package signing.</source>
+        <translation>安装需要包签名。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="716"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="779"/>
+        <source>Install package failed.</source>
+        <translation>安装包失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="716"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="779"/>
+        <source>Install failed because the package is unsigned. Configure Harmony signing in Settings.</source>
+        <translation>安装失败：包未签名。请先在设置中配置 Harmony 签名。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="716"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="779"/>
+        <source>Could not create temporary signed HAP directory.</source>
+        <translation>无法创建临时签名 HAP 目录。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="716"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="779"/>
+        <source>Install failed because bundle identity rewrite failed.</source>
+        <translation>安装失败：Bundle 标识重写失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="716"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="779"/>
+        <source>Install failed because signing failed.</source>
+        <translation>安装失败：签名失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="716"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="779"/>
+        <source>Signed package install failed.</source>
+        <translation>已签名包安装失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="725"/>
+        <source>Install requires signing confirmation.</source>
+        <translation>安装需要确认重签名。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="728"/>
+        <source>Re-sign and install package?</source>
+        <translation>要重签名并安装包吗？</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="729"/>
+        <source>The device rejected this package because its signature is missing or invalid. ReArk can use your configured Harmony signing material to re-sign the package and install the signed copy.</source>
+        <translation>设备拒绝了此包，因为签名缺失或无效。ReArk 可以使用已配置的 Harmony 签名材料重签名该包，并安装签名后的副本。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="739"/>
+        <source>No package is waiting for signing approval.</source>
+        <translation>没有等待签名确认的包。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="754"/>
+        <source>Re-sign and install package</source>
+        <translation>重签名并安装包</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="804"/>
+        <source>Install cancelled. Package signing was not approved.</source>
+        <translation>安装已取消。未批准包重签名。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="811"/>
+        <source>Bundle name is required.</source>
+        <translation>需要填写 Bundle 名称。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="817"/>
+        <source>Start ability</source>
+        <translation>启动 Ability</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="829"/>
+        <source>Start command accepted.</source>
+        <translation>启动命令已接受。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="831"/>
+        <source>Start ability failed.</source>
+        <translation>启动 Ability 失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="839"/>
+        <source>Read hilog</source>
+        <translation>读取 hilog</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="851"/>
+        <source>[No hilog lines matched]</source>
+        <translation>[没有匹配的 hilog 行]</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="854"/>
+        <source>Hilog captured.</source>
+        <translation>已捕获 Hilog。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="854"/>
+        <source>Hilog captured before timeout.</source>
+        <translation>已在超时前捕获部分 Hilog。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="867"/>
+        <source>Waiting for current device operation...</source>
+        <translation>正在等待当前设备操作完成...</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="877"/>
+        <source>Refresh screen</source>
+        <translation>刷新屏幕</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="877"/>
+        <source>Capture screenshot</source>
+        <translation>截取屏幕</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="886"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="955"/>
+        <source>Screenshot capture failed.</source>
+        <translation>截屏失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="915"/>
+        <source>Auto refresh: %1 frame(s), %2 FPS.</source>
+        <translation>自动刷新：%1 帧，%2 FPS。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="919"/>
+        <source>Screenshot updated.</source>
+        <translation>截图已更新。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="923"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="968"/>
+        <source>Screenshot download failed: %1</source>
+        <translation>截图下载失败：%1</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="946"/>
+        <source>Capture UI snapshot</source>
+        <translation>捕获 UI 快照</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="984"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1039"/>
+        <source>UI layout dump failed.</source>
+        <translation>导出 UI 布局失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="996"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1052"/>
+        <source>UI layout download failed.</source>
+        <translation>UI 布局下载失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1004"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1060"/>
+        <source>Could not read UI layout: %1</source>
+        <translation>无法读取 UI 布局：%1</translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1013"/>
+        <source>UI snapshot captured: %n node(s).</source>
+        <translation>
+            <numerusform>已捕获 UI 快照：%n 个节点。</numerusform>
+        </translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1030"/>
+        <source>Refresh UI layout</source>
+        <translation>刷新 UI 布局</translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1069"/>
+        <source>UI layout captured: %n node(s).</source>
+        <translation>
+            <numerusform>已捕获 UI 布局：%n 个节点。</numerusform>
+        </translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1078"/>
+        <source>Tap UI</source>
+        <translation>点击 UI</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1082"/>
+        <source>Tapped (%1, %2).</source>
+        <translation>已点击（%1，%2）。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1090"/>
+        <source>UI node is not available.</source>
+        <translation>UI 节点不可用。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1100"/>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1111"/>
+        <source>Text is required.</source>
+        <translation>需要填写文本。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1104"/>
+        <source>Input UI text</source>
+        <translation>输入 UI 文本</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1115"/>
+        <source>Input focused text</source>
+        <translation>向焦点输入文本</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1123"/>
+        <source>Key is required.</source>
+        <translation>需要指定按键。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1127"/>
+        <source>Press key</source>
+        <translation>按键</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1134"/>
+        <source>Swipe UI</source>
+        <translation>滑动 UI</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1141"/>
+        <source>Screen auto refresh is already running.</source>
+        <translation>屏幕自动刷新已在运行。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1153"/>
+        <source>Screen auto refresh started.</source>
+        <translation>屏幕自动刷新已开始。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1222"/>
+        <source>%1 completed.</source>
+        <translation>%1 已完成。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1224"/>
+        <source>%1 failed.</source>
+        <translation>%1 失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1320"/>
+        <source>connected</source>
+        <translation>已连接</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1320"/>
+        <source>offline</source>
+        <translation>离线</translation>
+    </message>
+</context>
+<context>
+    <name>DeviceRuntimeWorkspace</name>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="88"/>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="410"/>
+        <source>Back</source>
+        <translation>返回</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="112"/>
+        <source>Refresh</source>
+        <translation>刷新</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="154"/>
+        <source>Overlay</source>
+        <translation>叠加层</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="164"/>
+        <source>%1 node(s)</source>
+        <translation>%1 个节点</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="165"/>
+        <source>0 node(s)</source>
+        <translation>0 个节点</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="173"/>
+        <source>selected node #%1</source>
+        <translation>已选节点 #%1</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="174"/>
+        <source>no node selected</source>
+        <translation>未选择节点</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="264"/>
+        <source>Capture a snapshot or start auto refresh to inspect the device screen</source>
+        <translation>截取快照或启动自动刷新以检查设备屏幕</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="278"/>
+        <source>Screenshot updated</source>
+        <translation>截图已更新</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="327"/>
+        <source>Status</source>
+        <translation>状态</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="350"/>
+        <source>Screen</source>
+        <translation>屏幕</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="357"/>
+        <source>Capture</source>
+        <translation>采集</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="363"/>
+        <source>Screenshot</source>
+        <translation>截屏</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="371"/>
+        <source>Inspect UI</source>
+        <translation>检查 UI</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="380"/>
+        <source>Refreshing</source>
+        <translation>刷新中</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="381"/>
+        <source>Auto Refresh</source>
+        <translation>自动刷新</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="392"/>
+        <source>Stop</source>
+        <translation>停止</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="404"/>
+        <source>Keys</source>
+        <translation>按键</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="418"/>
+        <source>Home</source>
+        <translation>主页</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="429"/>
+        <source>Screen refresh stopped.</source>
+        <translation>屏幕刷新已停止。</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="438"/>
+        <source>Application</source>
+        <translation>应用</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="445"/>
+        <source>Package</source>
+        <translation>包</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="452"/>
+        <source>No package loaded</source>
+        <translation>未加载包</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="462"/>
+        <source>Install</source>
+        <translation>安装</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="472"/>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="818"/>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="484"/>
+        <source>Launch</source>
+        <translation>启动</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="491"/>
+        <source>Bundle</source>
+        <translation>Bundle</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="497"/>
+        <source>Ability</source>
+        <translation>Ability</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="502"/>
+        <source>Start</source>
+        <translation>启动</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="512"/>
+        <source>Interact</source>
+        <translation>交互</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="520"/>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="539"/>
+        <source>Tap</source>
+        <translation>点击</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="526"/>
+        <source>x</source>
+        <translation>x</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="533"/>
+        <source>y</source>
+        <translation>y</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="549"/>
+        <source>Tap Node</source>
+        <translation>点节点</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="566"/>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="577"/>
+        <source>Type</source>
+        <translation>输入</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="572"/>
+        <source>text</source>
+        <translation>文本</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="593"/>
+        <source>Evidence</source>
+        <translation>证据</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="600"/>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="672"/>
+        <source>Hilog</source>
+        <translation>Hilog</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="607"/>
+        <source>All</source>
+        <translation>全部</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="608"/>
+        <source>Debug</source>
+        <translation>调试</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="609"/>
+        <source>Info</source>
+        <translation>信息</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="610"/>
+        <source>Warn</source>
+        <translation>警告</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="611"/>
+        <source>Error</source>
+        <translation>错误</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="612"/>
+        <source>Fatal</source>
+        <translation>致命</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="619"/>
+        <source>filter</source>
+        <translation>过滤</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="623"/>
+        <source>Read</source>
+        <translation>读取</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="639"/>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="670"/>
+        <source>UI</source>
+        <translation>UI</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="645"/>
+        <source>filter text / id / type</source>
+        <translation>过滤文本 / ID / 类型</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="671"/>
+        <source>Commands</source>
+        <translation>命令</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="831"/>
+        <source>Re-sign and Install</source>
+        <translation>重签并安装</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="997"/>
+        <source>No device</source>
+        <translation>无设备</translation>
     </message>
 </context>
 <context>

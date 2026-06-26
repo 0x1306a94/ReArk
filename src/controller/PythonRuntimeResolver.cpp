@@ -1,6 +1,6 @@
 #include "controller/PythonRuntimeResolver.h"
 
-#if defined(REARK_HAS_WUWE) && __has_include(<wuwe/agent/execution/controlled_process_backend.hpp>)
+#if defined(REARK_HAS_WUWE) && !defined(REARK_DISABLE_WUWE_EXECUTION) && __has_include(<wuwe/agent/execution/controlled_process_backend.hpp>)
 #include <wuwe/agent/execution/controlled_process_backend.hpp>
 #define REARK_HAS_WUWE_PYTHON_PROBE 1
 #endif

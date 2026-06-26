@@ -7,7 +7,7 @@
 #include <wuwe/agent/llm/llm_provider_factory.h>
 #include <wuwe/agent/llm/llm_provider_registry.h>
 #include <wuwe/agent/tools/tool.hpp>
-#if __has_include(<wuwe/agent/execution/execution.hpp>)
+#if !defined(REARK_DISABLE_WUWE_EXECUTION) && __has_include(<wuwe/agent/execution/execution.hpp>)
 #include <wuwe/agent/execution/execution.hpp>
 #define REARK_HAS_WUWE_EXECUTION 1
 #endif

@@ -193,17 +193,40 @@ if(wuwe_FOUND)
     if(REARK_WUWE_INCLUDE_DIRS)
         target_include_directories(${PROJECT_NAME} BEFORE PRIVATE ${REARK_WUWE_INCLUDE_DIRS})
     endif()
-    get_target_property(REARK_WUWE_IMPORTED_CONFIGS wuwe::wuwe IMPORTED_CONFIGURATIONS)
+    foreach(_reark_wuwe_header_prefix
+        "${WUWE_INSTALL_PREFIX}/.."
+        "${WUWE_INSTALL_PREFIX}")
+        get_filename_component(_reark_wuwe_header_prefix_abs
+            "${_reark_wuwe_header_prefix}" ABSOLUTE)
+        if(EXISTS "${_reark_wuwe_header_prefix_abs}/include/wuwe/agent/llm/llm_provider_factory.h")
+            target_include_directories(${PROJECT_NAME} BEFORE PRIVATE
+                "${_reark_wuwe_header_prefix_abs}/include")
+            break()
+        endif()
+    endforeach()
     get_target_property(REARK_WUWE_IMPORTED_LOCATION_DEBUG wuwe::wuwe IMPORTED_LOCATION_DEBUG)
     get_target_property(REARK_WUWE_IMPORTED_LOCATION_RELEASE wuwe::wuwe IMPORTED_LOCATION_RELEASE)
-    if(REARK_WUWE_IMPORTED_CONFIGS MATCHES "DEBUG"
-        AND REARK_WUWE_IMPORTED_LOCATION_DEBUG
+    if(NOT REARK_WUWE_IMPORTED_LOCATION_DEBUG
+        AND EXISTS "${WUWE_INSTALL_PREFIX}/lib/wuwed.lib")
+        set_property(TARGET wuwe::wuwe APPEND PROPERTY IMPORTED_CONFIGURATIONS DEBUG)
+        set_target_properties(wuwe::wuwe PROPERTIES
+            IMPORTED_LINK_INTERFACE_LANGUAGES_DEBUG "CXX"
+            IMPORTED_LOCATION_DEBUG "${WUWE_INSTALL_PREFIX}/lib/wuwed.lib")
+        set(REARK_WUWE_IMPORTED_LOCATION_DEBUG "${WUWE_INSTALL_PREFIX}/lib/wuwed.lib")
+    endif()
+    if(REARK_WUWE_IMPORTED_LOCATION_DEBUG AND REARK_WUWE_IMPORTED_LOCATION_RELEASE
         AND NOT REARK_WUWE_IMPORTED_LOCATION_DEBUG STREQUAL REARK_WUWE_IMPORTED_LOCATION_RELEASE)
         set(REARK_WUWE_CONFIG_EXPRESSION "1")
         message(STATUS "Wuwe Agent runtime enabled for all imported configurations")
-    else()
+    elseif(REARK_WUWE_IMPORTED_LOCATION_DEBUG)
+        set(REARK_WUWE_CONFIG_EXPRESSION "$<CONFIG:Debug>")
+        message(STATUS "Wuwe Agent runtime enabled for Debug")
+    elseif(REARK_WUWE_IMPORTED_LOCATION_RELEASE)
         set(REARK_WUWE_CONFIG_EXPRESSION "$<NOT:$<CONFIG:Debug>>")
-        message(STATUS "Wuwe Agent runtime disabled for Debug because the installed package exports no Debug library")
+        message(STATUS "Wuwe Agent runtime enabled for non-Debug configurations")
+    else()
+        set(REARK_WUWE_CONFIG_EXPRESSION "0")
+        message(STATUS "Wuwe Agent runtime disabled because the installed package exports no usable library")
     endif()
     target_link_libraries(${PROJECT_NAME} PRIVATE
         "$<${REARK_WUWE_CONFIG_EXPRESSION}:wuwe::wuwe>"
@@ -211,6 +234,11 @@ if(wuwe_FOUND)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
         "$<${REARK_WUWE_CONFIG_EXPRESSION}:REARK_HAS_WUWE=1>"
     )
+    if(NOT REARK_ENABLE_WUWE_EXECUTION)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE
+            "$<${REARK_WUWE_CONFIG_EXPRESSION}:REARK_DISABLE_WUWE_EXECUTION=1>"
+        )
+    endif()
 endif()
 
 if(cmark-gfm_FOUND AND cmark-gfm-extensions_FOUND)
@@ -289,6 +317,10 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     REARK_VERSION="${PROJECT_VERSION}"
     $<$<CONFIG:Release>:QT_NO_DEBUG_OUTPUT>
 )
+
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /bigobj)
+endif()
 
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE Crypt32)

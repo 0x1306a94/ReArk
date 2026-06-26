@@ -54,6 +54,7 @@
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <system_error>
@@ -97,6 +98,12 @@ bool isScriptToolName(const std::string& name)
 
 QString toolDisplayName(const std::string& name)
 {
+    if (name == "read_agent_scratchpad") {
+        return AgentController::tr("analysis notes");
+    }
+    if (name == "update_agent_scratchpad") {
+        return AgentController::tr("analysis notes");
+    }
     if (name == "summarize_current_target") {
         return AgentController::tr("current target summary");
     }
@@ -126,6 +133,9 @@ QString toolDisplayName(const std::string& name)
     }
     if (name == "find_abc_call_argument_flows") {
         return AgentController::tr("ABC call argument flows");
+    }
+    if (name == "analyze_abc_reference_flow") {
+        return AgentController::tr("ABC reference flow");
     }
     if (name == "inspect_entry_points") {
         return AgentController::tr("entry points");
@@ -215,12 +225,16 @@ std::shared_ptr<wuwe::llm_client> createLlmClient(const AgentSettings& settings)
     return client;
 }
 
+constexpr int kMaxAgentScratchpadChars = 60000;
+constexpr int kDefaultAgentScratchpadReadChars = 12000;
+constexpr int kMaxAgentScratchpadUpdateChars = 20000;
+
 #ifdef REARK_HAS_WUWE_EXECUTION
 constexpr std::size_t kMaxAnalysisScriptCodeBytes = 32 * 1024;
 constexpr std::size_t kMaxAnalysisScriptStdinBytes = 256 * 1024;
 constexpr std::size_t kMaxAnalysisScriptArgumentsBytes =
     kMaxAnalysisScriptCodeBytes + kMaxAnalysisScriptStdinBytes + 4096;
-constexpr int kMaxAnalysisScriptTimeoutMs = 5000;
+constexpr int kMaxAnalysisScriptTimeoutMs = 30000;
 
 wuwe::agent::execution::execution_policy rearkExecutionPolicy(const std::filesystem::path& workdir)
 {
@@ -467,10 +481,61 @@ private:
 };
 #endif
 
+struct AgentScratchpad {
+    mutable std::mutex mutex;
+    QString text;
+};
+
+QString boundedSnapshotText(const QString& text, int maxChars);
+
 struct ReArkToolContext {
     std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot;
+    std::shared_ptr<AgentScratchpad> scratchpad;
     std::stop_token stopToken;
 };
+
+QString readAgentScratchpad(
+    const std::shared_ptr<AgentScratchpad>& scratchpad,
+    int maxChars = kDefaultAgentScratchpadReadChars)
+{
+    if (scratchpad == nullptr) {
+        return {};
+    }
+    const std::scoped_lock lock(scratchpad->mutex);
+    return boundedSnapshotText(scratchpad->text, maxChars);
+}
+
+QString updateAgentScratchpad(
+    const std::shared_ptr<AgentScratchpad>& scratchpad,
+    QString text,
+    const QString& mode)
+{
+    if (scratchpad == nullptr) {
+        return QStringLiteral("# scratchpad: unavailable");
+    }
+
+    text = text.trimmed();
+    if (text.size() > kMaxAgentScratchpadUpdateChars) {
+        text = text.left(kMaxAgentScratchpadUpdateChars)
+            + QStringLiteral("\n\n[update truncated to %1 characters]").arg(kMaxAgentScratchpadUpdateChars);
+    }
+
+    const std::scoped_lock lock(scratchpad->mutex);
+    if (mode == QStringLiteral("append") && !scratchpad->text.trimmed().isEmpty()) {
+        scratchpad->text += QStringLiteral("\n\n");
+        scratchpad->text += text;
+    } else {
+        scratchpad->text = text;
+    }
+
+    if (scratchpad->text.size() > kMaxAgentScratchpadChars) {
+        scratchpad->text = scratchpad->text.right(kMaxAgentScratchpadChars);
+        scratchpad->text.prepend(QStringLiteral("[scratchpad truncated to recent %1 characters]\n\n")
+            .arg(kMaxAgentScratchpadChars));
+    }
+
+    return QStringLiteral("# scratchpad: saved\n# chars: %1").arg(scratchpad->text.size());
+}
 
 int normalizedLimit(int limit, int fallback)
 {
@@ -1476,6 +1541,67 @@ std::optional<wuwe::llm_tool_result> cancelledToolResult(const ReArkToolContext&
     };
 }
 
+struct read_agent_scratchpad {
+    static constexpr std::string_view description =
+        "Read ReArk Agent's durable scratchpad for this chat. Use it before continuing a long static analysis, decoding task, or resumed CTF solve.";
+
+    wuwe::field<int> max_chars {
+        .default_value = kDefaultAgentScratchpadReadChars,
+        .description = "Maximum scratchpad characters to return."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        const QString text = readAgentScratchpad(context.scratchpad, max_chars.value);
+        return {
+            .content = toStdString(text.trimmed().isEmpty()
+                    ? QStringLiteral("# scratchpad: empty")
+                    : text)
+        };
+    }
+};
+
+struct update_agent_scratchpad {
+    static constexpr std::string_view description =
+        "Save durable intermediate analysis notes for this chat. Store decoded constants, script results, candidate flags, unresolved offsets, and the next action before long tool chains or when budget may be exhausted.";
+
+    wuwe::field<std::string> text {
+        .description = "Concise notes to save. Prefer structured bullets with evidence, script outputs, and next steps."
+    };
+    wuwe::field<std::string> mode {
+        .default_value = "replace",
+        .description = "replace or append."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        const QString normalizedMode = QString::fromStdString(mode.value).trimmed().toCaseFolded();
+        if (!normalizedMode.isEmpty()
+            && normalizedMode != QStringLiteral("replace")
+            && normalizedMode != QStringLiteral("append")) {
+            return {
+                .content = "Invalid scratchpad mode. Use replace or append.",
+                .error_code = wuwe::agent::make_error_code(
+                    wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+        return {
+            .content = toStdString(updateAgentScratchpad(
+                context.scratchpad,
+                QString::fromStdString(text.value),
+                normalizedMode == QStringLiteral("append")
+                    ? QStringLiteral("append")
+                    : QStringLiteral("replace")))
+        };
+    }
+};
+
 struct summarize_package {
     static constexpr std::string_view description =
         "Summarize the currently loaded ReArk analysis target, active tab, status, and important files.";
@@ -1826,6 +1952,91 @@ struct find_abc_call_argument_flows {
                 limit.value,
                 max_chars.value,
                 context.stopToken))
+        };
+    }
+};
+
+struct analyze_abc_reference_flow {
+    static constexpr std::string_view description =
+        "Compound ABC analysis for one string, method, or literal reference. It resolves literal evidence when applicable, then returns xrefs and call-argument flows in one tool call.";
+
+    wuwe::field<std::string> query {
+        .description = "String/method text to search, or an offset such as literal@0x5757 or 0x5757."
+    };
+    wuwe::field<std::string> path_or_query {
+        .default_value = std::string {},
+        .description = "Optional ABC file path or query. Leave empty for ReArk's current primary ABC."
+    };
+    wuwe::field<std::string> kind {
+        .default_value = "any",
+        .description = "Reference kind: any, string, method, or literal."
+    };
+    wuwe::field<int> limit {
+        .default_value = 80,
+        .description = "Maximum number of xrefs and flows to list."
+    };
+    wuwe::field<int> max_chars {
+        .default_value = 36000,
+        .description = "Maximum combined evidence characters to return."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        if (!context.snapshot) {
+            return { .content = "No active ReArk analysis snapshot." };
+        }
+
+        const QString queryText = QString::fromStdString(query.value).trimmed();
+        const QString pathQuery = QString::fromStdString(path_or_query.value);
+        const QString refKind = QString::fromStdString(kind.value);
+        const int resultLimit = normalizedLimit(limit.value, 80);
+        const int outputLimit = std::clamp(max_chars.value <= 0 ? 36000 : max_chars.value, 4000, 60000);
+
+        QStringList sections;
+        sections.append(QStringLiteral("# operation: analyze_abc_reference_flow"));
+        sections.append(QStringLiteral("# query: %1").arg(queryText));
+        sections.append(QStringLiteral("# kind: %1").arg(refKind));
+
+        const bool literalLike = queryText.contains(QStringLiteral("literal@"), Qt::CaseInsensitive)
+            || QRegularExpression(QStringLiteral("^0x[0-9a-fA-F]+$")).match(queryText).hasMatch();
+        if (literalLike) {
+            sections.append(QStringLiteral("\n[literal]\n%1").arg(
+                HyleDecompiler::readAbcLiteralEvidence(
+                    context.snapshot->packageContext,
+                    context.snapshot->packagePath,
+                    pathQuery,
+                    queryText,
+                    std::min(outputLimit / 3, 16000),
+                    context.stopToken)));
+        }
+
+        sections.append(QStringLiteral("\n[xrefs]\n%1").arg(
+            HyleDecompiler::findAbcXrefEvidence(
+                context.snapshot->packageContext,
+                context.snapshot->packagePath,
+                pathQuery,
+                queryText,
+                refKind,
+                resultLimit,
+                std::min(outputLimit / 2, 24000),
+                context.stopToken)));
+
+        sections.append(QStringLiteral("\n[call_argument_flows]\n%1").arg(
+            HyleDecompiler::findAbcCallArgumentFlowEvidence(
+                context.snapshot->packageContext,
+                context.snapshot->packagePath,
+                pathQuery,
+                queryText,
+                refKind,
+                resultLimit,
+                std::min(outputLimit / 2, 24000),
+                context.stopToken)));
+
+        return {
+            .content = toStdString(boundedSnapshotText(sections.join(QLatin1Char('\n')), outputLimit))
         };
     }
 };
@@ -2691,9 +2902,13 @@ class ReArkToolProvider {
 public:
     explicit ReArkToolProvider(
         std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot,
+        std::shared_ptr<AgentScratchpad> scratchpad,
         bool includeDeviceRuntimeTools)
         : snapshot_(std::move(snapshot))
+        , scratchpad_(std::move(scratchpad))
     {
+        registerTool<read_agent_scratchpad>();
+        registerTool<update_agent_scratchpad>();
         registerTool<summarize_package>();
         registerTool<list_files>();
         registerTool<search_loaded_content>();
@@ -2704,6 +2919,7 @@ public:
         registerTool<read_abc_tree>();
         registerTool<find_abc_xrefs>();
         registerTool<find_abc_call_argument_flows>();
+        registerTool<analyze_abc_reference_flow>();
         registerTool<inspect_entry_points>();
         registerTool<explain_signature>();
         if (!includeDeviceRuntimeTools) {
@@ -2734,6 +2950,7 @@ public:
     {
         ReArkToolContext context {
             .snapshot = snapshot_,
+            .scratchpad = scratchpad_,
             .stopToken = stopToken
         };
 
@@ -2761,6 +2978,7 @@ private:
     }
 
     std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot_;
+    std::shared_ptr<AgentScratchpad> scratchpad_;
     std::vector<wuwe::llm_tool> tools_;
     std::unordered_map<std::string, std::function<wuwe::llm_tool_result(
         const std::string&,
@@ -3177,28 +3395,28 @@ wuwe::agent::reasoning::reasoning_policy rearkReasoningPolicy(
         .requires_tools = false
     });
     if (profile.mode == AgentTaskMode::StaticFastPath) {
-        policy.budget.max_model_calls = 36;
-        policy.budget.max_tool_calls = 72;
-        policy.budget.max_tool_rounds = 18;
-        policy.budget.max_steps = 54;
-        policy.budget.timeout = std::chrono::milliseconds { 420000 };
+        policy.budget.max_model_calls = 64;
+        policy.budget.max_tool_calls = 160;
+        policy.budget.max_tool_rounds = 40;
+        policy.budget.max_steps = 96;
+        policy.budget.timeout = std::chrono::milliseconds { 900000 };
         return policy;
     }
 
     if (profile.mode == AgentTaskMode::DeviceRuntime) {
-        policy.budget.max_model_calls = 96;
-        policy.budget.max_tool_calls = 220;
-        policy.budget.max_tool_rounds = 56;
-        policy.budget.max_steps = 128;
+        policy.budget.max_model_calls = 120;
+        policy.budget.max_tool_calls = 280;
+        policy.budget.max_tool_rounds = 72;
+        policy.budget.max_steps = 160;
         policy.budget.timeout = std::chrono::milliseconds { 1800000 };
         return policy;
     }
 
-    policy.budget.max_model_calls = 64;
-    policy.budget.max_tool_calls = 140;
-    policy.budget.max_tool_rounds = 32;
-    policy.budget.max_steps = 96;
-    policy.budget.timeout = std::chrono::milliseconds { 900000 };
+    policy.budget.max_model_calls = 80;
+    policy.budget.max_tool_calls = 180;
+    policy.budget.max_tool_rounds = 48;
+    policy.budget.max_steps = 120;
+    policy.budget.timeout = std::chrono::milliseconds { 1200000 };
     return policy;
 }
 #endif
@@ -3209,6 +3427,7 @@ wuwe::agent::reasoning::reasoning_policy rearkReasoningPolicy(
 
 struct AgentController::Runtime {
 #ifdef REARK_HAS_WUWE
+    std::shared_ptr<AgentScratchpad> scratchpad = std::make_shared<AgentScratchpad>();
     std::shared_ptr<wuwe::llm_client> client;
     std::shared_ptr<ReArkToolProvider> rearkProvider;
 #ifdef REARK_HAS_WUWE_EXECUTION
@@ -3354,6 +3573,7 @@ void AgentController::ask(const QString& question)
     const bool deviceRuntimeToolsEnabled = taskProfile.deviceRuntimeToolsEnabled;
     runtime_->rearkProvider = std::make_shared<ReArkToolProvider>(
         snapshot,
+        runtime_->scratchpad,
         deviceRuntimeToolsEnabled);
 #ifdef REARK_HAS_WUWE_EXECUTION
     runtime_->executionWorkdir = std::make_unique<QTemporaryDir>(
@@ -3417,6 +3637,7 @@ void AgentController::ask(const QString& question)
             "Use ReArk tools when you need package, source, disassembly, resource, signature, or entry-point data, "
             "When ABC disassembly references literal@0x... values, resolve them with ABC literal evidence instead of guessing from text. "
             "For hardcoded credentials, hashes, crypto constants, or call-argument questions, prefer structured ABC string, xref, and call-flow evidence when available. "
+            "When investigating one ABC string, method, or literal reference, prefer the compound ABC reference-flow tool before separately calling literal, xref, and call-flow tools. "
             "but do not keep calling tools after you have enough evidence to answer. "
             "For overview questions such as app purpose, features, entry points, pages, permissions, or architecture, "
             "first use the current snapshot, important files, and entry-point list below, then call only the tools that are truly needed. "
@@ -3425,6 +3646,9 @@ void AgentController::ask(const QString& question)
             "prefer UI layout selectors over guessed coordinates, and do not claim to have arbitrary shell, hook, breakpoint, packet capture, or dynamic debugging unless a dedicated ReArk tool exists for that action. "
             "If a tool reports that a file is unavailable, unsupported, or not matched, do not retry the same unavailable path repeatedly; "
             "answer from the available evidence and clearly state what could not be read. "
+            "Use the durable scratchpad for long or multi-step analysis: read it before continuing a resumed task, "
+            "and update it with decoded constants, candidate answers, script outputs, unresolved offsets, and next steps before long tool chains or when the analysis may be interrupted. "
+            "For arithmetic, decoding, hashing, byte conversion, brute-force checks, and repeated string transforms, prefer run_analysis_script over natural-language calculation, then save important results to the scratchpad. "
             "Always produce a useful final answer, even if some optional evidence is missing. "
             "Keep final answers visually calm inside the ReArk chat: avoid oversized report-style headings, avoid long scripted step transcripts, and do not chain multiple Markdown headings on one line. "
             "When using Markdown headings or tables, put a blank line before and after them; if unsure, prefer short paragraphs or simple bullet lists over headings. "
@@ -3456,7 +3680,10 @@ void AgentController::ask(const QString& question)
             " Use the bounded local Python analysis capability when a short deterministic calculation would verify decoding, "
             "decryption, hashing, byte conversion, or other reverse-engineering arithmetic. "
             "When using local Python analysis, pass required data through the script or stdin and keep the script short, deterministic, and side-effect free. "
-            "Local Python analysis accepts only code, stdin_text, and timeout_ms; code must be at most 32768 bytes, stdin_text at most 262144 bytes, and timeout_ms at most 5000.");
+            "Local Python analysis accepts only code, stdin_text, and timeout_ms; code must be at most %1 bytes, stdin_text at most %2 bytes, and timeout_ms at most %3.")
+            .arg(kMaxAnalysisScriptCodeBytes)
+            .arg(kMaxAnalysisScriptStdinBytes)
+            .arg(kMaxAnalysisScriptTimeoutMs);
     }
 #endif
     if (knowledgeController_ != nullptr && knowledgeController_->hasReadyReferences()) {
@@ -3479,6 +3706,9 @@ void AgentController::ask(const QString& question)
         .arg(snapshot->fileList.isEmpty()
                 ? QStringLiteral("<none>")
                 : boundedSnapshotText(snapshot->fileList, taskProfile.maxFileListChars));
+    const QString scratchpadText = readAgentScratchpad(runtime_->scratchpad, kDefaultAgentScratchpadReadChars);
+    systemPrompt += QStringLiteral("\n\nCurrent Agent scratchpad:\n%1")
+        .arg(scratchpadText.trimmed().isEmpty() ? QStringLiteral("<empty>") : scratchpadText);
     systemPrompt += responseLanguageInstruction(trimmed);
 
     QPointer<AgentController> self(this);
@@ -3849,6 +4079,10 @@ void AgentController::newChat()
     }
     pendingQuestion_.clear();
     resetRun();
+    if (runtime_->scratchpad != nullptr) {
+        const std::scoped_lock lock(runtime_->scratchpad->mutex);
+        runtime_->scratchpad->text.clear();
+    }
     setRunning(false);
     clearMessages();
     if (knowledgeController_ != nullptr) {

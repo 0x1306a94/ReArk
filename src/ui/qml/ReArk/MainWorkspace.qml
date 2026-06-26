@@ -39,12 +39,12 @@ Rectangle {
                                              || hasPackage
     property string textViewMode: "raw"
     property string formattedJsonContent: ""
-    property bool abcEvidenceOpen: false
     property string pendingNavigationSearch: ""
     property var pendingNavigationQueries: []
 
     signal openRequested()
     signal fileDropped(url fileUrl)
+    signal abcEvidenceRequested()
 
     function packageFileKind(filePath) {
         const lowerPath = filePath.toLowerCase()
@@ -522,12 +522,12 @@ Rectangle {
                                 decompilerController.requestAbcXrefRows(query, kind, 120, abcPath)
                             }
                             onOpenXrefEvidenceRequested: function(query, kind, abcPath) {
-                                root.abcEvidenceOpen = true
                                 decompilerController.requestAbcXrefs(query, kind, 120, abcPath)
+                                root.abcEvidenceRequested()
                             }
                             onTraceFlowRequested: function(query, kind, abcPath) {
-                                root.abcEvidenceOpen = true
                                 decompilerController.requestAbcFlows(query, kind, 120, abcPath)
+                                root.abcEvidenceRequested()
                             }
                             onNavigateXrefRequested: function(row) {
                                 decompilerController.navigateToAbcXref(row)
@@ -740,19 +740,6 @@ Rectangle {
                                 Layout.fillWidth: true
                             }
 
-                            ToolButton {
-                                checkable: true
-                                checked: root.abcEvidenceOpen
-                                text: qsTr("ABC Evidence")
-                                enabled: root.hasPackage
-                                implicitWidth: 104
-                                implicitHeight: 24
-                                padding: 0
-                                ToolTip.text: qsTr("Open ABC Evidence")
-                                ToolTip.visible: hovered
-                                onClicked: root.abcEvidenceOpen = checked
-                            }
-
                             Label {
                                 text: decompilerController.tabsModel.activePath
                                 color: secondaryTextColor
@@ -769,25 +756,6 @@ Rectangle {
             }
         }
 
-        Rectangle {
-            Layout.preferredWidth: root.abcEvidenceOpen ? 1 : 0
-            Layout.fillHeight: true
-            visible: root.abcEvidenceOpen
-            color: dividerColor
-        }
-
-        AbcEvidenceDrawer {
-            Layout.preferredWidth: root.abcEvidenceOpen ? Math.min(430, Math.max(340, root.width * 0.28)) : 0
-            Layout.fillHeight: true
-            visible: root.abcEvidenceOpen
-            darkTheme: root.darkTheme
-            highlightTheme: root.highlightTheme
-            activePath: decompilerController.tabsModel.activePath
-            activeText: root.textViewMode === "disassembly"
-                        ? decompilerController.activeDisassemblyContent
-                        : decompilerController.selectedContent
-            onCloseRequested: root.abcEvidenceOpen = false
-        }
     }
 
     function isJsonKind(kind) {

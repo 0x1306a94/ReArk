@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.Basic as Basic
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 
@@ -19,14 +18,17 @@ Rectangle {
     property string highlightTheme: "GitHub Dark"
     property string activePath: ""
     property string activeText: ""
+    property bool framed: true
+    property bool showHeader: true
 
     signal closeRequested()
 
     readonly property string evidenceContent: decompilerController.abcEvidenceContent
     readonly property bool evidenceBusy: decompilerController.abcEvidenceBusy
+    readonly property bool hasEvidence: evidenceContent.length > 0
 
     color: panelColor
-    border.width: 1
+    border.width: framed ? 1 : 0
     border.color: dividerColor
     clip: true
 
@@ -133,48 +135,27 @@ Rectangle {
 
     onActivePathChanged: seedFromActivePath(activePath)
 
-    component EvidenceTextField: Rectangle {
-        id: fieldFrame
-
-        property alias text: input.text
-        property alias placeholderText: input.placeholderText
+    component EvidenceTextField: ReArkTextField {
         property int preferredWidth: 120
 
         Layout.preferredWidth: preferredWidth
         Layout.fillWidth: preferredWidth <= 0
         Layout.preferredHeight: 30
         radius: 3
-        color: root.fieldColor
-        border.width: 1
-        border.color: input.activeFocus ? root.accentColor : root.dividerColor
+        backgroundColor: root.fieldColor
+        borderColor: root.dividerColor
+        focusBorderColor: root.accentColor
+        textColor: Material.foreground
+        placeholderColor: root.mutedTextColor
+        selectedTextColor: root.darkTheme ? "#ffffff" : "#000000"
+        selectionColor: root.darkTheme ? "#1f4d78" : "#b8daf0"
+        textPixelSize: 12
+        horizontalPadding: 9
 
-        Basic.TextField {
-            id: input
-
-            anchors.fill: parent
-            anchors.leftMargin: 9
-            anchors.rightMargin: 9
-            selectByMouse: true
-            color: Material.foreground
-            placeholderTextColor: root.mutedTextColor
-            selectedTextColor: root.darkTheme ? "#ffffff" : "#000000"
-            selectionColor: root.darkTheme ? "#1f4d78" : "#b8daf0"
-            verticalAlignment: TextInput.AlignVCenter
-            font.pixelSize: 12
-            background: null
-
-            Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                    root.requestCurrent()
-                    event.accepted = true
-                }
-            }
-        }
+        onAccepted: root.requestCurrent()
     }
 
     component EvidenceSpinBox: SpinBox {
-        id: spin
-
         Layout.preferredWidth: 78
         Layout.preferredHeight: 30
         editable: true
@@ -183,7 +164,65 @@ Rectangle {
         to: 1000
     }
 
-    component ModeButton: ToolButton {
+    component SectionLabel: Label {
+        Layout.fillWidth: true
+        color: root.mutedTextColor
+        font.pixelSize: 11
+        font.weight: Font.DemiBold
+        elide: Text.ElideRight
+    }
+
+    component FieldLabel: Label {
+        color: root.mutedTextColor
+        font.pixelSize: 11
+        elide: Text.ElideRight
+        verticalAlignment: Text.AlignVCenter
+    }
+
+    component EvidenceButton: AbstractButton {
+        id: button
+
+        property string tone: "normal"
+        readonly property bool primary: tone === "primary"
+        readonly property bool quiet: tone === "quiet"
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: primary ? 32 : 30
+        leftPadding: 10
+        rightPadding: 10
+        hoverEnabled: true
+        font.pixelSize: 11
+        font.weight: primary ? Font.DemiBold : Font.Normal
+
+        background: Rectangle {
+            radius: 3
+            color: !button.enabled
+                   ? (button.quiet ? "transparent" : root.hoverColor)
+                   : button.down
+                   ? (button.primary ? Qt.darker(root.accentColor, 1.18) : root.hoverColor)
+                   : button.primary
+                   ? root.accentColor
+                   : button.hovered
+                   ? root.hoverColor
+                   : button.quiet
+                   ? "transparent"
+                   : root.surfaceColor
+            border.width: button.primary || (button.quiet && !button.hovered) ? 0 : 1
+            border.color: button.hovered ? root.accentColor : root.dividerColor
+        }
+
+        contentItem: Label {
+            text: button.text
+            color: button.primary ? "#ffffff" : Material.foreground
+            opacity: button.enabled ? 1.0 : 0.42
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+            font: button.font
+        }
+    }
+
+    component ModeButton: AbstractButton {
         id: button
 
         property string modeName: ""
@@ -191,39 +230,63 @@ Rectangle {
         ButtonGroup.group: modeGroup
         checkable: true
         Layout.fillWidth: true
-        Layout.preferredHeight: 30
-        padding: 0
+        Layout.preferredHeight: 32
+        leftPadding: 8
+        rightPadding: 8
         hoverEnabled: true
         text: modeName
-        font.pixelSize: 11
+        font.pixelSize: 12
         font.weight: checked ? Font.DemiBold : Font.Normal
 
         background: Rectangle {
             radius: 3
-            color: button.checked ? root.selectedColor : button.hovered ? root.hoverColor : "transparent"
-            border.width: button.checked ? 1 : 0
-            border.color: root.accentColor
+            color: button.checked
+                   ? root.selectedColor
+                   : button.hovered
+                   ? root.hoverColor
+                   : "transparent"
+            border.width: button.checked || button.hovered ? 1 : 0
+            border.color: button.checked ? root.accentColor : root.dividerColor
+        }
+
+        contentItem: Label {
+            text: button.text
+            color: Material.foreground
+            opacity: button.enabled ? 1.0 : 0.45
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+            font: button.font
         }
     }
 
-    component QuickButton: ToolButton {
+    component IconButton: ToolButton {
         id: button
 
-        property string label: ""
+        property string iconName: ""
+        property int buttonSize: 28
+        property int iconSize: 14
 
-        Layout.fillWidth: true
-        Layout.preferredHeight: 30
+        Layout.preferredWidth: buttonSize
+        Layout.preferredHeight: buttonSize
         padding: 0
         hoverEnabled: true
-        text: label
-        font.pixelSize: 11
-        font.weight: Font.DemiBold
 
         background: Rectangle {
             radius: 3
-            color: button.hovered ? root.hoverColor : root.surfaceColor
-            border.width: 1
-            border.color: button.hovered ? root.accentColor : root.dividerColor
+            color: button.hovered ? root.hoverColor : "transparent"
+            border.width: 0
+        }
+
+        contentItem: Item {
+            Icon {
+                anchors.centerIn: parent
+                width: button.iconSize
+                height: button.iconSize
+                name: button.iconName
+                color: Material.foreground
+                opacity: button.enabled ? 0.82 : 0.28
+            }
         }
     }
 
@@ -233,7 +296,8 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 44
+            Layout.preferredHeight: root.showHeader ? 44 : 0
+            visible: root.showHeader
             color: root.darkTheme ? "#181a1d" : "#eef3f5"
             border.width: 1
             border.color: root.dividerColor
@@ -270,12 +334,8 @@ Rectangle {
                     visible: running
                 }
 
-                ToolButton {
-                    Layout.preferredWidth: 28
-                    Layout.preferredHeight: 28
-                    padding: 0
-                    text: "×"
-                    font.pixelSize: 16
+                IconButton {
+                    iconName: "close"
                     ToolTip.text: qsTr("Close")
                     ToolTip.visible: hovered
                     onClicked: root.closeRequested()
@@ -283,100 +343,31 @@ Rectangle {
             }
         }
 
-        ScrollView {
+        Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 308
-            clip: true
+            Layout.preferredHeight: 54
+            color: root.surfaceColor
+            border.width: 1
+            border.color: root.dividerColor
 
-            ColumnLayout {
-                width: Math.max(root.width - 18, 280)
-                spacing: 9
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                spacing: 10
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    Layout.topMargin: 12
-                    spacing: 7
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: qsTr("Quick scan")
-                        color: root.mutedTextColor
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        QuickButton {
-                            label: qsTr("Hashes")
-                            onClicked: root.quickScan("hashes")
-                        }
-
-                        QuickButton {
-                            label: qsTr("Base64")
-                            onClicked: root.quickScan("base64")
-                        }
-
-                        QuickButton {
-                            label: qsTr("Long")
-                            onClicked: root.quickScan("long")
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        QuickButton {
-                            label: qsTr("Tree")
-                            onClicked: {
-                                root.selectMode(treeMode)
-                                decompilerController.requestAbcTreeEvidence(root.normalizedPath(), treeLimitField.value)
-                            }
-                        }
-
-                        QuickButton {
-                            label: root.currentLiteralOffset().length > 0
-                                   ? qsTr("Resolve literal")
-                                   : qsTr("Find candidates")
-                            onClicked: root.useLiteralFromView()
-                        }
-                    }
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    Layout.topMargin: 12
-                    spacing: 7
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: qsTr("Target")
-                        color: root.mutedTextColor
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                    }
-
-                    EvidenceTextField {
-                        id: pathField
-                        Layout.fillWidth: true
-                        preferredWidth: 0
-                        text: "modules.abc"
-                        placeholderText: qsTr("modules.abc")
-                    }
+                Label {
+                    Layout.preferredWidth: 42
+                    text: qsTr("Task")
+                    color: root.mutedTextColor
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    verticalAlignment: Text.AlignVCenter
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    spacing: 4
+                    spacing: 6
 
                     ButtonGroup {
                         id: modeGroup
@@ -409,227 +400,410 @@ Rectangle {
                     }
                 }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    Layout.preferredHeight: 1
-                    color: root.dividerColor
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    spacing: 8
-                    visible: literalMode.checked
-
-                    Label {
-                        text: qsTr("Offset")
-                        color: root.mutedTextColor
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                    }
-
-                    EvidenceTextField {
-                        id: literalField
-                        Layout.fillWidth: true
-                        preferredWidth: 0
-                        placeholderText: qsTr("literal@0x5757 or 0x5757")
-                    }
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    spacing: 8
-                    visible: stringsMode.checked
-
-                    Label {
-                        text: qsTr("Pattern")
-                        color: root.mutedTextColor
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                    }
-
-                    EvidenceTextField {
-                        id: stringPatternField
-                        Layout.fillWidth: true
-                        preferredWidth: 0
-                        placeholderText: qsTr("[0-9a-f]{64}")
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Label {
-                            text: qsTr("Min")
-                            color: root.mutedTextColor
-                            font.pixelSize: 11
-                        }
-
-                        EvidenceSpinBox {
-                            id: minLengthField
-                            value: 8
-                            to: 4096
-                        }
-
-                        Label {
-                            text: qsTr("Max")
-                            color: root.mutedTextColor
-                            font.pixelSize: 11
-                        }
-
-                        EvidenceSpinBox {
-                            id: maxLengthField
-                            value: 128
-                            to: 16384
-                        }
-
-                        Label {
-                            text: qsTr("Limit")
-                            color: root.mutedTextColor
-                            font.pixelSize: 11
-                        }
-
-                        EvidenceSpinBox {
-                            id: stringLimitField
-                            value: 80
-                            from: 1
-                            to: 1000
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    spacing: 8
-                    visible: treeMode.checked
-
-                    Label {
-                        text: qsTr("Tree limit")
-                        color: root.mutedTextColor
-                        font.pixelSize: 11
-                    }
-
-                    EvidenceSpinBox {
-                        id: treeLimitField
-                        value: 200
-                        to: 5000
-                    }
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    spacing: 8
-                    visible: xrefsMode.checked || flowsMode.checked
-
-                    Label {
-                        text: xrefsMode.checked ? qsTr("XRef query") : qsTr("Flow source")
-                        color: root.mutedTextColor
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                    }
-
-                    EvidenceTextField {
-                        id: xrefQueryField
-                        Layout.fillWidth: true
-                        preferredWidth: 0
-                        visible: xrefsMode.checked
-                        placeholderText: qsTr("passwordHash, 0x5757, method name")
-                    }
-
-                    EvidenceTextField {
-                        id: flowQueryField
-                        Layout.fillWidth: true
-                        preferredWidth: 0
-                        visible: flowsMode.checked
-                        placeholderText: qsTr("literal offset or string")
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        ComboBox {
-                            id: kindCombo
-
-                            Layout.preferredWidth: 112
-                            Layout.preferredHeight: 30
-                            textRole: "text"
-                            valueRole: "value"
-                            font.pixelSize: 12
-                            model: [
-                                { text: qsTr("Any"), value: "any" },
-                                { text: qsTr("String"), value: "string" },
-                                { text: qsTr("Literal"), value: "literal" },
-                                { text: qsTr("Method"), value: "method" }
-                            ]
-                        }
-
-                        Label {
-                            text: qsTr("Limit")
-                            color: root.mutedTextColor
-                            font.pixelSize: 11
-                        }
-
-                        EvidenceSpinBox {
-                            id: resultLimitField
-                            value: 80
-                            from: 1
-                            to: 1000
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 12
-                    Layout.rightMargin: 12
-                    Layout.bottomMargin: 12
-                    spacing: 8
-
-                    Button {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 32
-                        text: root.evidenceBusy ? qsTr("Reading") : qsTr("Run")
-                        enabled: !root.evidenceBusy
-                        onClicked: root.requestCurrent()
-                    }
-
-                    ToolButton {
-                        Layout.preferredWidth: 58
-                        Layout.preferredHeight: 32
-                        text: qsTr("Copy")
-                        enabled: root.evidenceContent.length > 0 && !root.evidenceBusy
-                        ToolTip.text: qsTr("Copy Evidence")
-                        ToolTip.visible: hovered
-                        onClicked: decompilerController.copyTextToClipboard(root.evidenceContent)
-                    }
+                EvidenceButton {
+                    Layout.fillWidth: false
+                    Layout.preferredWidth: 96
+                    tone: "primary"
+                    text: root.evidenceBusy ? qsTr("Reading") : qsTr("Run")
+                    enabled: !root.evidenceBusy
+                    onClicked: root.requestCurrent()
                 }
             }
         }
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            color: root.dividerColor
-        }
-
-        CodeView {
+        RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            code: root.evidenceContent.length > 0
-                  ? root.evidenceContent
-                  : qsTr("# Pick Hashes, Base64, Long, Tree, or Resolve literal")
-            highlightTheme: root.highlightTheme
-            syntax: "Markdown"
+            spacing: 0
+
+            Rectangle {
+                id: controlRail
+
+                Layout.fillHeight: true
+                Layout.minimumWidth: 300
+                Layout.preferredWidth: Math.min(350, Math.max(310, root.width * 0.24))
+                Layout.maximumWidth: 370
+                color: root.panelColor
+                clip: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 14
+
+                    ScrollView {
+                        id: controlScroll
+
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+
+                        Component.onCompleted: {
+                            if (contentItem !== null) {
+                                contentItem.boundsBehavior = Flickable.StopAtBounds
+                                contentItem.boundsMovement = Flickable.StopAtBounds
+                            }
+                        }
+
+                        ColumnLayout {
+                            width: Math.max(controlScroll.availableWidth, 272)
+                            spacing: 16
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                SectionLabel {
+                                    text: qsTr("Quick scans")
+                                }
+
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    columnSpacing: 6
+                                    rowSpacing: 6
+
+                                    EvidenceButton {
+                                        text: qsTr("Hashes")
+                                        onClicked: root.quickScan("hashes")
+                                    }
+
+                                    EvidenceButton {
+                                        text: qsTr("Base64")
+                                        onClicked: root.quickScan("base64")
+                                    }
+
+                                    EvidenceButton {
+                                        text: qsTr("Long strings")
+                                        onClicked: root.quickScan("long")
+                                    }
+
+                                    EvidenceButton {
+                                        text: qsTr("ABC tree")
+                                        onClicked: {
+                                            root.selectMode(treeMode)
+                                            decompilerController.requestAbcTreeEvidence(root.normalizedPath(), treeLimitField.value)
+                                        }
+                                    }
+
+                                    EvidenceButton {
+                                        Layout.columnSpan: 2
+                                        text: root.currentLiteralOffset().length > 0
+                                              ? qsTr("Use current literal")
+                                              : qsTr("Find literal candidates")
+                                        onClicked: root.useLiteralFromView()
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 1
+                                color: root.dividerColor
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                SectionLabel {
+                                    text: qsTr("Parameters")
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 7
+                                    visible: literalMode.checked
+
+                                    FieldLabel {
+                                        text: qsTr("Literal offset")
+                                    }
+
+                                    EvidenceTextField {
+                                        id: literalField
+                                        Layout.fillWidth: true
+                                        preferredWidth: 0
+                                        placeholderText: qsTr("literal@0x5757 or 0x5757")
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 7
+                                    visible: stringsMode.checked
+
+                                    FieldLabel {
+                                        text: qsTr("String pattern")
+                                    }
+
+                                    EvidenceTextField {
+                                        id: stringPatternField
+                                        Layout.fillWidth: true
+                                        preferredWidth: 0
+                                        placeholderText: qsTr("[0-9a-f]{64}")
+                                    }
+
+                                    GridLayout {
+                                        Layout.fillWidth: true
+                                        columns: 3
+                                        columnSpacing: 6
+                                        rowSpacing: 4
+
+                                        FieldLabel {
+                                            text: qsTr("Min")
+                                        }
+
+                                        FieldLabel {
+                                            text: qsTr("Max")
+                                        }
+
+                                        FieldLabel {
+                                            text: qsTr("Limit")
+                                        }
+
+                                        EvidenceSpinBox {
+                                            id: minLengthField
+                                            Layout.fillWidth: true
+                                            value: 8
+                                            to: 4096
+                                        }
+
+                                        EvidenceSpinBox {
+                                            id: maxLengthField
+                                            Layout.fillWidth: true
+                                            value: 128
+                                            to: 16384
+                                        }
+
+                                        EvidenceSpinBox {
+                                            id: stringLimitField
+                                            Layout.fillWidth: true
+                                            value: 80
+                                            from: 1
+                                            to: 1000
+                                        }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 7
+                                    visible: treeMode.checked
+
+                                    FieldLabel {
+                                        text: qsTr("Tree limit")
+                                    }
+
+                                    EvidenceSpinBox {
+                                        id: treeLimitField
+                                        Layout.fillWidth: true
+                                        value: 200
+                                        to: 5000
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 7
+                                    visible: xrefsMode.checked || flowsMode.checked
+
+                                    FieldLabel {
+                                        text: xrefsMode.checked ? qsTr("XRef query") : qsTr("Flow source")
+                                    }
+
+                                    EvidenceTextField {
+                                        id: xrefQueryField
+                                        Layout.fillWidth: true
+                                        preferredWidth: 0
+                                        visible: xrefsMode.checked
+                                        placeholderText: qsTr("passwordHash, 0x5757, method name")
+                                    }
+
+                                    EvidenceTextField {
+                                        id: flowQueryField
+                                        Layout.fillWidth: true
+                                        preferredWidth: 0
+                                        visible: flowsMode.checked
+                                        placeholderText: qsTr("literal offset or string")
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 7
+
+                                        ComboBox {
+                                            id: kindCombo
+
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 30
+                                            textRole: "text"
+                                            valueRole: "value"
+                                            font.pixelSize: 12
+                                            model: [
+                                                { text: qsTr("Any"), value: "any" },
+                                                { text: qsTr("String"), value: "string" },
+                                                { text: qsTr("Literal"), value: "literal" },
+                                                { text: qsTr("Method"), value: "method" }
+                                            ]
+                                        }
+
+                                        EvidenceSpinBox {
+                                            id: resultLimitField
+                                            Layout.preferredWidth: 82
+                                            value: 80
+                                            from: 1
+                                            to: 1000
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 1
+                                color: root.dividerColor
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                SectionLabel {
+                                    text: qsTr("Input")
+                                }
+
+                                FieldLabel {
+                                    text: qsTr("ABC path")
+                                }
+
+                                EvidenceTextField {
+                                    id: pathField
+                                    Layout.fillWidth: true
+                                    preferredWidth: 0
+                                    text: "modules.abc"
+                                    placeholderText: qsTr("modules.abc")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.preferredWidth: 1
+                Layout.fillHeight: true
+                color: root.dividerColor
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: root.surfaceColor
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 42
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 12
+                        spacing: 8
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("Evidence")
+                                color: Material.foreground
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: decompilerController.abcEvidenceTitle.length > 0
+                                      ? decompilerController.abcEvidenceTitle
+                                      : qsTr("Run a query to collect ABC evidence")
+                                color: root.mutedTextColor
+                                font.pixelSize: 11
+                                elide: Text.ElideRight
+                                visible: text.length > 0
+                            }
+                        }
+
+                        BusyIndicator {
+                            Layout.preferredWidth: 22
+                            Layout.preferredHeight: 22
+                            running: root.evidenceBusy
+                            visible: running
+                        }
+
+                        IconButton {
+                            iconName: "copy"
+                            enabled: root.hasEvidence && !root.evidenceBusy
+                            ToolTip.text: qsTr("Copy Evidence")
+                            ToolTip.visible: hovered
+                            onClicked: decompilerController.copyTextToClipboard(root.evidenceContent)
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: root.dividerColor
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.margins: 14
+                        color: root.darkTheme ? "#141516" : "#fbfcfd"
+                        border.width: 1
+                        border.color: root.dividerColor
+                        radius: 3
+                        clip: true
+
+                        CodeView {
+                            anchors.fill: parent
+                            visible: root.hasEvidence || root.evidenceBusy
+                            code: root.evidenceContent
+                            highlightTheme: root.highlightTheme
+                            syntax: "Markdown"
+                        }
+
+                        Column {
+                            anchors.centerIn: parent
+                            width: Math.min(parent.width - 48, 360)
+                            spacing: 6
+                            visible: !root.hasEvidence && !root.evidenceBusy
+
+                            Label {
+                                width: parent.width
+                                text: qsTr("No evidence collected.")
+                                color: Material.foreground
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Label {
+                                width: parent.width
+                                text: qsTr("Choose a task or preset, then run the query.")
+                                color: root.mutedTextColor
+                                font.pixelSize: 12
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

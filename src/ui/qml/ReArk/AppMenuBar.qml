@@ -25,6 +25,7 @@ Rectangle {
     signal themeRequested(string theme)
     signal highlightThemeRequested(string theme)
     signal deviceRuntimeRequested()
+    signal abcEvidenceRequested()
 
     implicitWidth: menuRow.implicitWidth
     implicitHeight: embedded ? 32 : 30
@@ -551,6 +552,14 @@ Rectangle {
                     syntaxHighlightMenu.removeAction(object)
                 }
             }
+        }
+
+        CompactMenuSeparator {}
+
+        Action {
+            text: qsTr("ABC Evidence")
+            enabled: decompilerController.hasPackage
+            onTriggered: root.abcEvidenceRequested()
         }
     }
 

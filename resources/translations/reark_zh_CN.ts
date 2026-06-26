@@ -2,6 +2,184 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="zh_CN">
 <context>
+    <name>AbcEvidenceDrawer</name>
+    <message>
+        <source>Literal</source>
+        <translation>字面量</translation>
+    </message>
+    <message>
+        <source>Strings</source>
+        <translation>字符串</translation>
+    </message>
+    <message>
+        <source>Tree</source>
+        <translation>树</translation>
+    </message>
+    <message>
+        <source>XRefs</source>
+        <translation>交叉引用</translation>
+    </message>
+    <message>
+        <source>Flows</source>
+        <translation>数据流</translation>
+    </message>
+    <message>
+        <source>ABC Evidence</source>
+        <translation>ABC 证据</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <source>Hashes</source>
+        <translation>哈希</translation>
+    </message>
+    <message>
+        <source>Base64</source>
+        <translation>Base64</translation>
+    </message>
+    <message>
+        <source>modules.abc</source>
+        <translation>modules.abc</translation>
+    </message>
+    <message>
+        <source>literal@0x5757 or 0x5757</source>
+        <translation>literal@0x5757 或 0x5757</translation>
+    </message>
+    <message>
+        <source>[0-9a-f]{64}</source>
+        <translation>[0-9a-f]{64}</translation>
+    </message>
+    <message>
+        <source>Min</source>
+        <translation>最小</translation>
+    </message>
+    <message>
+        <source>Max</source>
+        <translation>最大</translation>
+    </message>
+    <message>
+        <source>Limit</source>
+        <translation>限制</translation>
+    </message>
+    <message>
+        <source>Tree limit</source>
+        <translation>树限制</translation>
+    </message>
+    <message>
+        <source>XRef query</source>
+        <translation>交叉引用查询</translation>
+    </message>
+    <message>
+        <source>Flow source</source>
+        <translation>数据流来源</translation>
+    </message>
+    <message>
+        <source>passwordHash, 0x5757, method name</source>
+        <translation>passwordHash、0x5757、方法名</translation>
+    </message>
+    <message>
+        <source>literal offset or string</source>
+        <translation>字面量偏移或字符串</translation>
+    </message>
+    <message>
+        <source>Any</source>
+        <translation>任意</translation>
+    </message>
+    <message>
+        <source>String</source>
+        <translation>字符串</translation>
+    </message>
+    <message>
+        <source>Method</source>
+        <translation>方法</translation>
+    </message>
+    <message>
+        <source>Reading</source>
+        <translation>读取中</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>运行</translation>
+    </message>
+    <message>
+        <source>Copy Evidence</source>
+        <translation>复制证据</translation>
+    </message>
+    <message>
+        <source>No evidence collected.</source>
+        <translation>尚未收集证据。</translation>
+    </message>
+    <message>
+        <source>Task</source>
+        <translation>任务</translation>
+    </message>
+    <message>
+        <source>Quick scans</source>
+        <translation>快速扫描</translation>
+    </message>
+    <message>
+        <source>Long strings</source>
+        <translation>长字符串</translation>
+    </message>
+    <message>
+        <source>ABC tree</source>
+        <translation>ABC 树</translation>
+    </message>
+    <message>
+        <source>Use current literal</source>
+        <translation>使用当前字面量</translation>
+    </message>
+    <message>
+        <source>Find literal candidates</source>
+        <translation>查找字面量候选</translation>
+    </message>
+    <message>
+        <source>Parameters</source>
+        <translation>参数</translation>
+    </message>
+    <message>
+        <source>Literal offset</source>
+        <translation>字面量偏移</translation>
+    </message>
+    <message>
+        <source>String pattern</source>
+        <translation>字符串模式</translation>
+    </message>
+    <message>
+        <source>Input</source>
+        <translation>输入</translation>
+    </message>
+    <message>
+        <source>ABC path</source>
+        <translation>ABC 路径</translation>
+    </message>
+    <message>
+        <source>Evidence</source>
+        <translation>证据</translation>
+    </message>
+    <message>
+        <source>Run a query to collect ABC evidence</source>
+        <translation>运行查询以收集 ABC 证据</translation>
+    </message>
+    <message>
+        <source>Choose a task or preset, then run the query.</source>
+        <translation>选择任务或预设，然后运行查询。</translation>
+    </message>
+</context>
+<context>
+    <name>AbcEvidenceWorkspace</name>
+    <message>
+        <source>Back</source>
+        <translation>返回</translation>
+    </message>
+    <message>
+        <source>ABC Evidence</source>
+        <translation>ABC 证据</translation>
+    </message>
+</context>
+<context>
     <name>AboutWindow</name>
     <message>
         <location filename="../../src/ui/qml/ReArk/AboutWindow.qml" line="14"/>
@@ -373,6 +551,10 @@
         <location filename="../../src/ui/qml/ReArk/AppMenuBar.qml" line="466"/>
         <source>Syntax Highlight</source>
         <translation>语法高亮</translation>
+    </message>
+    <message>
+        <source>ABC Evidence</source>
+        <translation>ABC 证据</translation>
     </message>
     <message>
         <location filename="../../src/ui/qml/ReArk/AppMenuBar.qml" line="528"/>

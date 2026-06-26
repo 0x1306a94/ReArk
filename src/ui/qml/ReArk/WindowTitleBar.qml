@@ -22,6 +22,7 @@ Rectangle {
     signal highlightThemeRequested(string theme)
     signal smartAnalysisRequested()
     signal deviceRuntimeRequested()
+    signal abcEvidenceRequested()
     signal systemMenuRequested(point globalPosition)
 
     implicitHeight: 32
@@ -119,6 +120,7 @@ Rectangle {
             onThemeRequested: function(theme) { root.themeRequested(theme) }
             onHighlightThemeRequested: function(theme) { root.highlightThemeRequested(theme) }
             onDeviceRuntimeRequested: root.deviceRuntimeRequested()
+            onAbcEvidenceRequested: root.abcEvidenceRequested()
         }
 
         Item {

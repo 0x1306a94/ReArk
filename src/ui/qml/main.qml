@@ -38,7 +38,13 @@ ApplicationWindow {
 
     onEffectiveDarkThemeChanged: syncHighlightThemeWithAppTheme()
     onHasPackageChanged: {
-        if (activeView !== "smartAnalysis" && activeView !== "deviceRuntime") {
+        if (!hasPackage && activeView === "abcEvidence") {
+            activeView = "start"
+            return
+        }
+        if (activeView !== "smartAnalysis"
+                && activeView !== "deviceRuntime"
+                && activeView !== "abcEvidence") {
             activeView = hasPackage ? "workspace" : "start"
         }
     }
@@ -67,6 +73,7 @@ ApplicationWindow {
             onHighlightThemeRequested: function(theme) { mainWindow.currentHighlightTheme = theme }
             onSmartAnalysisRequested: mainWindow.toggleSmartAnalysisView()
             onDeviceRuntimeRequested: mainWindow.openDeviceRuntimeView()
+            onAbcEvidenceRequested: mainWindow.openAbcEvidenceView()
             onSystemMenuRequested: function(globalPosition) {
                 windowChrome.showSystemMenu(mainWindow, globalPosition)
             }
@@ -97,6 +104,7 @@ ApplicationWindow {
                 highlightTheme: mainWindow.currentHighlightTheme
                 onOpenRequested: openFileDialog.open()
                 onFileDropped: function(fileUrl) { mainWindow.openFileUrl(fileUrl) }
+                onAbcEvidenceRequested: mainWindow.openAbcEvidenceView()
             }
 
             RK.SmartAnalysisPage {
@@ -113,6 +121,19 @@ ApplicationWindow {
                 packagePath: mainWindow.currentFilePath
                 packageName: mainWindow.currentFileName
                 installablePackages: decompilerController.installablePackages
+                onBackRequested: mainWindow.activeView = mainWindow.hasPackage ? "workspace" : "start"
+            }
+
+            RK.AbcEvidenceWorkspace {
+                anchors.fill: parent
+                visible: mainWindow.activeView === "abcEvidence"
+                packageName: mainWindow.currentFileName
+                highlightTheme: mainWindow.currentHighlightTheme
+                activePath: decompilerController.tabsModel.activePath
+                activeText: decompilerController.tabsModel.activeContentMode === "text"
+                            && decompilerController.activeSupportsDisassembly
+                            ? decompilerController.activeDisassemblyContent
+                            : decompilerController.selectedContent
                 onBackRequested: mainWindow.activeView = mainWindow.hasPackage ? "workspace" : "start"
             }
         }
@@ -272,6 +293,14 @@ ApplicationWindow {
     function openDeviceRuntimeView() {
         activeView = "deviceRuntime"
         deviceRuntimeController.refreshDevices()
+    }
+
+    function openAbcEvidenceView() {
+        if (!hasPackage) {
+            activeView = "start"
+            return
+        }
+        activeView = "abcEvidence"
     }
 
     function openSettingsWindow() {

@@ -49,10 +49,6 @@ Rectangle {
     readonly property string signingValidationMessage: signingController !== null
             ? signingController.harmonySigningValidationMessage
             : ""
-    readonly property var pythonRuntime: settingsController !== null
-            ? settingsController.agentPythonRuntime
-            : ({})
-
     color: pageColor
 
     onVisibleChanged: {
@@ -73,43 +69,25 @@ Rectangle {
             color: root.pageColor
             border.width: 0
 
-            Rectangle {
-                id: searchBox
+            ReArkTextField {
+                id: searchInput
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: 26
                 anchors.rightMargin: 26
                 height: 28
+                placeholderText: qsTr("Search settings")
                 radius: 2
-                color: root.inputColor
-                border.width: 1
-                border.color: searchInput.activeFocus ? root.inputFocusColor : root.borderColor
-
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 9
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: searchInput.text.length === 0
-                    text: qsTr("Search settings")
-                    color: root.subtleTextColor
-                    font.pixelSize: 13
-                }
-
-                TextInput {
-                    id: searchInput
-                    anchors.fill: parent
-                    anchors.leftMargin: 9
-                    anchors.rightMargin: 9
-                    clip: true
-                    selectByMouse: true
-                    color: root.primaryTextColor
-                    selectionColor: root.inputFocusColor
-                    selectedTextColor: "#ffffff"
-                    font.pixelSize: 13
-                    verticalAlignment: TextInput.AlignVCenter
-                    onTextChanged: root.searchQuery = text
-                }
+                backgroundColor: root.inputColor
+                borderColor: root.borderColor
+                focusBorderColor: root.inputFocusColor
+                textColor: root.primaryTextColor
+                placeholderColor: root.subtleTextColor
+                selectionColor: root.inputFocusColor
+                textPixelSize: 13
+                horizontalPadding: 9
+                onTextChanged: root.searchQuery = text
             }
         }
 
@@ -334,45 +312,6 @@ Rectangle {
                                 SettingsCheckBox {
                                     id: requireApiKeyBox
                                     text: qsTr("Require API key")
-                                }
-                            }
-
-                            SettingRow {
-                                id: pythonRuntimeRow
-
-                                title: qsTr("Agent: Python Runtime")
-                                description: qsTr("Optional interpreter path for local analysis scripts. Leave empty to use ReArk's automatic resolver.")
-
-                                ColumnLayout {
-                                    spacing: 7
-
-                                    SettingsTextField {
-                                        id: pythonInterpreterPathField
-                                        Layout.preferredWidth: 460
-                                    }
-
-                                    Label {
-                                        Layout.preferredWidth: 460
-                                        text: root.pythonRuntimeSummary()
-                                        color: root.pythonRuntimeOk()
-                                               ? root.secondaryTextColor
-                                               : root.dangerTextColor
-                                        font.pixelSize: 12
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    SettingsCheckBox {
-                                        id: restrictedPythonBackendBox
-                                        text: qsTr("Use Windows restricted process when available")
-                                    }
-
-                                    Label {
-                                        Layout.preferredWidth: 460
-                                        text: qsTr("Default local Python is bounded but not a file or network security sandbox. Restricted process is explicit opt-in and fails closed if unavailable.")
-                                        color: root.secondaryTextColor
-                                        font.pixelSize: 12
-                                        wrapMode: Text.WordWrap
-                                    }
                                 }
                             }
 
@@ -917,33 +856,17 @@ Rectangle {
         }
     }
 
-    component SettingsTextField: Rectangle {
-        id: fieldRoot
-
-        property alias text: input.text
-        property alias echoMode: input.echoMode
-
+    component SettingsTextField: ReArkTextField {
         implicitWidth: 460
         implicitHeight: 32
         radius: 2
-        color: root.inputColor
-        border.width: 1
-        border.color: input.activeFocus ? root.inputFocusColor : root.borderColor
-
-        TextInput {
-            id: input
-
-            anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
-            clip: true
-            selectByMouse: true
-            color: root.primaryTextColor
-            selectionColor: root.inputFocusColor
-            selectedTextColor: "#ffffff"
-            font.pixelSize: 13
-            verticalAlignment: TextInput.AlignVCenter
-        }
+        backgroundColor: root.inputColor
+        borderColor: root.borderColor
+        focusBorderColor: root.inputFocusColor
+        textColor: root.primaryTextColor
+        placeholderColor: root.secondaryTextColor
+        selectionColor: root.inputFocusColor
+        textPixelSize: 13
     }
 
     component SettingsButton: AbstractButton {
@@ -1164,8 +1087,6 @@ Rectangle {
             apiKeyField.text = settingsController.agentApiKey
             requireApiKeyBox.checked = settingsController.agentRequireApiKey
             embeddingBaseUrlField.text = settingsController.agentEmbeddingBaseUrl
-            pythonInterpreterPathField.text = settingsController.agentPythonInterpreterPath
-            restrictedPythonBackendBox.checked = settingsController.agentEnableRestrictedPythonBackend
             embeddingModelField.text = settingsController.agentEmbeddingModel
             embeddingApiKeyField.text = settingsController.agentEmbeddingApiKey
             embeddingRequireApiKeyBox.checked = settingsController.agentEmbeddingRequireApiKey
@@ -1200,7 +1121,6 @@ Rectangle {
             || modelRow.visible
             || apiKeyRow.visible
             || requireApiKeyRow.visible
-            || pythonRuntimeRow.visible
     }
 
     function anyKnowledgeSettingVisible() {
@@ -1220,42 +1140,6 @@ Rectangle {
             || signingMaterialStatusRow.visible
     }
 
-    function pythonRuntimeOk() {
-        if (settingsController === null) {
-            return false
-        }
-        const runtime = root.pythonRuntime
-        return runtime !== undefined && runtime !== null && runtime.ok === true
-    }
-
-    function pythonRuntimeSummary() {
-        if (settingsController === null) {
-            return ""
-        }
-
-        const runtime = root.pythonRuntime
-        if (runtime === undefined || runtime === null) {
-            return qsTr("Python runtime status is unavailable.")
-        }
-
-        const status = runtime.status !== undefined ? runtime.status : qsTr("Unavailable")
-        const detail = runtime.detail !== undefined ? runtime.detail : ""
-        const version = runtime.version !== undefined && runtime.version.length > 0
-                ? qsTr("Python %1").arg(runtime.version)
-                : status
-        const source = runtime.source !== undefined && runtime.source.length > 0
-                ? runtime.source
-                : qsTr("auto")
-        const path = runtime.resolvedPath !== undefined && runtime.resolvedPath.length > 0
-                ? runtime.resolvedPath
-                : ""
-
-        if (runtime.ok === true && path.length > 0) {
-            return qsTr("%1 · %2 · %3").arg(version).arg(source).arg(path)
-        }
-        return detail.length > 0 ? qsTr("%1 · %2").arg(status).arg(detail) : status
-    }
-
     function saveAgentSettings() {
         if (settingsController === null) {
             return false
@@ -1268,8 +1152,8 @@ Rectangle {
             apiKeyField.text,
             modelField.text,
             requireApiKeyBox.checked,
-            pythonInterpreterPathField.text,
-            restrictedPythonBackendBox.checked,
+            settingsController.agentPythonInterpreterPath,
+            settingsController.agentEnableRestrictedPythonBackend,
             embeddingBaseUrlField.text,
             embeddingApiKeyField.text,
             embeddingModelField.text,

@@ -50,6 +50,30 @@ ReArk Agent also supports reference knowledge indexing. You can attach documents
 
 The Agent is designed for product-facing answers: it avoids exposing internal tool names or implementation details, follows the user's language, and keeps Markdown output compatible with ReArk's renderer.
 
+### Agent Optimization Notes
+
+Recent Agent work has focused on making analysis faster, less repetitive, and more resilient during long reverse-engineering tasks.
+
+Implemented:
+
+- Task routing separates static analysis, static CTF-style cracking, and device runtime workflows.
+- Device runtime tools are exposed only when the latest request explicitly asks for installation, launch, HDC, logs, screenshots, UI automation, signing, or runtime verification.
+- Conversation context is denoised and compressed so old device/signing output does not pollute static analysis tasks.
+- A durable in-chat scratchpad lets the Agent save intermediate constants, candidate answers, script output, unresolved offsets, and next steps across follow-up turns.
+- Local Python analysis is encouraged for deterministic decoding, hashing, byte conversion, brute-force checks, and repeated string transforms instead of doing arithmetic in natural language.
+- The bounded Python execution timeout has been raised for larger static calculations.
+- ABC reference-flow analysis can combine literal resolution, cross-references, and call-argument flow evidence in one tool call.
+- Reasoning budgets are split by task profile instead of using one global budget for every workflow.
+
+Planned next:
+
+- Add a persistent Python session or equivalent calculation engine so variables, helper functions, and extracted data can survive across tool calls.
+- Persist the Agent scratchpad to disk per chat or per loaded package, with explicit reset and cleanup behavior.
+- Add higher-level compound tools for common CTF workflows, such as finding an encryption routine, extracting constants, running a verifier script, and returning the candidate answer.
+- Add Agent run telemetry for task mode, tool-call count, elapsed time, budget-stop reason, scratchpad usage, and final outcome.
+- Build regression samples for static CTF analysis and compare solve time, tool-call count, and success rate across Agent changes.
+- Continue tuning source/disassembly chunking and evidence summaries to reduce repeated reads without hiding important context.
+
 ## Safety and Privacy
 
 Use ReArk only for legally authorized reverse engineering, interoperability work, malware analysis, and security research. Do not use it for unauthorized bypass, attacks, or data extraction.

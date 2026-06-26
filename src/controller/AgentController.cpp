@@ -1004,6 +1004,173 @@ bool signatureSummaryLooksUnsigned(const QString& summary)
         || folded.contains(QStringLiteral("未签名"));
 }
 
+bool containsAnyTerm(const QString& foldedText, const QStringList& terms)
+{
+    for (const QString& term : terms) {
+        if (!term.isEmpty() && foldedText.contains(term.toCaseFolded())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool hasExplicitDeviceRuntimeIntent(const QString& question)
+{
+    const QString folded = question.toCaseFolded();
+    return containsAnyTerm(folded, {
+        QStringLiteral("device"),
+        QStringLiteral("hdc"),
+        QStringLiteral("hilog"),
+        QStringLiteral("screenshot"),
+        QStringLiteral("ui layout"),
+        QStringLiteral("install"),
+        QStringLiteral("launch"),
+        QStringLiteral("start app"),
+        QStringLiteral("run on device"),
+        QStringLiteral("connected"),
+        QStringLiteral("resign"),
+        QStringLiteral("re-sign"),
+        QStringLiteral("sign and install"),
+        QStringLiteral("真机"),
+        QStringLiteral("设备"),
+        QStringLiteral("手机"),
+        QStringLiteral("安装"),
+        QStringLiteral("启动"),
+        QStringLiteral("打开应用"),
+        QStringLiteral("运行应用"),
+        QStringLiteral("重签"),
+        QStringLiteral("重签名"),
+        QStringLiteral("签名安装"),
+        QStringLiteral("截图"),
+        QStringLiteral("日志"),
+        QStringLiteral("崩溃"),
+        QStringLiteral("点击"),
+        QStringLiteral("ui input"),
+        QStringLiteral("uiinput"),
+        QStringLiteral("输入事件"),
+        QStringLiteral("模拟输入"),
+        QStringLiteral("投屏")
+    });
+}
+
+bool hasStaticCtfIntent(const QString& question)
+{
+    const QString folded = question.toCaseFolded();
+    return containsAnyTerm(folded, {
+        QStringLiteral("ctf"),
+        QStringLiteral("flag"),
+        QStringLiteral("password"),
+        QStringLiteral("secretkey"),
+        QStringLiteral("secret key"),
+        QStringLiteral("crack"),
+        QStringLiteral("decode"),
+        QStringLiteral("decrypt"),
+        QStringLiteral("encode"),
+        QStringLiteral("hash"),
+        QStringLiteral("maze"),
+        QStringLiteral("shctf"),
+        QStringLiteral("口令"),
+        QStringLiteral("破解"),
+        QStringLiteral("解码"),
+        QStringLiteral("解密"),
+        QStringLiteral("算法"),
+        QStringLiteral("找 flag"),
+        QStringLiteral("找flag"),
+        QStringLiteral("密码"),
+        QStringLiteral("密钥")
+    });
+}
+
+bool shouldUseStaticFastPath(const QString& question)
+{
+    return hasStaticCtfIntent(question) && !hasExplicitDeviceRuntimeIntent(question);
+}
+
+enum class AgentTaskMode {
+    StaticFastPath,
+    DeviceRuntime,
+    GeneralStatic
+};
+
+struct AgentTaskProfile {
+    AgentTaskMode mode = AgentTaskMode::GeneralStatic;
+    bool deviceRuntimeToolsEnabled = false;
+    int maxHistoryMessages = 8;
+    int maxHistoryCharsPerMessage = 3000;
+    int maxSnapshotSummaryChars = 8000;
+    int maxEntryPointChars = 10000;
+    int maxFileListChars = 10000;
+};
+
+QString agentTaskModeName(AgentTaskMode mode)
+{
+    switch (mode) {
+    case AgentTaskMode::StaticFastPath:
+        return QStringLiteral("static_fast_path");
+    case AgentTaskMode::DeviceRuntime:
+        return QStringLiteral("device_runtime");
+    case AgentTaskMode::GeneralStatic:
+        return QStringLiteral("general_static");
+    }
+    return QStringLiteral("general_static");
+}
+
+AgentTaskProfile classifyAgentTask(const QString& question)
+{
+    AgentTaskProfile profile;
+    if (shouldUseStaticFastPath(question)) {
+        profile.mode = AgentTaskMode::StaticFastPath;
+        profile.deviceRuntimeToolsEnabled = false;
+        profile.maxHistoryMessages = 3;
+        profile.maxHistoryCharsPerMessage = 1800;
+        profile.maxSnapshotSummaryChars = 6000;
+        profile.maxEntryPointChars = 9000;
+        profile.maxFileListChars = 6000;
+        return profile;
+    }
+
+    if (hasExplicitDeviceRuntimeIntent(question)) {
+        profile.mode = AgentTaskMode::DeviceRuntime;
+        profile.deviceRuntimeToolsEnabled = true;
+        profile.maxHistoryMessages = 10;
+        profile.maxHistoryCharsPerMessage = 3000;
+        profile.maxSnapshotSummaryChars = 10000;
+        profile.maxEntryPointChars = 10000;
+        profile.maxFileListChars = 10000;
+        return profile;
+    }
+
+    return profile;
+}
+
+QString agentTaskModeInstruction(const AgentTaskProfile& profile)
+{
+    if (profile.mode == AgentTaskMode::StaticFastPath) {
+        return QStringLiteral(
+            "\n\nTask mode:\n"
+            "- Static CTF fast path is active for this request.\n"
+            "- Treat flag, password, secretKey, maze, encode/decode, hash, and CTF prompts as static reverse-engineering tasks by default.\n"
+            "- First use the package summary, entry points, source/disassembly, ABC strings, literals, xrefs, call flows, and short Python calculations.\n"
+            "- Do not attempt device install, app launch, hilog, screenshots, UI automation, or signing validation unless the latest user request explicitly asks for device verification.\n"
+            "- Once the decoding formula, key material, or flag/answer is supported by static evidence, stop calling tools and answer.");
+    }
+
+    if (profile.deviceRuntimeToolsEnabled) {
+        return QStringLiteral(
+            "\n\nTask mode:\n"
+            "- Device runtime tools are enabled because the latest request mentions installation, launch, signing, device, HDC, UI, logs, screenshots, or runtime verification.\n"
+            "- ReArk's install_current_hap tool installs the resolved HAP module from the current package.\n"
+            "- If installation is rejected because the HAP is unsigned or signature verification fails, and Harmony signing is configured in Settings, install_current_hap automatically signs and retries.\n"
+            "- If the package bundle identity differs from the configured signing profile bundle, install_current_hap can rewrite the HAP bundle identity, repack, sign, and retry installation.\n"
+            "- Do not tell the user ReArk lacks re-signing capability; if automatic signing cannot run, report the concrete signing settings or tool error from install_current_hap.");
+    }
+
+    return QStringLiteral(
+        "\n\nTask mode:\n"
+        "- Static analysis tools are the default for this request.\n"
+        "- Device runtime tools are not part of the default path unless the latest user request explicitly asks for installation, launch, HDC, UI automation, logs, screenshots, signing, or runtime verification.");
+}
+
 QString signingSettingsStatusLine(const QString& validationMessage)
 {
     return validationMessage.trimmed().isEmpty()
@@ -1735,7 +1902,7 @@ struct list_harmony_devices {
 
 struct install_current_hap {
     static constexpr std::string_view description =
-        "Install the currently loaded ReArk package to a HarmonyOS target through hdc. If the active package is an APP container, ReArk installs the resolved inner HAP module. If hdc rejects the HAP because it is unsigned and Harmony signing is configured in Settings, ReArk signs the HAP with the configured local signing material and retries installation automatically. For multi-HAP APP packages, pass module to choose a module from the tool's candidate list.";
+        "Install the currently loaded ReArk package to a HarmonyOS target through hdc. If the active package is an APP container, ReArk installs the resolved inner HAP module. If hdc rejects the HAP because it is unsigned or signature verification fails and Harmony signing is configured in Settings, ReArk signs the HAP with the configured local signing material and retries installation automatically. If the package bundle identity does not match the configured signing profile bundle, ReArk can rewrite the HAP bundle identity, repack, sign, and retry installation. For multi-HAP APP packages, pass module to choose a module from the tool's candidate list.";
 
     wuwe::field<std::string> target_id {
         .default_value = std::string {},
@@ -2522,7 +2689,9 @@ struct swipe_device {
 
 class ReArkToolProvider {
 public:
-    explicit ReArkToolProvider(std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot)
+    explicit ReArkToolProvider(
+        std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot,
+        bool includeDeviceRuntimeTools)
         : snapshot_(std::move(snapshot))
     {
         registerTool<summarize_package>();
@@ -2537,6 +2706,9 @@ public:
         registerTool<find_abc_call_argument_flows>();
         registerTool<inspect_entry_points>();
         registerTool<explain_signature>();
+        if (!includeDeviceRuntimeTools) {
+            return;
+        }
         registerTool<list_harmony_devices>();
         registerTool<install_current_hap>();
         registerTool<start_harmony_app>();
@@ -2829,11 +3001,69 @@ QVariantMap reasoningEventActivity(const wuwe::agent::reasoning::reasoning_event
     return {};
 }
 
-QString conversationInputForReasoning(const QVariantList& messages)
+QString compactAgentMessageText(QString text, int maxChars)
+{
+    text = text.trimmed();
+    if (text.size() <= maxChars) {
+        return text;
+    }
+    return text.left(std::max(0, maxChars))
+        + QStringLiteral("\n[message truncated]");
+}
+
+bool staticFastPathHistoryNoise(
+    const QString& role,
+    const QString& content,
+    bool latestUserMessage)
+{
+    if (role == QStringLiteral("user")) {
+        return !latestUserMessage
+            && hasExplicitDeviceRuntimeIntent(content)
+            && !hasStaticCtfIntent(content);
+    }
+
+    const QString folded = content.toCaseFolded();
+    return containsAnyTerm(folded, {
+        QStringLiteral("install_current_hap"),
+        QStringLiteral("list_harmony_devices"),
+        QStringLiteral("start_harmony_app"),
+        QStringLiteral("read_hilog"),
+        QStringLiteral("capture_device_screenshot"),
+        QStringLiteral("dump_ui_layout"),
+        QStringLiteral("hdc"),
+        QStringLiteral("signature"),
+        QStringLiteral("signing"),
+        QStringLiteral("signed hap"),
+        QStringLiteral("device"),
+        QStringLiteral("安装"),
+        QStringLiteral("签名"),
+        QStringLiteral("重签"),
+        QStringLiteral("设备"),
+        QStringLiteral("真机"),
+        QStringLiteral("日志")
+    });
+}
+
+QString conversationInputForReasoning(
+    const QVariantList& messages,
+    const AgentTaskProfile& profile)
 {
     QStringList lines;
+    lines.append(QStringLiteral("Task profile: %1").arg(agentTaskModeName(profile.mode)));
     lines.append(QStringLiteral("Conversation:"));
-    for (const QVariant& item : messages) {
+    QVector<QPair<QString, QString>> selected;
+    selected.reserve(std::min(profile.maxHistoryMessages, static_cast<int>(messages.size())));
+    int latestUserIndex = -1;
+    for (int index = messages.size() - 1; index >= 0; --index) {
+        const QVariantMap message = messages.at(index).toMap();
+        if (message.value(QStringLiteral("role")).toString() == QStringLiteral("user")
+            && !message.value(QStringLiteral("text")).toString().trimmed().isEmpty()) {
+            latestUserIndex = index;
+            break;
+        }
+    }
+    for (int index = messages.size() - 1; index >= 0; --index) {
+        const QVariant& item = messages.at(index);
         const QVariantMap message = item.toMap();
         const QString role = message.value(QStringLiteral("role")).toString();
         const QString content = message.value(QStringLiteral("text")).toString().trimmed();
@@ -2841,9 +3071,21 @@ QString conversationInputForReasoning(const QVariantList& messages)
             || (role != QStringLiteral("user") && role != QStringLiteral("assistant"))) {
             continue;
         }
-        lines.append(QStringLiteral("%1: %2").arg(
+        if (profile.mode == AgentTaskMode::StaticFastPath
+            && staticFastPathHistoryNoise(role, content, index == latestUserIndex)) {
+            continue;
+        }
+        selected.prepend({
             role == QStringLiteral("user") ? QStringLiteral("User") : QStringLiteral("Assistant"),
-            content));
+            compactAgentMessageText(content, profile.maxHistoryCharsPerMessage)
+        });
+        if (selected.size() >= profile.maxHistoryMessages) {
+            break;
+        }
+    }
+
+    for (const auto& item : selected) {
+        lines.append(QStringLiteral("%1: %2").arg(item.first, item.second));
     }
     return lines.join(QLatin1Char('\n'));
 }
@@ -2923,7 +3165,9 @@ QString reasoningCancelledMessage(const wuwe::agent::reasoning::reasoning_result
     return AgentController::tr("Analysis cancelled.");
 }
 
-wuwe::agent::reasoning::reasoning_policy rearkReasoningPolicy(const std::string& input)
+wuwe::agent::reasoning::reasoning_policy rearkReasoningPolicy(
+    const std::string& input,
+    const AgentTaskProfile& profile)
 {
     namespace reasoning = wuwe::agent::reasoning;
 
@@ -2932,11 +3176,29 @@ wuwe::agent::reasoning::reasoning_policy rearkReasoningPolicy(const std::string&
         .has_tools = true,
         .requires_tools = false
     });
-    policy.budget.max_model_calls = 144;
-    policy.budget.max_tool_calls = 360;
-    policy.budget.max_tool_rounds = 96;
-    policy.budget.max_steps = 192;
-    policy.budget.timeout = std::chrono::milliseconds { 2700000 };
+    if (profile.mode == AgentTaskMode::StaticFastPath) {
+        policy.budget.max_model_calls = 36;
+        policy.budget.max_tool_calls = 72;
+        policy.budget.max_tool_rounds = 18;
+        policy.budget.max_steps = 54;
+        policy.budget.timeout = std::chrono::milliseconds { 420000 };
+        return policy;
+    }
+
+    if (profile.mode == AgentTaskMode::DeviceRuntime) {
+        policy.budget.max_model_calls = 96;
+        policy.budget.max_tool_calls = 220;
+        policy.budget.max_tool_rounds = 56;
+        policy.budget.max_steps = 128;
+        policy.budget.timeout = std::chrono::milliseconds { 1800000 };
+        return policy;
+    }
+
+    policy.budget.max_model_calls = 64;
+    policy.budget.max_tool_calls = 140;
+    policy.budget.max_tool_rounds = 32;
+    policy.budget.max_steps = 96;
+    policy.budget.timeout = std::chrono::milliseconds { 900000 };
     return policy;
 }
 #endif
@@ -3088,7 +3350,11 @@ void AgentController::ask(const QString& question)
         resetRun();
         return;
     }
-    runtime_->rearkProvider = std::make_shared<ReArkToolProvider>(snapshot);
+    const AgentTaskProfile taskProfile = classifyAgentTask(trimmed);
+    const bool deviceRuntimeToolsEnabled = taskProfile.deviceRuntimeToolsEnabled;
+    runtime_->rearkProvider = std::make_shared<ReArkToolProvider>(
+        snapshot,
+        deviceRuntimeToolsEnabled);
 #ifdef REARK_HAS_WUWE_EXECUTION
     runtime_->executionWorkdir = std::make_unique<QTemporaryDir>(
         QDir::temp().filePath(QStringLiteral("ReArk-agent-analysis-XXXXXX")));
@@ -3180,6 +3446,7 @@ void AgentController::ask(const QString& question)
             "Use plain text numbering such as [Step 1], Step 1, 1., or (1), not keycap emoji numbering. "
             "Do not claim that ReArk Agent never uses emoji; explain that stable simple emoji are supported, while keycap and complex emoji sequences are avoided. "
             "Be concise, evidence-based, and mention when requested data is unavailable through the tools.");
+    systemPrompt += agentTaskModeInstruction(taskProfile);
 #ifdef REARK_HAS_WUWE_EXECUTION
     if (!runtime_->executionPromptNote.isEmpty()) {
         systemPrompt += QStringLiteral(" %1").arg(runtime_->executionPromptNote);
@@ -3201,13 +3468,17 @@ void AgentController::ask(const QString& question)
                  knowledgeController_->referenceSessionId());
     }
     systemPrompt += QStringLiteral("\n\nCurrent ReArk snapshot:\n%1")
-        .arg(snapshot->packageSummary.isEmpty() ? QStringLiteral("<none>") : snapshot->packageSummary);
+        .arg(snapshot->packageSummary.isEmpty()
+                ? QStringLiteral("<none>")
+                : boundedSnapshotText(snapshot->packageSummary, taskProfile.maxSnapshotSummaryChars));
     systemPrompt += QStringLiteral("\n\nCurrent important entry points:\n%1")
-        .arg(snapshot->entryPoints.isEmpty() ? QStringLiteral("<none>") : snapshot->entryPoints);
+        .arg(snapshot->entryPoints.isEmpty()
+                ? QStringLiteral("<none>")
+                : boundedSnapshotText(snapshot->entryPoints, taskProfile.maxEntryPointChars));
     systemPrompt += QStringLiteral("\n\nCurrent file index excerpt:\n%1")
         .arg(snapshot->fileList.isEmpty()
                 ? QStringLiteral("<none>")
-                : boundedSnapshotText(snapshot->fileList, 12000));
+                : boundedSnapshotText(snapshot->fileList, taskProfile.maxFileListChars));
     systemPrompt += responseLanguageInstruction(trimmed);
 
     QPointer<AgentController> self(this);
@@ -3280,12 +3551,16 @@ void AgentController::ask(const QString& question)
             }));
 
     reasoning::reasoning_request request;
-    request.input = toStdString(conversationInputForReasoning(messages_));
+    request.input = toStdString(conversationInputForReasoning(messages_, taskProfile));
     request.system_prompt = toStdString(systemPrompt);
     request.model = toStdString(settings.model);
     request.temperature = 0.2;
-    request.policy = rearkReasoningPolicy(request.input);
+    request.policy = rearkReasoningPolicy(request.input, taskProfile);
     request.metadata.emplace("host", "ReArk");
+    request.metadata.emplace("task_mode", toStdString(agentTaskModeName(taskProfile.mode)));
+    request.metadata.emplace(
+        "device_runtime_tools",
+        taskProfile.deviceRuntimeToolsEnabled ? "enabled" : "disabled");
     request.metadata.emplace("target_summary", toStdString(boundedSnapshotText(snapshot->packageSummary, 2000)));
 
     reasoning::reasoning_run_options options;

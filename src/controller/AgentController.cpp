@@ -1999,11 +1999,15 @@ struct start_harmony_app {
 
 struct read_hilog {
     static constexpr std::string_view description =
-        "Read bounded HarmonyOS hilog output through hdc and optionally filter lines by a substring.";
+        "Read bounded HarmonyOS hilog output through hdc and optionally filter by log level and line substring.";
 
     wuwe::field<std::string> filter {
         .default_value = std::string {},
         .description = "Optional substring filter applied by ReArk after capture."
+    };
+    wuwe::field<std::string> level {
+        .default_value = std::string {},
+        .description = "Optional hilog level: D, I, W, E, F, or empty for all levels."
     };
     wuwe::field<int> max_lines {
         .default_value = 500,
@@ -2022,13 +2026,18 @@ struct read_hilog {
 
         HdcDeviceBackend backend = agentDeviceBackend();
         const CommandResult result = CommandRunner::runBlocking(
-            backend.hilogRequest(QString::fromStdString(target_id.value)));
+            backend.hilogRequest(
+                QString::fromStdString(target_id.value),
+                QString::fromStdString(level.value)));
         const QString filtered = HdcDeviceBackend::filterHilog(
             result.standardOutput + result.standardError,
             QString::fromStdString(filter.value),
             max_lines.value);
-        QString extra = QStringLiteral("# hdc: %1\n# filter: %2\n# lines_returned: %3")
+        QString extra = QStringLiteral("# hdc: %1\n# level: %2\n# filter: %3\n# lines_returned: %4")
             .arg(backend.resolvedProgram())
+            .arg(QString::fromStdString(level.value).trimmed().isEmpty()
+                    ? QStringLiteral("All")
+                    : QString::fromStdString(level.value))
             .arg(QString::fromStdString(filter.value))
             .arg(filtered.isEmpty() ? 0 : filtered.count(QLatin1Char('\n')) + 1);
         if (!filtered.isEmpty()) {

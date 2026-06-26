@@ -37,6 +37,7 @@ public:
         int timeoutMs = 5000) const;
     [[nodiscard]] CommandRequest hilogRequest(
         const QString& targetId,
+        const QString& level = {},
         int timeoutMs = 10000) const;
     [[nodiscard]] CommandRequest screenshotCaptureRequest(
         const QString& remotePath,
@@ -66,6 +67,8 @@ public:
     [[nodiscard]] static bool missionDumpShowsVisibleBundle(const QString& output, const QString& bundleName);
     [[nodiscard]] static bool installSucceeded(const CommandResult& result);
     [[nodiscard]] static bool installOutputReportsFailure(const CommandResult& result);
+    [[nodiscard]] static bool startSucceeded(const CommandResult& result);
+    [[nodiscard]] static bool startOutputReportsFailure(const CommandResult& result);
     [[nodiscard]] static QString resultSummary(const CommandResult& result);
 
     [[nodiscard]] QStringList targetArguments(const QString& targetId) const;

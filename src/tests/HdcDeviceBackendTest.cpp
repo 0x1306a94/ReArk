@@ -37,6 +37,10 @@ int main(int argc, char* argv[])
         || targets.at(1).state != QStringLiteral("unauthorized")) {
         return fail(QStringLiteral("second target was parsed incorrectly"));
     }
+    if (!HdcDeviceBackend::parseTargets(QStringLiteral("[Empty]\n")).isEmpty()
+        || !HdcDeviceBackend::parseTargets(QStringLiteral("[empty]\n")).isEmpty()) {
+        return fail(QStringLiteral("target parser should ignore bracketed Empty sentinel output"));
+    }
 
     HdcDeviceBackend backend;
     const CommandRequest listRequest = backend.listTargetsRequest();
@@ -109,6 +113,30 @@ int main(int argc, char* argv[])
             QStringLiteral("ps"),
             QStringLiteral("-ef") })) {
         return fail(QStringLiteral("process list argv changed unexpectedly"));
+    }
+
+    const CommandRequest allHilogRequest = backend.hilogRequest(QStringLiteral("target-1"));
+    if (allHilogRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("hilog"),
+            QStringLiteral("-x") })) {
+        return fail(QStringLiteral("all-level hilog argv changed unexpectedly"));
+    }
+
+    const CommandRequest errorHilogRequest = backend.hilogRequest(
+        QStringLiteral("target-1"),
+        QStringLiteral("Error"));
+    if (errorHilogRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("hilog"),
+            QStringLiteral("-x"),
+            QStringLiteral("-L"),
+            QStringLiteral("E") })) {
+        return fail(QStringLiteral("level-filtered hilog argv changed unexpectedly"));
     }
 
     const CommandRequest screenshotRequest = backend.screenshotCaptureRequest(
@@ -210,6 +238,26 @@ int main(int argc, char* argv[])
     result.standardOutput = QStringLiteral("[Info]App install path:D:\\sample.hap msg:error: failed to install bundle. code:9568329 error: verify signature failed.\nAppMod finish\n");
     if (HdcDeviceBackend::installSucceeded(result)) {
         return fail(QStringLiteral("signature verification failures must not be treated as successful installs"));
+    }
+
+    result.standardOutput = QStringLiteral(
+        "error: failed to start ability.\n"
+        "Error Code:10104001  Error Message:The specified ability does not exist\n"
+        "Error cause: The specified Ability is not installed\n");
+    if (HdcDeviceBackend::startSucceeded(result)
+        || !HdcDeviceBackend::startOutputReportsFailure(result)
+        || !HdcDeviceBackend::resultSummary(result).contains(QStringLiteral("hdc_reported_failure"))) {
+        return fail(QStringLiteral("aa start failures reported on stdout must not be treated as success"));
+    }
+
+    result.standardOutput = QStringLiteral(
+        "StartMode: Hot\n"
+        "BundleName: com.example.arks\n"
+        "AbilityName: EntryAbility\n"
+        "ModuleName: entry\n"
+        "start ability successfully.\n");
+    if (!HdcDeviceBackend::startSucceeded(result)) {
+        return fail(QStringLiteral("successful aa start output should be accepted"));
     }
 
     QTemporaryDir packageDir;

@@ -31,6 +31,17 @@ QStringList splitNonEmptyLines(const QString& text)
     return lines;
 }
 
+bool isNoTargetLine(const QString& line)
+{
+    QString normalized = line.trimmed().toCaseFolded();
+    normalized.remove(QLatin1Char('['));
+    normalized.remove(QLatin1Char(']'));
+    normalized.remove(QLatin1Char('.'));
+    return normalized == QStringLiteral("empty")
+        || normalized == QStringLiteral("no targets")
+        || normalized == QStringLiteral("no target");
+}
+
 QString briefText(QString value, int maxChars = 1200)
 {
     value = value.trimmed();
@@ -43,6 +54,38 @@ QString briefText(QString value, int maxChars = 1200)
 QString hostFileArgument(const QString& path)
 {
     return QDir::toNativeSeparators(QFileInfo(path.trimmed()).absoluteFilePath());
+}
+
+QString normalizedHilogLevel(QString level)
+{
+    level = level.trimmed().toUpper();
+    if (level.isEmpty() || level == QStringLiteral("ALL")) {
+        return {};
+    }
+    if (level == QStringLiteral("DEBUG")) {
+        return QStringLiteral("D");
+    }
+    if (level == QStringLiteral("INFO")) {
+        return QStringLiteral("I");
+    }
+    if (level == QStringLiteral("WARN") || level == QStringLiteral("WARNING")) {
+        return QStringLiteral("W");
+    }
+    if (level == QStringLiteral("ERROR")) {
+        return QStringLiteral("E");
+    }
+    if (level == QStringLiteral("FATAL")) {
+        return QStringLiteral("F");
+    }
+
+    static const QStringList supportedLevels {
+        QStringLiteral("D"),
+        QStringLiteral("I"),
+        QStringLiteral("W"),
+        QStringLiteral("E"),
+        QStringLiteral("F")
+    };
+    return supportedLevels.contains(level) ? level : QString {};
 }
 
 QString commandOutputText(const CommandResult& result)
@@ -161,12 +204,17 @@ CommandRequest HdcDeviceBackend::processListRequest(const QString& targetId, int
     };
 }
 
-CommandRequest HdcDeviceBackend::hilogRequest(const QString& targetId, int timeoutMs) const
+CommandRequest HdcDeviceBackend::hilogRequest(const QString& targetId, const QString& level, int timeoutMs) const
 {
     QStringList arguments = targetArguments(targetId);
     arguments << QStringLiteral("shell")
               << QStringLiteral("hilog")
               << QStringLiteral("-x");
+    const QString normalizedLevel = normalizedHilogLevel(level);
+    if (!normalizedLevel.isEmpty()) {
+        arguments << QStringLiteral("-L")
+                  << normalizedLevel;
+    }
     return {
         .program = resolvedProgram(),
         .arguments = arguments,
@@ -261,7 +309,7 @@ QList<HdcDeviceTarget> HdcDeviceBackend::parseTargets(const QString& output)
     QList<HdcDeviceTarget> targets;
     for (const QString& line : splitNonEmptyLines(output)) {
         const QString folded = line.toCaseFolded();
-        if (folded == QStringLiteral("empty")
+        if (isNoTargetLine(line)
             || folded.contains(QStringLiteral("no targets"))
             || folded.contains(QStringLiteral("not found"))) {
             continue;
@@ -362,13 +410,29 @@ bool HdcDeviceBackend::installOutputReportsFailure(const CommandResult& result)
         || folded.contains(QStringLiteral("signature verify failed"));
 }
 
+bool HdcDeviceBackend::startSucceeded(const CommandResult& result)
+{
+    return result.succeeded() && !startOutputReportsFailure(result);
+}
+
+bool HdcDeviceBackend::startOutputReportsFailure(const CommandResult& result)
+{
+    const QString folded = commandOutputText(result).toCaseFolded();
+    return folded.contains(QStringLiteral("failed to start ability"))
+        || folded.contains(QStringLiteral("error code:"))
+        || folded.contains(QStringLiteral("ability does not exist"))
+        || folded.contains(QStringLiteral("ability is not installed"))
+        || (folded.contains(QStringLiteral("bundle name"))
+            && folded.contains(QStringLiteral("not found")));
+}
+
 QString HdcDeviceBackend::resultSummary(const CommandResult& result)
 {
     QString text;
     text += QStringLiteral("$ %1\n").arg(result.commandLine());
     text += QStringLiteral("# exit_code: %1\n").arg(result.exitCode);
     text += QStringLiteral("# elapsed_ms: %1\n").arg(result.elapsedMs);
-    if (installOutputReportsFailure(result)) {
+    if (installOutputReportsFailure(result) || startOutputReportsFailure(result)) {
         text += QStringLiteral("# hdc_reported_failure: true\n");
     }
     if (result.timedOut) {

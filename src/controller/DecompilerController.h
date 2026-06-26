@@ -33,6 +33,7 @@ class DecompilerController : public QObject {
     Q_PROPERTY(QStringList activityLog READ activityLog NOTIFY activityLogChanged)
     Q_PROPERTY(bool hasPackage READ hasPackage NOTIFY packageChanged)
     Q_PROPERTY(QString packagePath READ packagePath NOTIFY packageChanged)
+    Q_PROPERTY(QVariantList installablePackages READ installablePackages NOTIFY packageChanged)
     Q_PROPERTY(QString appIconUrl READ appIconUrl NOTIFY appIconChanged)
     Q_PROPERTY(QString appIconDataUrl READ appIconDataUrl NOTIFY appIconChanged)
     Q_PROPERTY(QString appIconPath READ appIconPath NOTIFY appIconChanged)
@@ -97,6 +98,7 @@ public:
     [[nodiscard]] QStringList activityLog() const;
     [[nodiscard]] bool hasPackage() const;
     [[nodiscard]] QString packagePath() const;
+    [[nodiscard]] QVariantList installablePackages() const;
     [[nodiscard]] QString appIconUrl() const;
     [[nodiscard]] QString appIconDataUrl() const;
     [[nodiscard]] QString appIconPath() const;

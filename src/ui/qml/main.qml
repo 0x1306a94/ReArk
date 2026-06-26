@@ -112,6 +112,7 @@ ApplicationWindow {
                 controller: deviceRuntimeController
                 packagePath: mainWindow.currentFilePath
                 packageName: mainWindow.currentFileName
+                installablePackages: decompilerController.installablePackages
                 onBackRequested: mainWindow.activeView = mainWindow.hasPackage ? "workspace" : "start"
             }
         }

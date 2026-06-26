@@ -322,6 +322,24 @@ QString DecompilerController::packagePath() const
     return hasPackage_ ? packagePath_ : QString();
 }
 
+QVariantList DecompilerController::installablePackages() const
+{
+    QVariantList packages;
+    if (!hasPackage_ || !packageContext_) {
+        return packages;
+    }
+
+    for (const HyleDecompiler::PackageSession& package : packageContext_->packages) {
+        QVariantMap item;
+        item.insert(QStringLiteral("path"), package.path);
+        item.insert(QStringLiteral("displayName"), package.displayName.isEmpty()
+            ? QFileInfo(package.path).fileName()
+            : package.displayName);
+        packages.append(item);
+    }
+    return packages;
+}
+
 QString DecompilerController::appIconUrl() const
 {
     return hasPackage_ ? appIconUrl_ : QString();

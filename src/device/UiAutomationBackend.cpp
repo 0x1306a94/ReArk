@@ -97,11 +97,12 @@ QString nodeSearchText(const UiAutomationNode& node)
     }.join(QLatin1Char(' ')).toCaseFolded();
 }
 
-QString escapeUitestText(QString text)
+QString quoteRemoteShellArgument(QString text)
 {
     text.replace(QLatin1Char('\r'), QLatin1Char(' '));
     text.replace(QLatin1Char('\n'), QLatin1Char(' '));
-    return text;
+    text.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+    return QStringLiteral("'%1'").arg(text);
 }
 
 bool textMatches(const QString& value, const QString& pattern, bool exact)
@@ -276,7 +277,7 @@ CommandRequest UiAutomationBackend::inputTextAtRequest(
               << QStringLiteral("inputText")
               << QString::number(x)
               << QString::number(y)
-              << escapeUitestText(text);
+              << quoteRemoteShellArgument(text);
     return {
         .program = deviceBackend_.resolvedProgram(),
         .arguments = arguments,
@@ -294,7 +295,7 @@ CommandRequest UiAutomationBackend::inputFocusedTextRequest(
               << QStringLiteral("uitest")
               << QStringLiteral("uiInput")
               << QStringLiteral("text")
-              << escapeUitestText(text);
+              << quoteRemoteShellArgument(text);
     return {
         .program = deviceBackend_.resolvedProgram(),
         .arguments = arguments,

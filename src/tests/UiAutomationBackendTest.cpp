@@ -55,8 +55,16 @@ int main(int argc, char* argv[])
         20,
         QStringLiteral("hello\nworld"),
         QStringLiteral("target-1"));
-    if (!textRequest.arguments.contains(QStringLiteral("hello world"))) {
-        return fail(QStringLiteral("input text should normalize newlines"));
+    if (textRequest.arguments.last() != QStringLiteral("'hello world'")) {
+        return fail(QStringLiteral("input text should normalize newlines and shell-quote the remote text argument"));
+    }
+
+    const QString specialText = QStringLiteral("u}\"xJ x\"K|y<z\\$a'b");
+    const CommandRequest specialTextRequest = backend.inputFocusedTextRequest(
+        specialText,
+        QStringLiteral("target-1"));
+    if (specialTextRequest.arguments.last() != QStringLiteral("'u}\"xJ x\"K|y<z\\$a'\\''b'")) {
+        return fail(QStringLiteral("input text should protect shell-special characters for hdc shell uitest"));
     }
 
     const QByteArray layout = R"json(

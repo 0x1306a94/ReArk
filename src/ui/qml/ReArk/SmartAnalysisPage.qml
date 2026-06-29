@@ -12,6 +12,8 @@ Rectangle {
     property var agentKnowledgeController: null
     property string draftText: ""
     property int copiedMessageIndex: -1
+    property int editingMessageIndex: -1
+    property string editingMessageText: ""
 
     readonly property bool darkTheme: Material.theme === Material.Dark
     readonly property bool agentAvailable: agentController !== null && agentController.available
@@ -32,6 +34,7 @@ Rectangle {
     readonly property bool canSendPrompt: agentAvailable
             && !agentRunning
             && !referenceBusy
+            && editingMessageIndex < 0
             && draftText.trim().length > 0
 
     readonly property color pageTopColor: darkTheme ? "#1e1e1e" : "#e8f0fb"
@@ -41,6 +44,8 @@ Rectangle {
     readonly property color composerBorderColor: darkTheme ? "#353a41" : "#d7dfe9"
     readonly property color composerFocusBorderColor: darkTheme ? "#4b5563" : "#b8c5d8"
     readonly property color userBubbleColor: darkTheme ? "#1f4d78" : "#dbeafe"
+    readonly property color editSurfaceColor: darkTheme ? "#202326" : "#ffffff"
+    readonly property color editSurfaceBorderColor: darkTheme ? "#414850" : "#cbd5e1"
     readonly property color assistantBubbleColor: darkTheme ? "#1b1d20" : "#ffffff"
     readonly property color primaryTextColor: darkTheme ? "#e7e7e7" : "#0f172a"
     readonly property color secondaryTextColor: darkTheme ? "#a6a6a6" : "#748094"
@@ -73,6 +78,33 @@ Rectangle {
             return
         }
         followTailTimer.restart()
+    }
+
+    function beginEditMessage(index, text) {
+        if (!root.agentAvailable || root.agentRunning) {
+            return
+        }
+        root.editingMessageIndex = index
+        root.editingMessageText = text
+    }
+
+    function cancelEditMessage() {
+        root.editingMessageIndex = -1
+        root.editingMessageText = ""
+    }
+
+    function saveEditedMessage() {
+        if (root.agentController === null || root.editingMessageIndex < 0) {
+            return
+        }
+        const text = root.editingMessageText.trim()
+        if (text.length === 0) {
+            return
+        }
+        const row = root.editingMessageIndex
+        root.cancelEditMessage()
+        root.agentController.editUserMessage(row, text)
+        root.scheduleChatFollowTail()
     }
 
     gradient: Gradient {
@@ -232,6 +264,7 @@ Rectangle {
             readonly property bool userMessage: messageRole === "user"
             readonly property bool streaming: messageState === "streaming"
             readonly property bool activeAssistantMessage: streaming && !userMessage
+            readonly property bool editing: root.editingMessageIndex === index
             readonly property bool copied: root.copiedMessageIndex === index
             readonly property real maxBubbleWidth: messageDelegate.userMessage
                                                    ? Math.max(220, root.contentWidth * 0.78)
@@ -259,28 +292,41 @@ Rectangle {
                     id: messageBubble
 
                     readonly property real horizontalPadding: 30
-                    readonly property color bubbleColor: messageDelegate.userMessage ? root.userBubbleColor : root.assistantBubbleColor
+                    readonly property color bubbleColor: messageDelegate.editing
+                                                              ? root.editSurfaceColor
+                                                              : messageDelegate.userMessage
+                                                              ? root.userBubbleColor
+                                                              : root.assistantBubbleColor
                     readonly property real compactWidth: Math.min(
                         Math.max(44, bubbleTextMeasure.implicitWidth + horizontalPadding),
                         messageDelegate.maxBubbleWidth)
+                    readonly property real minimumEditWidth: Math.min(500, messageDelegate.maxBubbleWidth)
+                    readonly property real editWidth: Math.min(
+                        messageDelegate.maxBubbleWidth,
+                        Math.max(minimumEditWidth, bubbleTextMeasure.implicitWidth + horizontalPadding))
 
                     Layout.alignment: messageDelegate.userMessage ? Qt.AlignRight : Qt.AlignLeft
                     Layout.maximumWidth: messageDelegate.maxBubbleWidth
                     implicitWidth: messageDelegate.streaming && !messageDelegate.userMessage
                                    ? messageDelegate.maxBubbleWidth
+                                   : messageDelegate.editing
+                                     ? editWidth
                                    : messageDelegate.userMessage
                                      ? compactWidth
                                      : messageDelegate.maxBubbleWidth
-                    implicitHeight: messageBody.implicitHeight + 22
+                    implicitHeight: (messageDelegate.editing
+                                     ? editMessageInput.implicitHeight + editActionRow.implicitHeight + 30
+                                     : messageBody.implicitHeight + 22)
                                     + (messageDelegate.activeAssistantMessage ? streamStatus.implicitHeight + 10 : 0)
 
                     Rectangle {
                         anchors.fill: parent
                         radius: 8
                         color: messageBubble.bubbleColor
-                        border.width: messageDelegate.userMessage ? 0 : 1
+                        border.width: messageDelegate.userMessage && !messageDelegate.editing ? 0 : 1
                         border.color: root.borderColor
-                        visible: !messageDelegate.userMessage && !messageDelegate.streaming
+                        visible: messageDelegate.editing
+                                 || (!messageDelegate.userMessage && !messageDelegate.streaming)
                         layer.enabled: visible
                         layer.effect: MultiEffect {
                             shadowEnabled: true
@@ -294,8 +340,10 @@ Rectangle {
                         anchors.fill: parent
                         radius: 8
                         color: messageBubble.bubbleColor
-                        border.width: messageDelegate.userMessage ? 0 : 1
-                        border.color: messageDelegate.activeAssistantMessage
+                        border.width: messageDelegate.userMessage && !messageDelegate.editing ? 0 : 1
+                        border.color: messageDelegate.editing
+                                      ? root.editSurfaceBorderColor
+                                      : messageDelegate.activeAssistantMessage
                                       ? (root.darkTheme ? "#4b667c" : "#9fc7e8")
                                       : root.borderColor
                     }
@@ -330,6 +378,7 @@ Rectangle {
                     MarkdownMessage {
                         id: messageBody
 
+                        visible: !messageDelegate.editing
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -347,6 +396,141 @@ Rectangle {
                         accentColor: root.accentColor
                         textPixelSize: 13
                         clipboardController: root.agentController
+                    }
+
+                    TextArea {
+                        id: editMessageInput
+
+                        visible: messageDelegate.editing
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.leftMargin: 15
+                        anchors.rightMargin: 15
+                        anchors.topMargin: 11
+                        anchors.bottom: editActionRow.top
+                        anchors.bottomMargin: 7
+                        text: root.editingMessageText
+                        wrapMode: TextArea.Wrap
+                        selectByMouse: true
+                        color: root.primaryTextColor
+                        selectedTextColor: "#ffffff"
+                        selectionColor: root.accentColor
+                        font.pixelSize: 13
+                        padding: 0
+                        leftPadding: 0
+                        rightPadding: 0
+                        topPadding: 1
+                        bottomPadding: 1
+                        implicitHeight: Math.min(170, Math.max(24, contentHeight + topPadding + bottomPadding))
+
+                        background: Item {}
+
+                        Keys.onEscapePressed: root.cancelEditMessage()
+                        Keys.onPressed: event => {
+                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                    && (event.modifiers & Qt.ControlModifier)) {
+                                root.saveEditedMessage()
+                                event.accepted = true
+                            }
+                        }
+
+                        onTextChanged: {
+                            if (messageDelegate.editing && root.editingMessageText !== text) {
+                                root.editingMessageText = text
+                            }
+                        }
+
+                        onVisibleChanged: {
+                            if (visible) {
+                                forceActiveFocus()
+                                cursorPosition = text.length
+                            }
+                        }
+                    }
+
+                    Row {
+                        id: editActionRow
+
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.rightMargin: 10
+                        anchors.bottomMargin: 8
+                        spacing: 8
+                        visible: messageDelegate.editing
+                        height: visible ? 28 : 0
+
+                        AbstractButton {
+                            id: cancelEditButton
+
+                            width: 62
+                            height: 28
+                            padding: 0
+                            hoverEnabled: true
+                            opacity: hovered ? 1.0 : 0.82
+
+                            Accessible.name: qsTr("Cancel editing")
+                            ToolTip.text: qsTr("Cancel")
+                            ToolTip.visible: false
+                            ToolTip.delay: 450
+
+                            background: Rectangle {
+                                radius: 7
+                                color: cancelEditButton.hovered
+                                       ? (root.darkTheme ? "#2d3238" : "#f1f5f9")
+                                       : "transparent"
+                                border.width: 1
+                                border.color: root.darkTheme ? "#3b424b" : "#d7dee8"
+                            }
+
+                            contentItem: Text {
+                                text: qsTr("Cancel")
+                                color: root.darkTheme ? "#c6d1dc" : "#4d6078"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                renderType: Text.NativeRendering
+                            }
+
+                            onClicked: root.cancelEditMessage()
+                        }
+
+                        AbstractButton {
+                            id: saveEditButton
+
+                            width: 56
+                            height: 28
+                            padding: 0
+                            hoverEnabled: true
+                            enabled: root.editingMessageText.trim().length > 0
+                            opacity: enabled ? 1.0 : 0.42
+
+                            Accessible.name: qsTr("Save edited message")
+                            ToolTip.text: qsTr("Send")
+                            ToolTip.visible: false
+                            ToolTip.delay: 450
+
+                            background: Rectangle {
+                                radius: 7
+                                color: saveEditButton.hovered
+                                       ? (root.darkTheme ? "#eef2f7" : "#030712")
+                                       : (root.darkTheme ? "#d4d8de" : "#111827")
+                                border.width: 0
+                            }
+
+                            contentItem: Text {
+                                text: qsTr("Send")
+                                color: root.darkTheme ? "#18181b" : "#ffffff"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                renderType: Text.NativeRendering
+                            }
+
+                            onClicked: root.saveEditedMessage()
+                        }
                     }
 
                     RowLayout {
@@ -409,12 +593,47 @@ Rectangle {
                     spacing: 8
 
                     AbstractButton {
+                        id: editButton
+
+                        Layout.preferredWidth: 16
+                        Layout.preferredHeight: 16
+                        padding: 0
+                        hoverEnabled: true
+                        visible: messageDelegate.userMessage && !messageDelegate.editing
+                        enabled: root.agentAvailable && !root.agentRunning
+                        opacity: enabled ? (hovered ? 1.0 : 0.68) : 0.34
+
+                        Accessible.name: qsTr("Edit message")
+                        ToolTip.text: qsTr("Edit")
+                        ToolTip.visible: hovered && enabled
+                        ToolTip.delay: 450
+
+                        background: Rectangle {
+                            radius: 4
+                            color: editButton.hovered
+                                   ? (root.darkTheme ? "#292d32" : "#e7edf7")
+                                   : "transparent"
+                        }
+
+                        contentItem: Icon {
+                            anchors.centerIn: parent
+                            name: "pencil"
+                            width: 10
+                            height: 10
+                            color: root.mutedTextColor
+                        }
+
+                        onClicked: root.beginEditMessage(messageDelegate.index, messageDelegate.messageText)
+                    }
+
+                    AbstractButton {
                         id: copyButton
 
                         Layout.preferredWidth: 16
                         Layout.preferredHeight: 16
                         padding: 0
                         hoverEnabled: true
+                        visible: !messageDelegate.editing
                         enabled: messageDelegate.messageText.length > 0
                         opacity: enabled ? (hovered || messageDelegate.copied ? 1.0 : 0.68) : 0.34
 
@@ -454,7 +673,7 @@ Rectangle {
                         color: root.mutedTextColor
                         font.pixelSize: 11
                         verticalAlignment: Text.AlignVCenter
-                        visible: text.length > 0
+                        visible: text.length > 0 && !messageDelegate.editing
                     }
                 }
             }
@@ -869,6 +1088,7 @@ Rectangle {
         root.agentController.ask(text)
         root.draftText = ""
         promptInput.text = ""
+        root.cancelEditMessage()
         root.scheduleChatFollowTail()
     }
 }

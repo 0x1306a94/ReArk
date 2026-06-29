@@ -152,6 +152,7 @@ qt_add_resources(${PROJECT_NAME} "icons"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/copy.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/gem.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/paperclip.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/pencil.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/fontawesome/square-plus.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/find-match-case.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/find-regex.svg"
@@ -492,6 +493,26 @@ if(BUILD_TESTING AND EXISTS "${REARK_ABC_EVIDENCE_SAMPLE}")
 endif()
 
 if(BUILD_TESTING)
+    qt_add_executable(reark_command_runner_test
+        tests/CommandRunnerTest.cpp
+    )
+    target_include_directories(reark_command_runner_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_command_runner_test PRIVATE
+        reark_core
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_command_runner_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_command_runner_test>
+                $<TARGET_FILE_DIR:reark_command_runner_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    add_test(NAME reark_command_runner_test
+        COMMAND reark_command_runner_test)
+
     qt_add_executable(reark_hdc_device_backend_test
         tests/HdcDeviceBackendTest.cpp
     )

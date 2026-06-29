@@ -337,10 +337,18 @@ QString installAttemptSummary(
 DeviceInstallResult installPackageWithAutoSigning(
     const QString& packagePath,
     const QString& targetId,
-    const CommandResult& initialInstall)
+    const CommandResult& initialInstall,
+    std::stop_token stopToken)
 {
     DeviceInstallResult result;
     HdcDeviceBackend backend;
+
+    if (stopToken.stop_requested()) {
+        result.error = DeviceInstallError::Cancelled;
+        result.commandLog = QStringLiteral("# status: error\n# operation: install_package\n# cancelled: true\n\n%1")
+            .arg(HdcDeviceBackend::resultSummary(initialInstall));
+        return result;
+    }
 
     const HarmonySigningSettings signingSettings = SigningSettingsStore::loadHarmony();
     const QString validationMessage = SigningSettingsStore::harmonyValidationMessage(signingSettings);
@@ -376,8 +384,19 @@ DeviceInstallResult installPackageWithAutoSigning(
             .oldBundleName = packageIdentity.bundleName,
             .newBundleName = materialStatus.profileBundleName,
             .javaProgram = HarmonyHapSigner::resolvedJavaProgram(),
-            .packingToolPath = HarmonyHapSigner::bundledPackingToolPath()
+            .packingToolPath = HarmonyHapSigner::bundledPackingToolPath(),
+            .stopToken = stopToken
         });
+        if (stopToken.stop_requested()) {
+            result.error = DeviceInstallError::Cancelled;
+            result.commandLog = installAttemptSummary(
+                initialInstall,
+                {},
+                {},
+                &rewriteResult,
+                QStringLiteral("# re_sign: approved_by_user\n# cancelled: true"));
+            return result;
+        }
         if (!rewriteResult.ok) {
             signedDir.setAutoRemove(false);
             result.error = DeviceInstallError::BundleRewriteFailed;
@@ -401,7 +420,17 @@ DeviceInstallResult installPackageWithAutoSigning(
         .certificatePath = signingSettings.certificatePath,
         .inputHapPath = signInputHapPath,
         .outputHapPath = signedHapPath
-    }));
+    }), stopToken);
+    if (stopToken.stop_requested()) {
+        result.error = DeviceInstallError::Cancelled;
+        result.commandLog = installAttemptSummary(
+            initialInstall,
+            signResult,
+            {},
+            rewriteUsed ? &rewriteResult : nullptr,
+            QStringLiteral("# re_sign: approved_by_user\n# cancelled: true"));
+        return result;
+    }
     if (!signResult.succeeded()) {
         signedDir.setAutoRemove(false);
         result.error = DeviceInstallError::SigningFailed;
@@ -423,7 +452,18 @@ DeviceInstallResult installPackageWithAutoSigning(
     }
 
     const CommandResult signedInstall = CommandRunner::runBlocking(
-        backend.installRequest(signedHapPath, targetId));
+        backend.installRequest(signedHapPath, targetId),
+        stopToken);
+    if (stopToken.stop_requested()) {
+        result.error = DeviceInstallError::Cancelled;
+        result.commandLog = installAttemptSummary(
+            initialInstall,
+            signResult,
+            signedInstall,
+            rewriteUsed ? &rewriteResult : nullptr,
+            QStringLiteral("# re_sign: approved_by_user\n# cancelled: true"));
+        return result;
+    }
     result.installed = HdcDeviceBackend::installSucceeded(signedInstall);
     if (result.installed) {
         result.status = rewriteUsed
@@ -461,11 +501,18 @@ DeviceInstallResult installPackageWithAutoSigning(
 
 DeviceInstallProbeResult probeInstallPackage(
     const QString& packagePath,
-    const QString& targetId)
+    const QString& targetId,
+    std::stop_token stopToken)
 {
     DeviceInstallProbeResult result;
     HdcDeviceBackend backend;
-    result.initialInstall = CommandRunner::runBlocking(backend.installRequest(packagePath, targetId));
+    result.initialInstall = CommandRunner::runBlocking(
+        backend.installRequest(packagePath, targetId),
+        stopToken);
+    if (stopToken.stop_requested()) {
+        result.error = DeviceInstallError::Cancelled;
+        return result;
+    }
     result.installed = HdcDeviceBackend::installSucceeded(result.initialInstall);
     if (result.installed) {
         result.status = DeviceInstallStatus::Installed;
@@ -535,6 +582,11 @@ bool DeviceRuntimeController::busy() const
 QString DeviceRuntimeController::activeOperation() const
 {
     return activeOperation_;
+}
+
+bool DeviceRuntimeController::screenRefreshBusy() const
+{
+    return busy_ && activeOperation_ == tr("Refresh screen");
 }
 
 QString DeviceRuntimeController::status() const
@@ -683,8 +735,13 @@ void DeviceRuntimeController::installPackage(const QString& packagePath)
         setErrorMessage(tr("Package does not exist: %1").arg(trimmed));
         return;
     }
+    if (screenRefreshTimer_.isActive()) {
+        stopScreenRefresh();
+    }
     if (busy_) {
-        setErrorMessage(tr("Another device operation is still running."));
+        setErrorMessage(activeOperation_ == tr("Refresh screen")
+                ? tr("Waiting for screen refresh to finish before installing.")
+                : tr("Another device operation is still running."));
         return;
     }
     if (!ensureDeviceAvailable()) {
@@ -694,13 +751,19 @@ void DeviceRuntimeController::installPackage(const QString& packagePath)
     hasPendingSigningInstall_ = false;
     pendingSigningPackagePath_.clear();
     pendingSigningTargetId_.clear();
+    installStopSource_ = std::stop_source {};
+    const std::stop_token stopToken = installStopSource_.get_token();
+    const quint64 runId = ++asyncInstallRunId_;
     setBusy(true, tr("Install package"));
     setErrorMessage({});
     auto* probeWatcher = new QFutureWatcher<DeviceInstallProbeResult>(this);
     const QString targetId = currentTargetId();
-    connect(probeWatcher, &QFutureWatcher<DeviceInstallProbeResult>::finished, this, [this, probeWatcher, trimmed, targetId]() {
+    connect(probeWatcher, &QFutureWatcher<DeviceInstallProbeResult>::finished, this, [this, probeWatcher, trimmed, targetId, runId]() {
         const DeviceInstallProbeResult result = probeWatcher->result();
         probeWatcher->deleteLater();
+        if (runId != asyncInstallRunId_) {
+            return;
+        }
 
         if (result.installed) {
             appendCommandLog(result.initialInstall);
@@ -737,8 +800,8 @@ void DeviceRuntimeController::installPackage(const QString& packagePath)
             tr("Re-sign and install package?"),
             tr("The device rejected this package because its signature is missing or invalid. ReArk can use your configured Harmony signing material to re-sign the package and install the signed copy."));
     });
-    probeWatcher->setFuture(QtConcurrent::run([trimmed, targetId]() {
-        return probeInstallPackage(trimmed, targetId);
+    probeWatcher->setFuture(QtConcurrent::run([trimmed, targetId, stopToken]() {
+        return probeInstallPackage(trimmed, targetId, stopToken);
     }));
 }
 
@@ -759,13 +822,19 @@ void DeviceRuntimeController::approveResignInstall()
     hasPendingSigningInstall_ = false;
     pendingSigningPackagePath_.clear();
     pendingSigningTargetId_.clear();
+    installStopSource_ = std::stop_source {};
+    const std::stop_token stopToken = installStopSource_.get_token();
+    const quint64 runId = ++asyncInstallRunId_;
 
     setBusy(true, tr("Re-sign and install package"));
     setErrorMessage({});
     auto* watcher = new QFutureWatcher<DeviceInstallResult>(this);
-    connect(watcher, &QFutureWatcher<DeviceInstallResult>::finished, this, [this, watcher, packagePath, targetId]() {
+    connect(watcher, &QFutureWatcher<DeviceInstallResult>::finished, this, [this, watcher, packagePath, targetId, runId]() {
         const DeviceInstallResult result = watcher->result();
         watcher->deleteLater();
+        if (runId != asyncInstallRunId_) {
+            return;
+        }
 
         if (!result.commandLog.trimmed().isEmpty()) {
             if (!commandLog_.isEmpty()) {
@@ -793,8 +862,8 @@ void DeviceRuntimeController::approveResignInstall()
         }
         setBusy(false);
     });
-    watcher->setFuture(QtConcurrent::run([packagePath, targetId, initialInstall]() {
-        return installPackageWithAutoSigning(packagePath, targetId, initialInstall);
+    watcher->setFuture(QtConcurrent::run([packagePath, targetId, initialInstall, stopToken]() {
+        return installPackageWithAutoSigning(packagePath, targetId, initialInstall, stopToken);
     }));
 }
 
@@ -1233,8 +1302,22 @@ void DeviceRuntimeController::captureAutoRefreshFrame()
 
 void DeviceRuntimeController::cancel()
 {
+    installStopSource_.request_stop();
+    if (hasPendingSigningInstall_) {
+        hasPendingSigningInstall_ = false;
+        pendingSigningPackagePath_.clear();
+        pendingSigningTargetId_.clear();
+        setStatus(tr("Install cancelled."));
+    }
     if (activeCommandId_ != 0) {
         runner_.cancel(activeCommandId_);
+    }
+    if (busy_ && (activeOperation_ == tr("Install package")
+            || activeOperation_ == tr("Re-sign and install package"))) {
+        ++asyncInstallRunId_;
+        setErrorMessage({});
+        setStatus(tr("Install cancelled."));
+        setBusy(false);
     }
 }
 
@@ -1436,6 +1519,8 @@ QString DeviceRuntimeController::translatedInstallError(DeviceInstallError error
         return tr("Install failed because signing failed.");
     case DeviceInstallError::SignedInstallFailed:
         return tr("Signed package install failed.");
+    case DeviceInstallError::Cancelled:
+        return tr("Install cancelled.");
     case DeviceInstallError::None:
         break;
     }

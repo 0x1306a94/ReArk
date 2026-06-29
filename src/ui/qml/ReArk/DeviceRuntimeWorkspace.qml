@@ -16,11 +16,13 @@ Rectangle {
     property string lastAppliedAbilityName: ""
     property int selectedUiNodeIndex: -1
     property var activeRuntimeOutput: null
+    property string pendingInstallPackagePath: ""
     readonly property bool hasUiEvidence: controller !== null && controller.filteredUiNodes.length > 0
     readonly property bool hasCommandEvidence: controller !== null && controller.commandLog.length > 0
     readonly property bool hasHilogEvidence: controller !== null && controller.hilogText.length > 0
     readonly property bool hasEvidenceDetails: hasUiEvidence || hasCommandEvidence || hasHilogEvidence
     readonly property bool hasSelectedDevice: controller !== null && controller.selectedDeviceId.length > 0
+    readonly property bool refreshOperationActive: controller !== null && controller.screenRefreshBusy
     readonly property bool darkTheme: Material.theme === Material.Dark
     readonly property color pageColor: darkTheme ? "#1e1e1e" : "#f5f7f8"
     readonly property color panelColor: darkTheme ? "#202226" : "#ffffff"
@@ -67,6 +69,26 @@ Rectangle {
 
     Component.onCompleted: {
         root.refreshActiveLaunchMetadata()
+    }
+
+    Timer {
+        id: deferredInstallTimer
+        interval: 120
+        repeat: true
+        onTriggered: {
+            if (root.controller === null || root.pendingInstallPackagePath.length === 0) {
+                stop()
+                root.pendingInstallPackagePath = ""
+                return
+            }
+            if (root.refreshOperationActive) {
+                return
+            }
+            const packagePath = root.pendingInstallPackagePath
+            root.pendingInstallPackagePath = ""
+            stop()
+            root.controller.installPackage(packagePath)
+        }
     }
 
     ColumnLayout {
@@ -462,11 +484,9 @@ Rectangle {
                                         Layout.preferredWidth: root.runtimeActionWidth
                                         text: qsTr("Install")
                                         visible: root.packagePath.length > 0
-                                        enabled: root.controller !== null
-                                                 && root.hasSelectedDevice
-                                                 && !root.controller.busy
-                                                 && root.activeInstallablePackagePath().length > 0
-                                        onClicked: root.controller.installPackage(root.activeInstallablePackagePath())
+                                        enabled: root.canInstallActivePackage()
+                                        toolTip: root.installUnavailableReason()
+                                        onClicked: root.installActivePackage()
                                     }
 
                                     RuntimeButton {
@@ -932,6 +952,7 @@ Rectangle {
 
     component RuntimeButton: AbstractButton {
         property string tone: "normal"
+        property string toolTip: ""
         readonly property color baseColor: tone === "primary"
                                            ? (root.darkTheme ? "#23495d" : "#d8eaf3")
                                            : tone === "quiet"
@@ -986,6 +1007,10 @@ Rectangle {
                           ? root.focusColor
                           : root.dividerColor
         }
+
+        ToolTip.text: toolTip
+        ToolTip.visible: hovered && toolTip.length > 0
+        ToolTip.delay: 500
     }
 
     component RuntimeComboBox: ComboBox {
@@ -1324,14 +1349,74 @@ Rectangle {
     }
 
     function activeInstallablePackagePath() {
-        if (root.installablePackages !== null
-                && root.installablePackages !== undefined
-                && root.installablePackages.length === 1
-                && root.installablePackages[0].path !== undefined
-                && root.installablePackages[0].path.length > 0) {
-            return root.installablePackages[0].path
+        const hapPackages = root.installableHapPackages()
+        if (hapPackages.length === 1) {
+            return hapPackages[0].path
         }
-        return root.packagePath.toLowerCase().endsWith(".hap") ? root.packagePath : ""
+        const currentPath = root.packagePath.toLowerCase()
+        return currentPath.endsWith(".hap") ? root.packagePath : ""
+    }
+
+    function canInstallActivePackage() {
+        return root.controller !== null
+                && root.hasSelectedDevice
+                && root.activeInstallablePackagePath().length > 0
+                && (!root.controller.busy || root.refreshOperationActive)
+    }
+
+    function installUnavailableReason() {
+        if (root.controller === null) {
+            return qsTr("Device runtime is not ready.")
+        }
+        if (!root.hasSelectedDevice) {
+            return qsTr("Select a connected device first.")
+        }
+        if (root.activeInstallablePackagePath().length === 0) {
+            return qsTr("No installable HAP module was resolved from this package.")
+        }
+        if (root.controller.busy && !root.refreshOperationActive) {
+            return root.controller.activeOperation.length > 0
+                    ? qsTr("Waiting for %1 to finish.").arg(root.controller.activeOperation)
+                    : qsTr("Waiting for the current device operation to finish.")
+        }
+        return ""
+    }
+
+    function installActivePackage() {
+        if (root.controller === null) {
+            return
+        }
+        const packagePath = root.activeInstallablePackagePath()
+        if (packagePath.length === 0) {
+            return
+        }
+        if (root.controller.screenRefreshRunning) {
+            root.controller.stopScreenRefresh()
+        }
+        if (root.refreshOperationActive) {
+            root.pendingInstallPackagePath = packagePath
+            deferredInstallTimer.restart()
+            return
+        }
+        root.controller.installPackage(packagePath)
+    }
+
+    function installableHapPackages() {
+        const result = []
+        if (root.installablePackages === null || root.installablePackages === undefined) {
+            return result
+        }
+        for (let i = 0; i < root.installablePackages.length; ++i) {
+            const item = root.installablePackages[i]
+            if (item === null || item === undefined || item.path === undefined) {
+                continue
+            }
+            const path = item.path || ""
+            if (path.length > 0 && path.toLowerCase().endsWith(".hap")) {
+                result.push(item)
+            }
+        }
+        return result
     }
 
     function overlayScale() {

@@ -12,6 +12,8 @@
 #include <QTimer>
 #include <QVariantList>
 
+#include <stop_token>
+
 enum class DeviceInstallStatus {
     None,
     Installed,
@@ -27,7 +29,8 @@ enum class DeviceInstallError {
     TemporaryDirectoryFailed,
     BundleRewriteFailed,
     SigningFailed,
-    SignedInstallFailed
+    SignedInstallFailed,
+    Cancelled
 };
 
 class DeviceRuntimeController : public QObject {
@@ -36,6 +39,7 @@ class DeviceRuntimeController : public QObject {
     Q_PROPERTY(QString selectedDeviceId READ selectedDeviceId WRITE setSelectedDeviceId NOTIFY selectedDeviceChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString activeOperation READ activeOperation NOTIFY busyChanged)
+    Q_PROPERTY(bool screenRefreshBusy READ screenRefreshBusy NOTIFY busyChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
     Q_PROPERTY(QString commandLog READ commandLog NOTIFY commandLogChanged)
@@ -63,6 +67,7 @@ public:
 
     [[nodiscard]] bool busy() const;
     [[nodiscard]] QString activeOperation() const;
+    [[nodiscard]] bool screenRefreshBusy() const;
     [[nodiscard]] QString status() const;
     [[nodiscard]] QString errorMessage() const;
     [[nodiscard]] QString commandLog() const;
@@ -179,6 +184,8 @@ private:
     QString uiNodeSummary_;
     QString uiNodeFilter_;
     QString screenRefreshStatus_;
+    std::stop_source installStopSource_;
+    quint64 asyncInstallRunId_ = 0;
     int screenRefreshFrameCount_ = 0;
     double screenRefreshFps_ = 0.0;
     int activeCommandId_ = 0;

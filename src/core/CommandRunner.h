@@ -8,6 +8,7 @@
 #include <QStringList>
 
 #include <functional>
+#include <stop_token>
 
 struct CommandRequest {
     QString program;
@@ -47,6 +48,7 @@ public:
     Q_INVOKABLE void cancelAll();
 
     [[nodiscard]] static CommandResult runBlocking(const CommandRequest& request);
+    [[nodiscard]] static CommandResult runBlocking(const CommandRequest& request, std::stop_token stopToken);
 
 private:
     struct ActiveCommand;

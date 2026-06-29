@@ -24,6 +24,42 @@ QString quoteArgument(const QString& argument)
     return QStringLiteral("\"%1\"").arg(escaped);
 }
 
+QString decodeProcessOutput(const QByteArray& output)
+{
+    QString text = QString::fromUtf8(output);
+    if (!text.contains(QChar::ReplacementCharacter)) {
+        return text;
+    }
+    const QString localText = QString::fromLocal8Bit(output);
+    return localText.contains(QChar::ReplacementCharacter) ? text : localText;
+}
+
+void collectProcessResult(QProcess& process, QElapsedTimer& elapsed, CommandResult* result)
+{
+    if (result == nullptr) {
+        return;
+    }
+    result->elapsedMs = int(elapsed.elapsed());
+    result->exitCode = process.exitCode();
+    result->exitStatus = process.exitStatus();
+    const QProcess::ProcessError processError = process.error();
+    const bool finishedSuccessfully =
+        process.state() == QProcess::NotRunning
+        && result->exitStatus == QProcess::NormalExit
+        && result->exitCode == 0
+        && !result->timedOut;
+    result->processError =
+        finishedSuccessfully && processError == QProcess::Timedout
+            ? QProcess::UnknownError
+            : processError;
+    result->standardOutput = decodeProcessOutput(process.readAllStandardOutput());
+    result->standardError = decodeProcessOutput(process.readAllStandardError());
+    if (result->errorMessage.isEmpty()
+        && result->processError != QProcess::UnknownError) {
+        result->errorMessage = process.errorString();
+    }
+}
+
 } // namespace
 
 bool CommandResult::succeeded() const
@@ -161,6 +197,11 @@ void CommandRunner::cancelAll()
 
 CommandResult CommandRunner::runBlocking(const CommandRequest& request)
 {
+    return runBlocking(request, {});
+}
+
+CommandResult CommandRunner::runBlocking(const CommandRequest& request, std::stop_token stopToken)
+{
     QElapsedTimer elapsed;
     elapsed.start();
 
@@ -168,37 +209,71 @@ CommandResult CommandRunner::runBlocking(const CommandRequest& request)
     result.program = request.program;
     result.arguments = request.arguments;
 
+    if (stopToken.stop_requested()) {
+        result.errorMessage = QObject::tr("Command cancelled.");
+        result.elapsedMs = int(elapsed.elapsed());
+        return result;
+    }
+
     QProcess process;
     if (!request.workingDirectory.trimmed().isEmpty()) {
         process.setWorkingDirectory(request.workingDirectory);
     }
     process.start(request.program, request.arguments);
-    if (!process.waitForStarted(std::min(std::max(1, request.timeoutMs), 5000))) {
-        result.processError = process.error();
-        result.errorMessage = process.errorString();
-        result.elapsedMs = int(elapsed.elapsed());
-        result.standardOutput = QString::fromUtf8(process.readAllStandardOutput());
-        result.standardError = QString::fromUtf8(process.readAllStandardError());
+
+    const int startTimeoutMs = std::min(std::max(1, request.timeoutMs), 5000);
+    while (process.state() == QProcess::Starting) {
+        if (stopToken.stop_requested()) {
+            result.errorMessage = QObject::tr("Command cancelled.");
+            process.kill();
+            process.waitForFinished(1000);
+            collectProcessResult(process, elapsed, &result);
+            return result;
+        }
+
+        const int remainingMs = startTimeoutMs - int(elapsed.elapsed());
+        if (remainingMs <= 0 || !process.waitForStarted(std::min(50, remainingMs))) {
+            if (process.state() == QProcess::Running) {
+                break;
+            }
+            if (remainingMs <= 0 || process.state() == QProcess::NotRunning) {
+                collectProcessResult(process, elapsed, &result);
+                if (result.errorMessage.isEmpty()) {
+                    result.errorMessage = process.errorString();
+                }
+                return result;
+            }
+        }
+    }
+
+    if (process.state() == QProcess::NotRunning) {
+        collectProcessResult(process, elapsed, &result);
         return result;
     }
 
     result.started = true;
-    if (!process.waitForFinished(std::max(1, request.timeoutMs))) {
-        result.timedOut = true;
-        result.errorMessage = QObject::tr("Command timed out.");
-        process.kill();
-        process.waitForFinished(1000);
+    const int timeoutMs = std::max(1, request.timeoutMs);
+    while (process.state() != QProcess::NotRunning) {
+        if (stopToken.stop_requested()) {
+            result.errorMessage = QObject::tr("Command cancelled.");
+            process.kill();
+            process.waitForFinished(1000);
+            break;
+        }
+
+        const int remainingMs = timeoutMs - int(elapsed.elapsed());
+        if (remainingMs <= 0) {
+            result.timedOut = true;
+            result.errorMessage = QObject::tr("Command timed out.");
+            process.kill();
+            process.waitForFinished(1000);
+            break;
+        }
+
+        process.waitForFinished(std::min(100, remainingMs));
     }
 
-    result.elapsedMs = int(elapsed.elapsed());
-    result.exitCode = process.exitCode();
-    result.exitStatus = process.exitStatus();
-    result.processError = process.error();
-    result.standardOutput = QString::fromUtf8(process.readAllStandardOutput());
-    result.standardError = QString::fromUtf8(process.readAllStandardError());
-    if (result.errorMessage.isEmpty() && result.processError != QProcess::UnknownError) {
-        result.errorMessage = process.errorString();
-    }
+    collectProcessResult(process, elapsed, &result);
     return result;
 }
 
@@ -212,8 +287,8 @@ void CommandRunner::finish(int commandId)
     active->finished = true;
     active->timer->stop();
     active->result.elapsedMs = int(active->elapsed.elapsed());
-    active->result.standardOutput = QString::fromUtf8(active->process->readAllStandardOutput());
-    active->result.standardError = QString::fromUtf8(active->process->readAllStandardError());
+    active->result.standardOutput = decodeProcessOutput(active->process->readAllStandardOutput());
+    active->result.standardError = decodeProcessOutput(active->process->readAllStandardError());
     if (active->result.errorMessage.isEmpty()
         && active->result.processError != QProcess::UnknownError) {
         active->result.errorMessage = active->process->errorString();

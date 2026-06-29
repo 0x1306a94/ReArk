@@ -28,6 +28,7 @@ public:
     void clear();
     void removeMessage(int row);
     void appendText(int row, const QString& text);
+    void setText(int row, const QString& text);
     void setActivities(int row, const QVariantList& activities);
     void finishStreaming(int row, const QString& fallbackText);
     void failStreaming(int row);

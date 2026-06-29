@@ -30,6 +30,8 @@
 #include "signing/HarmonyHapSigner.h"
 #include "signing/SigningMaterialInspector.h"
 
+#include <hyle/hap/hap.h>
+
 #include <QClipboard>
 #include <QDateTime>
 #include <QDir>
@@ -103,6 +105,15 @@ QString toolDisplayName(const std::string& name)
     }
     if (name == "update_agent_scratchpad") {
         return AgentController::tr("analysis notes");
+    }
+    if (name == "read_python_session") {
+        return AgentController::tr("Python analysis state");
+    }
+    if (name == "update_python_session") {
+        return AgentController::tr("Python analysis state");
+    }
+    if (name == "clear_python_session") {
+        return AgentController::tr("Python analysis state");
     }
     if (name == "summarize_current_target") {
         return AgentController::tr("current target summary");
@@ -193,6 +204,54 @@ QString fromStringView(std::string_view value)
     return QString::fromUtf8(value.data(), qsizetype(value.size()));
 }
 
+std::optional<QString> plainTextToolCallName(const nlohmann::json& value)
+{
+    if (!value.is_object()) {
+        return std::nullopt;
+    }
+
+    auto tool = value.find("tool");
+    if (tool == value.end()) {
+        tool = value.find("name");
+    }
+    if (tool != value.end() && tool->is_string()) {
+        const QString name = QString::fromStdString(tool->get<std::string>()).trimmed();
+        if (!name.isEmpty()) {
+            return name;
+        }
+    }
+
+    const auto arguments = value.find("arguments");
+    if (arguments != value.end()) {
+        return plainTextToolCallName(*arguments);
+    }
+
+    return std::nullopt;
+}
+
+std::optional<QString> plainTextToolCallName(const QString& text)
+{
+    const QString trimmed = text.trimmed();
+    if (!trimmed.startsWith(QLatin1Char('{')) || !trimmed.endsWith(QLatin1Char('}'))) {
+        return std::nullopt;
+    }
+
+    try {
+        return plainTextToolCallName(nlohmann::json::parse(toStdString(trimmed)));
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+QString plainTextToolCallFallbackMessage(const QString& toolName)
+{
+    return AgentController::tr(
+        "The configured model returned a tool call as plain text, so ReArk did not execute it.\n\n"
+        "Requested tool: %1\n\n"
+        "Use a model that supports function/tool calling for Agent actions, or run the operation from Device Runtime.")
+        .arg(toolName.isEmpty() ? AgentController::tr("<unknown>") : toolName);
+}
+
 std::shared_ptr<wuwe::llm_client> createLlmClient(const AgentSettings& settings)
 {
     const QString provider = settings.provider.trimmed();
@@ -202,9 +261,9 @@ std::shared_ptr<wuwe::llm_client> createLlmClient(const AgentSettings& settings)
         .api_key = toStdString(settings.apiKey),
         .require_api_key = settings.requireApiKey,
         .model = toStdString(settings.model),
-        .timeout = 120000,
+        .timeout = 90000,
         .stream_timeouts = {
-            .total_ms = 300000,
+            .total_ms = 120000,
             .connect_ms = 15000,
             .first_event_ms = 45000,
             .idle_ms = 45000,
@@ -228,6 +287,17 @@ std::shared_ptr<wuwe::llm_client> createLlmClient(const AgentSettings& settings)
 constexpr int kMaxAgentScratchpadChars = 60000;
 constexpr int kDefaultAgentScratchpadReadChars = 12000;
 constexpr int kMaxAgentScratchpadUpdateChars = 20000;
+constexpr int kMaxPythonSessionPreludeChars = 60000;
+constexpr int kDefaultPythonSessionReadChars = 16000;
+constexpr int kMaxPythonSessionUpdateChars = 24000;
+constexpr qint64 kAgentWatchdogIntervalMs = 5000;
+constexpr qint64 kAgentModelIdleWarningMs = 15000;
+constexpr qint64 kAgentModelIdleStopMs = 95000;
+
+struct PythonSessionState {
+    mutable std::mutex mutex;
+    QString prelude;
+};
 
 #ifdef REARK_HAS_WUWE_EXECUTION
 constexpr std::size_t kMaxAnalysisScriptCodeBytes = 32 * 1024;
@@ -424,6 +494,13 @@ std::string analysisScriptArgumentError(const std::string& argumentsJson)
             return "Invalid run_analysis_script arguments: unsupported parameter '" + key
                 + "'. Only code, stdin_text, and timeout_ms are allowed.";
         }
+        if ((key == "code" || key == "stdin_text") && !item.value().is_string()) {
+            return "Invalid run_analysis_script arguments: parameter '" + key
+                + "' must be a string.";
+        }
+        if (key == "timeout_ms" && !item.value().is_number_integer()) {
+            return "Invalid run_analysis_script arguments: parameter 'timeout_ms' must be an integer.";
+        }
     }
 
     return {};
@@ -432,8 +509,10 @@ std::string analysisScriptArgumentError(const std::string& argumentsJson)
 class ReArkExecutionToolProvider {
 public:
     explicit ReArkExecutionToolProvider(
-        std::shared_ptr<wuwe::agent::execution::execution_tool_provider> provider)
+        std::shared_ptr<wuwe::agent::execution::execution_tool_provider> provider,
+        std::shared_ptr<PythonSessionState> pythonSession)
         : provider_(std::move(provider))
+        , pythonSession_(std::move(pythonSession))
     {
     }
 
@@ -473,11 +552,59 @@ public:
                     wuwe::agent::llm_error_code::invalid_tool_arguments)
             };
         }
-        return provider_->invoke(name, argumentsJson, stopToken);
+
+        QString prelude;
+        if (pythonSession_ != nullptr) {
+            const std::scoped_lock lock(pythonSession_->mutex);
+            prelude = pythonSession_->prelude.trimmed();
+        }
+        if (prelude.isEmpty()) {
+            return provider_->invoke(name, argumentsJson, stopToken);
+        }
+
+        nlohmann::json arguments;
+        try {
+            arguments = nlohmann::json::parse(argumentsJson);
+        } catch (const std::exception& ex) {
+            return {
+                .content = std::string("Invalid run_analysis_script arguments: ") + ex.what(),
+                .error_code = wuwe::agent::make_error_code(
+                    wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        const QString code = QString::fromStdString(arguments.value("code", std::string {}));
+        const QString combinedCode =
+            prelude + QStringLiteral("\n\n# --- ReArk Python analysis script ---\n") + code;
+        const QByteArray combinedCodeBytes = combinedCode.toUtf8();
+        if (static_cast<std::size_t>(combinedCodeBytes.size()) > kMaxAnalysisScriptCodeBytes) {
+            return {
+                .content = "run_analysis_script rejected: Python session state plus code exceeds the ReArk host code limit of "
+                    + std::to_string(kMaxAnalysisScriptCodeBytes)
+                    + " bytes. Clear or shrink the Python session state before running this script.",
+                .error_code = wuwe::agent::make_error_code(
+                    wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        arguments["code"] = toStdString(combinedCode);
+        const std::string combinedArgumentsJson = arguments.dump();
+        if (combinedArgumentsJson.size() > kMaxAnalysisScriptArgumentsBytes) {
+            return {
+                .content = "run_analysis_script rejected: Python session state plus arguments exceed the ReArk host input limit of "
+                    + std::to_string(kMaxAnalysisScriptArgumentsBytes)
+                    + " bytes. Clear or shrink the Python session state before running this script.",
+                .error_code = wuwe::agent::make_error_code(
+                    wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        return provider_->invoke(name, combinedArgumentsJson, stopToken);
     }
 
 private:
     std::shared_ptr<wuwe::agent::execution::execution_tool_provider> provider_;
+    std::shared_ptr<PythonSessionState> pythonSession_;
 };
 #endif
 
@@ -491,6 +618,7 @@ QString boundedSnapshotText(const QString& text, int maxChars);
 struct ReArkToolContext {
     std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot;
     std::shared_ptr<AgentScratchpad> scratchpad;
+    std::shared_ptr<PythonSessionState> pythonSession;
     std::stop_token stopToken;
 };
 
@@ -535,6 +663,59 @@ QString updateAgentScratchpad(
     }
 
     return QStringLiteral("# scratchpad: saved\n# chars: %1").arg(scratchpad->text.size());
+}
+
+QString readPythonSession(
+    const std::shared_ptr<PythonSessionState>& session,
+    int maxChars = kDefaultPythonSessionReadChars)
+{
+    if (session == nullptr) {
+        return {};
+    }
+    const std::scoped_lock lock(session->mutex);
+    return boundedSnapshotText(session->prelude, maxChars);
+}
+
+QString updatePythonSession(
+    const std::shared_ptr<PythonSessionState>& session,
+    QString prelude,
+    const QString& mode)
+{
+    if (session == nullptr) {
+        return QStringLiteral("# python_session: unavailable");
+    }
+
+    prelude = prelude.trimmed();
+    if (prelude.size() > kMaxPythonSessionUpdateChars) {
+        prelude = prelude.left(kMaxPythonSessionUpdateChars)
+            + QStringLiteral("\n\n# update truncated to %1 characters").arg(kMaxPythonSessionUpdateChars);
+    }
+
+    const std::scoped_lock lock(session->mutex);
+    if (mode == QStringLiteral("append") && !session->prelude.trimmed().isEmpty()) {
+        session->prelude += QStringLiteral("\n\n");
+        session->prelude += prelude;
+    } else {
+        session->prelude = prelude;
+    }
+
+    if (session->prelude.size() > kMaxPythonSessionPreludeChars) {
+        session->prelude = session->prelude.right(kMaxPythonSessionPreludeChars);
+        session->prelude.prepend(QStringLiteral("# python_session truncated to recent %1 characters\n\n")
+            .arg(kMaxPythonSessionPreludeChars));
+    }
+
+    return QStringLiteral("# python_session: saved\n# chars: %1").arg(session->prelude.size());
+}
+
+QString clearPythonSession(const std::shared_ptr<PythonSessionState>& session)
+{
+    if (session == nullptr) {
+        return QStringLiteral("# python_session: unavailable");
+    }
+    const std::scoped_lock lock(session->mutex);
+    session->prelude.clear();
+    return QStringLiteral("# python_session: cleared");
 }
 
 int normalizedLimit(int limit, int fallback)
@@ -1227,7 +1408,9 @@ QString agentTaskModeInstruction(const AgentTaskProfile& profile)
             "- ReArk's install_current_hap tool installs the resolved HAP module from the current package.\n"
             "- If installation is rejected because the HAP is unsigned or signature verification fails, and Harmony signing is configured in Settings, install_current_hap automatically signs and retries.\n"
             "- If the package bundle identity differs from the configured signing profile bundle, install_current_hap can rewrite the HAP bundle identity, repack, sign, and retry installation.\n"
-            "- Do not tell the user ReArk lacks re-signing capability; if automatic signing cannot run, report the concrete signing settings or tool error from install_current_hap.");
+            "- Do not tell the user ReArk lacks re-signing capability; if automatic signing cannot run, report the concrete signing settings or tool error from install_current_hap.\n"
+            "- Do not claim install, signing, bundle rewrite, packing, or launch succeeded, failed, or timed out unless install_current_hap or another ReArk device tool actually returned that status.\n"
+            "- Only say app_packing_tool.jar timed out when the tool output contains timed_out: true or Command timed out; otherwise say the operation was not actually executed or the exact observed error is unknown.");
     }
 
     return QStringLiteral(
@@ -1263,19 +1446,24 @@ QString agentRewrittenHapFileName(const QString& sourcePath)
     return baseName + QStringLiteral("-rebundle-unsigned.hap");
 }
 
-QString packageBundleNameFromSummary(const QString& summary)
-{
-    static const QRegularExpression bundleNamePattern(
-        QStringLiteral("\"bundleName\"\\s*:\\s*\"([^\"]+)\""));
-    QRegularExpressionMatch match = bundleNamePattern.match(summary);
-    if (match.hasMatch()) {
-        return match.captured(1).trimmed();
-    }
+struct AgentPackageIdentity {
+    QString bundleName;
+    QString summaryError;
+};
 
-    static const QRegularExpression profileBundleNamePattern(
-        QStringLiteral("\"bundle-name\"\\s*:\\s*\"([^\"]+)\""));
-    match = profileBundleNamePattern.match(summary);
-    return match.hasMatch() ? match.captured(1).trimmed() : QString();
+AgentPackageIdentity readAgentPackageIdentity(const QString& hapPath)
+{
+    AgentPackageIdentity identity;
+    auto summary = hyle::hap::summarize_decompiled_package(toStdString(hapPath));
+    if (!summary) {
+        identity.summaryError = QStringLiteral("Package summary failed: %1")
+            .arg(QString::fromUtf8(summary.error().message().data(), qsizetype(summary.error().message().size())));
+        return identity;
+    }
+    identity.bundleName = QString::fromUtf8(
+        summary->bundle_name.data(),
+        qsizetype(summary->bundle_name.size())).trimmed();
+    return identity;
 }
 
 QString packageCompatibleVersionFromSummary(const QString& summary)
@@ -1470,7 +1658,8 @@ struct AgentUiLayoutEvidence {
 
 AgentUiLayoutEvidence dumpUiLayoutForAgent(
     const QString& target,
-    const QString& bundleName = {})
+    const QString& bundleName = {},
+    std::stop_token stopToken = {})
 {
     UiAutomationBackend backend = agentUiBackend();
     HdcDeviceBackend deviceBackend = agentDeviceBackend();
@@ -1478,14 +1667,18 @@ AgentUiLayoutEvidence dumpUiLayoutForAgent(
     AgentUiLayoutEvidence evidence;
     evidence.localPath = agentLayoutPath();
     evidence.dump = CommandRunner::runBlocking(
-        backend.dumpLayoutRequest(remotePath, target, bundleName));
+        backend.dumpLayoutRequest(remotePath, target, bundleName),
+        stopToken);
     if (!evidence.dump.succeeded()) {
         return evidence;
     }
 
     evidence.receive = CommandRunner::runBlocking(
-        deviceBackend.receiveFileRequest(remotePath, evidence.localPath, target));
-    (void)CommandRunner::runBlocking(deviceBackend.removeRemoteFileRequest(remotePath, target));
+        deviceBackend.receiveFileRequest(remotePath, evidence.localPath, target),
+        stopToken);
+    (void)CommandRunner::runBlocking(
+        deviceBackend.removeRemoteFileRequest(remotePath, target),
+        stopToken);
     if (!evidence.receive.succeeded()) {
         return evidence;
     }
@@ -1598,6 +1791,82 @@ struct update_agent_scratchpad {
                 normalizedMode == QStringLiteral("append")
                     ? QStringLiteral("append")
                     : QStringLiteral("replace")))
+        };
+    }
+};
+
+struct read_python_session {
+    static constexpr std::string_view description =
+        "Read the reusable Python analysis state for this chat. The host automatically prepends this state to run_analysis_script calls when present.";
+
+    wuwe::field<int> max_chars {
+        .default_value = kDefaultPythonSessionReadChars,
+        .description = "Maximum Python analysis state characters to return."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        const QString text = readPythonSession(context.pythonSession, max_chars.value);
+        return {
+            .content = toStdString(text.trimmed().isEmpty()
+                    ? QStringLiteral("# python_session: empty")
+                    : text)
+        };
+    }
+};
+
+struct update_python_session {
+    static constexpr std::string_view description =
+        "Save reusable Python analysis state for this chat. Store constants, decoded byte arrays, lookup tables, and helper function definitions that should survive across run_analysis_script calls.";
+
+    wuwe::field<std::string> prelude {
+        .description = "Valid Python source to reuse in future run_analysis_script calls. Keep it minimal and deterministic."
+    };
+    wuwe::field<std::string> mode {
+        .default_value = "replace",
+        .description = "replace or append."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        const QString normalizedMode = QString::fromStdString(mode.value).trimmed().toCaseFolded();
+        if (!normalizedMode.isEmpty()
+            && normalizedMode != QStringLiteral("replace")
+            && normalizedMode != QStringLiteral("append")) {
+            return {
+                .content = "Invalid Python session mode. Use replace or append.",
+                .error_code = wuwe::agent::make_error_code(
+                    wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+        return {
+            .content = toStdString(updatePythonSession(
+                context.pythonSession,
+                QString::fromStdString(prelude.value),
+                normalizedMode == QStringLiteral("append")
+                    ? QStringLiteral("append")
+                    : QStringLiteral("replace")))
+        };
+    }
+};
+
+struct clear_python_session {
+    static constexpr std::string_view description =
+        "Clear the reusable Python analysis state for this chat when prior constants or helper functions are stale or misleading.";
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        return {
+            .content = toStdString(clearPythonSession(context.pythonSession))
         };
     }
 };
@@ -2093,7 +2362,9 @@ struct list_harmony_devices {
         }
 
         HdcDeviceBackend backend = agentDeviceBackend();
-        const CommandResult result = CommandRunner::runBlocking(backend.listTargetsRequest());
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.listTargetsRequest(),
+            context.stopToken);
         const QList<HdcDeviceTarget> targets = HdcDeviceBackend::parseTargets(result.standardOutput);
 
         QString extra = QStringLiteral("# hdc: %1\n# target_count: %2").arg(
@@ -2147,7 +2418,11 @@ struct install_current_hap {
 
         const QString targetId = QString::fromStdString(target_id.value);
         const CommandResult result = CommandRunner::runBlocking(
-            backend.installRequest(selection.path, targetId));
+            backend.installRequest(selection.path, targetId),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const bool installOk = HdcDeviceBackend::installSucceeded(result);
         const QString extra = QStringLiteral("# active_package: %1\n# installable_hap: %2\n# source_module: %3\n# hdc: %4").arg(
             context.snapshot->packagePath,
@@ -2176,8 +2451,8 @@ struct install_current_hap {
 
             const SigningMaterialStatus materialStatus =
                 SigningMaterialInspector::inspectHarmony(signingSettings);
-            const QString packageBundleName =
-                packageBundleNameFromSummary(context.snapshot->packageSummary);
+            const AgentPackageIdentity packageIdentity = readAgentPackageIdentity(selection.path);
+            const QString packageBundleName = packageIdentity.bundleName;
 
             QTemporaryDir signedDir(QDir::temp().filePath(QStringLiteral("ReArk-agent-signed-hap-XXXXXX")));
             if (!signedDir.isValid()) {
@@ -2209,8 +2484,12 @@ struct install_current_hap {
                     .oldBundleName = packageBundleName,
                     .newBundleName = materialStatus.profileBundleName,
                     .javaProgram = HarmonyHapSigner::resolvedJavaProgram(),
-                    .packingToolPath = HarmonyHapSigner::bundledPackingToolPath()
+                    .packingToolPath = HarmonyHapSigner::bundledPackingToolPath(),
+                    .stopToken = context.stopToken
                 });
+                if (auto cancelled = cancelledToolResult(context)) {
+                    return *cancelled;
+                }
                 if (!rewriteResult.ok) {
                     signedDir.setAutoRemove(false);
                     QString text;
@@ -2223,6 +2502,9 @@ struct install_current_hap {
                     text += QStringLiteral("# package_bundle: %1\n").arg(packageBundleName);
                     text += QStringLiteral("# signing_profile_bundle: %1\n").arg(materialStatus.profileBundleName);
                     text += QStringLiteral("# rewritten_hap: %1\n\n").arg(rewrittenHapPath);
+                    if (!packageIdentity.summaryError.isEmpty()) {
+                        text += QStringLiteral("# package_summary_warning: %1\n").arg(packageIdentity.summaryError);
+                    }
                     text += HdcDeviceBackend::resultSummary(result);
                     text += QStringLiteral("\n\n[bundle rewrite]\n");
                     text += QStringLiteral("# status: error\n# error: %1\n").arg(rewriteResult.error.trimmed());
@@ -2255,7 +2537,10 @@ struct install_current_hap {
                 .inputHapPath = signInputHapPath,
                 .outputHapPath = signedHapPath,
                 .compatibleVersion = packageCompatibleVersionFromSummary(context.snapshot->packageSummary)
-            }));
+            }), context.stopToken);
+            if (auto cancelled = cancelledToolResult(context)) {
+                return *cancelled;
+            }
             if (!signResult.succeeded()) {
                 signedDir.setAutoRemove(false);
                 const QString signedExtra = extra
@@ -2264,6 +2549,9 @@ struct install_current_hap {
                     + (bundleRewriteUsed
                         ? QStringLiteral("\n# package_bundle: %1\n# signing_profile_bundle: %2\n# rewritten_hap: %3")
                             .arg(packageBundleName, materialStatus.profileBundleName, signInputHapPath)
+                        : QString())
+                    + (!packageIdentity.summaryError.isEmpty()
+                        ? QStringLiteral("\n# package_summary_warning: %1").arg(packageIdentity.summaryError)
                         : QString())
                     + QStringLiteral("\n%1").arg(signingSettingsStatusLine(validationMessage))
                     + QStringLiteral("\n# signed_hap: %1").arg(signedHapPath);
@@ -2276,7 +2564,11 @@ struct install_current_hap {
             }
 
             const CommandResult signedInstallResult = CommandRunner::runBlocking(
-                backend.installRequest(signedHapPath, targetId));
+                backend.installRequest(signedHapPath, targetId),
+                context.stopToken);
+            if (auto cancelled = cancelledToolResult(context)) {
+                return *cancelled;
+            }
             const bool signedInstallOk = HdcDeviceBackend::installSucceeded(signedInstallResult);
             if (!signedInstallOk) {
                 signedDir.setAutoRemove(false);
@@ -2287,6 +2579,9 @@ struct install_current_hap {
                 + (bundleRewriteUsed
                     ? QStringLiteral("\n# package_bundle: %1\n# signing_profile_bundle: %2\n# installed_bundle: %2")
                         .arg(packageBundleName, materialStatus.profileBundleName)
+                    : QString())
+                + (!packageIdentity.summaryError.isEmpty()
+                    ? QStringLiteral("\n# package_summary_warning: %1").arg(packageIdentity.summaryError)
                     : QString())
                 + QStringLiteral("\n%1").arg(signingSettingsStatusLine(validationMessage))
                 + (signedInstallOk
@@ -2352,11 +2647,23 @@ struct start_harmony_app {
                 bundle,
                 ability,
                 module,
-                target));
+                target),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const CommandResult missionResult = CommandRunner::runBlocking(
-            backend.missionListRequest(target));
+            backend.missionListRequest(target),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const CommandResult processResult = CommandRunner::runBlocking(
-            backend.processListRequest(target));
+            backend.processListRequest(target),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const QString missionOutput = missionResult.standardOutput + QLatin1Char('\n') + missionResult.standardError;
         const bool visibleLaunch = result.succeeded()
             && (startWaitOutputLooksLaunched(result, bundle)
@@ -2406,7 +2713,11 @@ struct read_hilog {
         const CommandResult result = CommandRunner::runBlocking(
             backend.hilogRequest(
                 QString::fromStdString(target_id.value),
-                QString::fromStdString(level.value)));
+                QString::fromStdString(level.value)),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const QString filtered = HdcDeviceBackend::filterHilog(
             result.standardOutput + result.standardError,
             QString::fromStdString(filter.value),
@@ -2451,7 +2762,11 @@ struct capture_device_screenshot {
         const QString remotePath = QStringLiteral("/data/local/tmp/reark-agent-screenshot.jpeg");
         const QString localPath = agentScreenshotPath();
         const CommandResult capture = CommandRunner::runBlocking(
-            backend.screenshotCaptureRequest(remotePath, target));
+            backend.screenshotCaptureRequest(remotePath, target),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         if (!capture.succeeded()) {
             return {
                 .content = deviceCommandToolContent(QStringLiteral("capture_device_screenshot"), capture),
@@ -2460,8 +2775,14 @@ struct capture_device_screenshot {
         }
 
         const CommandResult receive = CommandRunner::runBlocking(
-            backend.receiveFileRequest(remotePath, localPath, target));
-        (void)CommandRunner::runBlocking(backend.removeRemoteFileRequest(remotePath, target));
+            backend.receiveFileRequest(remotePath, localPath, target),
+            context.stopToken);
+        (void)CommandRunner::runBlocking(
+            backend.removeRemoteFileRequest(remotePath, target),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
 
         QString text;
         text += QStringLiteral("# status: %1\n").arg(receive.succeeded() ? QStringLiteral("ok") : QStringLiteral("error"));
@@ -2545,7 +2866,11 @@ struct dump_ui_layout {
 
         const AgentUiLayoutEvidence evidence = dumpUiLayoutForAgent(
             QString::fromStdString(target_id.value),
-            QString::fromStdString(bundle_name.value));
+            QString::fromStdString(bundle_name.value),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         QList<UiAutomationNode> nodes = evidence.nodes;
         const UiNodeSelector selector = makeUiNodeSelector(
             query.value,
@@ -2603,7 +2928,11 @@ struct tap_ui {
 
         UiAutomationBackend backend = agentUiBackend();
         const CommandResult result = CommandRunner::runBlocking(
-            backend.tapRequest(x.value, y.value, QString::fromStdString(target_id.value)));
+            backend.tapRequest(x.value, y.value, QString::fromStdString(target_id.value)),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const QString extra = QStringLiteral("# x: %1\n# y: %2").arg(x.value).arg(y.value);
         return {
             .content = deviceCommandToolContent(QStringLiteral("tap_ui"), result, extra),
@@ -2686,7 +3015,11 @@ struct tap_ui_text {
         const QString target = QString::fromStdString(target_id.value);
         const AgentUiLayoutEvidence evidence = dumpUiLayoutForAgent(
             target,
-            QString::fromStdString(bundle_name.value));
+            QString::fromStdString(bundle_name.value),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         if (!evidence.succeeded()) {
             QString text;
             text += QStringLiteral("# status: error\n# operation: tap_ui_text\n\n[dump]\n%1\n\n[receive]\n%2").arg(
@@ -2735,7 +3068,11 @@ struct tap_ui_text {
         UiAutomationBackend backend = agentUiBackend();
         const QPoint point = selected->center();
         const CommandResult tap = CommandRunner::runBlocking(
-            backend.tapRequest(point.x(), point.y(), target));
+            backend.tapRequest(point.x(), point.y(), target),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
 
         QString output;
         output += QStringLiteral("# status: %1\n").arg(tap.succeeded() ? QStringLiteral("ok") : QStringLiteral("error"));
@@ -2762,10 +3099,10 @@ struct tap_ui_text {
 
 struct input_ui_text {
     static constexpr std::string_view description =
-        "Input text through HarmonyOS uitest. Use x/y to focus a coordinate first, or omit them to type into the currently focused field.";
+        "Input text through HarmonyOS uitest. Use x/y to focus a coordinate first, or omit them to type into the currently focused field. Pass the intended text exactly; ReArk quotes the remote hdc shell argument so spaces and characters such as double quotes, pipes, dollar signs, and angle brackets can be tried directly.";
 
     wuwe::field<std::string> text {
-        .description = "Text to input."
+        .description = "Text to input exactly. Do not pre-escape shell metacharacters; ReArk handles remote shell quoting."
     };
     wuwe::field<int> x {
         .default_value = -1,
@@ -2799,7 +3136,11 @@ struct input_ui_text {
         const CommandResult result = CommandRunner::runBlocking(
             hasPoint
                 ? backend.inputTextAtRequest(x.value, y.value, value, target)
-                : backend.inputFocusedTextRequest(value, target));
+                : backend.inputFocusedTextRequest(value, target),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const QString extra = QStringLiteral("# mode: %1\n# x: %2\n# y: %3")
             .arg(hasPoint ? QStringLiteral("coordinate") : QStringLiteral("focused"))
             .arg(x.value)
@@ -2840,7 +3181,11 @@ struct press_device_key {
 
         UiAutomationBackend backend = agentUiBackend();
         const CommandResult result = CommandRunner::runBlocking(
-            backend.keyEventRequest(value, QString::fromStdString(target_id.value)));
+            backend.keyEventRequest(value, QString::fromStdString(target_id.value)),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const QString extra = QStringLiteral("# key: %1").arg(value);
         return {
             .content = deviceCommandToolContent(QStringLiteral("press_device_key"), result, extra),
@@ -2882,7 +3227,11 @@ struct swipe_device {
                 to_x.value,
                 to_y.value,
                 QString::fromStdString(target_id.value),
-                velocity.value));
+                velocity.value),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
         const QString extra = QStringLiteral("# from: (%1,%2)\n# to: (%3,%4)\n# velocity: %5")
             .arg(from_x.value)
             .arg(from_y.value)
@@ -2903,12 +3252,17 @@ public:
     explicit ReArkToolProvider(
         std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot,
         std::shared_ptr<AgentScratchpad> scratchpad,
+        std::shared_ptr<PythonSessionState> pythonSession,
         bool includeDeviceRuntimeTools)
         : snapshot_(std::move(snapshot))
         , scratchpad_(std::move(scratchpad))
+        , pythonSession_(std::move(pythonSession))
     {
         registerTool<read_agent_scratchpad>();
         registerTool<update_agent_scratchpad>();
+        registerTool<read_python_session>();
+        registerTool<update_python_session>();
+        registerTool<clear_python_session>();
         registerTool<summarize_package>();
         registerTool<list_files>();
         registerTool<search_loaded_content>();
@@ -2951,6 +3305,7 @@ public:
         ReArkToolContext context {
             .snapshot = snapshot_,
             .scratchpad = scratchpad_,
+            .pythonSession = pythonSession_,
             .stopToken = stopToken
         };
 
@@ -2979,6 +3334,7 @@ private:
 
     std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot_;
     std::shared_ptr<AgentScratchpad> scratchpad_;
+    std::shared_ptr<PythonSessionState> pythonSession_;
     std::vector<wuwe::llm_tool> tools_;
     std::unordered_map<std::string, std::function<wuwe::llm_tool_result(
         const std::string&,
@@ -3428,6 +3784,7 @@ wuwe::agent::reasoning::reasoning_policy rearkReasoningPolicy(
 struct AgentController::Runtime {
 #ifdef REARK_HAS_WUWE
     std::shared_ptr<AgentScratchpad> scratchpad = std::make_shared<AgentScratchpad>();
+    std::shared_ptr<PythonSessionState> pythonSession = std::make_shared<PythonSessionState>();
     std::shared_ptr<wuwe::llm_client> client;
     std::shared_ptr<ReArkToolProvider> rearkProvider;
 #ifdef REARK_HAS_WUWE_EXECUTION
@@ -3461,10 +3818,13 @@ AgentController::AgentController(
     , runtime_(std::make_unique<Runtime>())
     , messageModel_(new AgentMessageModel(this))
     , assistantDeltaTimer_(new QTimer(this))
+    , runWatchdogTimer_(new QTimer(this))
 {
     assistantDeltaTimer_->setSingleShot(true);
     assistantDeltaTimer_->setInterval(50);
     connect(assistantDeltaTimer_, &QTimer::timeout, this, &AgentController::flushPendingAssistantDelta);
+    runWatchdogTimer_->setInterval(int(kAgentWatchdogIntervalMs));
+    connect(runWatchdogTimer_, &QTimer::timeout, this, &AgentController::checkRunWatchdog);
     setStatus(available() ? tr("Ready") : unavailableMessage());
 }
 
@@ -3574,6 +3934,7 @@ void AgentController::ask(const QString& question)
     runtime_->rearkProvider = std::make_shared<ReArkToolProvider>(
         snapshot,
         runtime_->scratchpad,
+        runtime_->pythonSession,
         deviceRuntimeToolsEnabled);
 #ifdef REARK_HAS_WUWE_EXECUTION
     runtime_->executionWorkdir = std::make_unique<QTemporaryDir>(
@@ -3602,7 +3963,9 @@ void AgentController::ask(const QString& question)
                         : "Run a short Python analysis script with bounded output and timeout in a local controlled process. This is not a file or network security sandbox."
                 });
             runtime_->guardedExecutionProvider =
-                std::make_shared<ReArkExecutionToolProvider>(runtime_->executionProvider);
+                std::make_shared<ReArkExecutionToolProvider>(
+                    runtime_->executionProvider,
+                    runtime_->pythonSession);
         }
     } else if (!runtime_->executionWorkdir->isValid()) {
         runtime_->executionPromptNote = tr("Local Python analysis is unavailable because the temporary execution workdir could not be created.");
@@ -3631,6 +3994,8 @@ void AgentController::ask(const QString& question)
     appendMessage(QStringLiteral("assistant"), {}, QStringLiteral("streaming"));
     setStatus(tr("Preparing analysis context..."));
     setRunning(true);
+    const quint64 runId = ++activeRunId_;
+    startRunWatchdog();
 
     QString systemPrompt =
         QStringLiteral("You are an expert HarmonyOS NEXT application reverse engineering assistant embedded in ReArk. "
@@ -3643,12 +4008,16 @@ void AgentController::ask(const QString& question)
             "first use the current snapshot, important files, and entry-point list below, then call only the tools that are truly needed. "
             "When the user asks to verify on a connected HarmonyOS device, use ReArk's fixed device runtime tools for HDC target listing, current package installation, app launch, bounded hilog capture, screenshots, UI layout dumps, and controlled UI input; "
             "Do not use run_analysis_script for HDC installation, launch, screenshots, UI input, or other device I/O; it is only for short local Python analysis. "
+            "For UI text input, pass the intended text to input_ui_text exactly, including spaces and punctuation, and try the full string before assuming shell escaping or special characters are a blocker. "
             "prefer UI layout selectors over guessed coordinates, and do not claim to have arbitrary shell, hook, breakpoint, packet capture, or dynamic debugging unless a dedicated ReArk tool exists for that action. "
             "If a tool reports that a file is unavailable, unsupported, or not matched, do not retry the same unavailable path repeatedly; "
             "answer from the available evidence and clearly state what could not be read. "
+            "Do not infer concrete tool outcomes such as install failed, signing failed, packing timed out, or app launched unless a ReArk tool result explicitly says so; distinguish verified tool output from a hypothesis. "
             "Use the durable scratchpad for long or multi-step analysis: read it before continuing a resumed task, "
             "and update it with decoded constants, candidate answers, script outputs, unresolved offsets, and next steps before long tool chains or when the analysis may be interrupted. "
             "For arithmetic, decoding, hashing, byte conversion, brute-force checks, and repeated string transforms, prefer run_analysis_script over natural-language calculation, then save important results to the scratchpad. "
+            "When a Python calculation creates reusable constants, byte arrays, lookup tables, or helper functions, save minimal valid Python analysis state; later run_analysis_script calls automatically receive that state. "
+            "Clear the Python analysis state when its previous constants or helper functions no longer apply to the current target or task. "
             "Always produce a useful final answer, even if some optional evidence is missing. "
             "Keep final answers visually calm inside the ReArk chat: avoid oversized report-style headings, avoid long scripted step transcripts, and do not chain multiple Markdown headings on one line. "
             "When using Markdown headings or tables, put a blank line before and after them; if unsure, prefer short paragraphs or simple bullet lists over headings. "
@@ -3680,6 +4049,7 @@ void AgentController::ask(const QString& question)
             " Use the bounded local Python analysis capability when a short deterministic calculation would verify decoding, "
             "decryption, hashing, byte conversion, or other reverse-engineering arithmetic. "
             "When using local Python analysis, pass required data through the script or stdin and keep the script short, deterministic, and side-effect free. "
+            "For multi-step calculations, keep reusable constants and helpers in Python analysis state instead of rediscovering them. "
             "Local Python analysis accepts only code, stdin_text, and timeout_ms; code must be at most %1 bytes, stdin_text at most %2 bytes, and timeout_ms at most %3.")
             .arg(kMaxAnalysisScriptCodeBytes)
             .arg(kMaxAnalysisScriptStdinBytes)
@@ -3709,6 +4079,9 @@ void AgentController::ask(const QString& question)
     const QString scratchpadText = readAgentScratchpad(runtime_->scratchpad, kDefaultAgentScratchpadReadChars);
     systemPrompt += QStringLiteral("\n\nCurrent Agent scratchpad:\n%1")
         .arg(scratchpadText.trimmed().isEmpty() ? QStringLiteral("<empty>") : scratchpadText);
+    const QString pythonSessionText = readPythonSession(runtime_->pythonSession, kDefaultPythonSessionReadChars);
+    systemPrompt += QStringLiteral("\n\nCurrent Python analysis state:\n%1")
+        .arg(pythonSessionText.trimmed().isEmpty() ? QStringLiteral("<empty>") : pythonSessionText);
     systemPrompt += responseLanguageInstruction(trimmed);
 
     QPointer<AgentController> self(this);
@@ -3723,7 +4096,7 @@ void AgentController::ask(const QString& question)
     };
     auto progress = std::make_shared<RunProgress>();
 
-    auto onEvent = [self, progress](const reasoning::reasoning_event& event) {
+    auto onEvent = [self, progress, runId](const reasoning::reasoning_event& event) {
         if (!self) {
             return;
         }
@@ -3748,11 +4121,28 @@ void AgentController::ask(const QString& question)
 
         const QString status = reasoningEventStatus(event, modelCallCount, toolCallCount);
         const QVariantMap activity = reasoningEventActivity(event);
+        RunWaitPhase phase = RunWaitPhase::Other;
+        switch (event.type) {
+        case reasoning::reasoning_event_type::model_started:
+        case reasoning::reasoning_event_type::model_first_event:
+        case reasoning::reasoning_event_type::content_delta:
+        case reasoning::reasoning_event_type::tool_call_building:
+        case reasoning::reasoning_event_type::tool_call_ready:
+            phase = RunWaitPhase::Model;
+            break;
+        case reasoning::reasoning_event_type::tool_started:
+            phase = RunWaitPhase::Tool;
+            break;
+        default:
+            phase = RunWaitPhase::Other;
+            break;
+        }
         if (!status.isEmpty() || !activity.isEmpty()) {
-            QMetaObject::invokeMethod(self.data(), [self, status, activity] {
-                if (!self) {
+            QMetaObject::invokeMethod(self.data(), [self, status, activity, phase, runId] {
+                if (!self || self->activeRunId_ != runId) {
                     return;
                 }
+                self->noteRunActivity(phase);
                 if (!activity.isEmpty()) {
                     self->recordActiveAssistantActivity(
                         activity.value(QStringLiteral("type")).toString(),
@@ -3795,26 +4185,31 @@ void AgentController::ask(const QString& question)
 
     reasoning::reasoning_run_options options;
     options.stop_token = runtime_->stopSource.get_token();
-    options.callbacks.on_delta = [self](std::string_view delta) {
+    options.callbacks.on_delta = [self, runId](std::string_view delta) {
         if (!self) {
             return;
         }
         const QString chunk = fromStringView(delta);
-        QMetaObject::invokeMethod(self.data(), [self, chunk] {
-            if (self) {
+        QMetaObject::invokeMethod(self.data(), [self, chunk, runId] {
+            if (self && self->activeRunId_ == runId) {
+                self->noteRunActivity(RunWaitPhase::Model);
                 self->queueAssistantDelta(chunk);
             }
         }, Qt::QueuedConnection);
     };
-    options.callbacks.on_done = [self](const reasoning::reasoning_result& result) {
+    options.callbacks.on_done = [self, runId](const reasoning::reasoning_result& result) {
         if (!self) {
             return;
         }
-        const QString finalText = QString::fromStdString(result.content);
-        QMetaObject::invokeMethod(self.data(), [self, finalText] {
-            if (!self) {
+        QString finalText = QString::fromStdString(result.content);
+        if (finalText.trimmed().isEmpty()) {
+            finalText = QString::fromStdString(result.final_response.content);
+        }
+        QMetaObject::invokeMethod(self.data(), [self, finalText, runId] {
+            if (!self || self->activeRunId_ != runId) {
                 return;
             }
+            self->stopRunWatchdog();
             self->setRunning(false);
             self->finishActiveAssistantMessage(finalText.isEmpty()
                 ? AgentController::tr("No response.")
@@ -3824,7 +4219,7 @@ void AgentController::ask(const QString& question)
             self->startPendingQuestion();
         }, Qt::QueuedConnection);
     };
-    options.callbacks.on_error = [self](const reasoning::reasoning_error& error) {
+    options.callbacks.on_error = [self, runId](const reasoning::reasoning_error& error) {
         if (!self) {
             return;
         }
@@ -3834,10 +4229,11 @@ void AgentController::ask(const QString& question)
         if (message.isEmpty()) {
             message = AgentController::tr("Analysis failed.");
         }
-        QMetaObject::invokeMethod(self.data(), [self, message, timedOut, budgetExceeded] {
-            if (!self) {
+        QMetaObject::invokeMethod(self.data(), [self, message, timedOut, budgetExceeded, runId] {
+            if (!self || self->activeRunId_ != runId) {
                 return;
             }
+            self->stopRunWatchdog();
             if (timedOut || budgetExceeded) {
                 self->setErrorMessage({});
                 self->finishInterruptedAssistantMessage(
@@ -3858,15 +4254,16 @@ void AgentController::ask(const QString& question)
             self->startPendingQuestion();
         }, Qt::QueuedConnection);
     };
-    options.callbacks.on_cancelled = [self](const reasoning::reasoning_result& result) {
+    options.callbacks.on_cancelled = [self, runId](const reasoning::reasoning_result& result) {
         if (!self) {
             return;
         }
         const QString message = reasoningCancelledMessage(result);
-        QMetaObject::invokeMethod(self.data(), [self, message] {
-            if (!self) {
+        QMetaObject::invokeMethod(self.data(), [self, message, runId] {
+            if (!self || self->activeRunId_ != runId) {
                 return;
             }
+            self->stopRunWatchdog();
             self->setStatus(message);
             self->finishActiveAssistantMessage(message);
             self->setRunning(false);
@@ -3908,39 +4305,42 @@ void AgentController::ask(const QString& question)
 
     wuwe::llm_agent_run_options options;
     options.stop_token = runtime_->stopSource.get_token();
-    options.callbacks.on_delta = [self](std::string_view text) {
+    options.callbacks.on_delta = [self, runId](std::string_view text) {
         if (!self) {
             return;
         }
         const QString chunk = fromStringView(text);
-        QMetaObject::invokeMethod(self.data(), [self, chunk] {
-            if (self) {
+        QMetaObject::invokeMethod(self.data(), [self, chunk, runId] {
+            if (self && self->activeRunId_ == runId) {
+                self->noteRunActivity(RunWaitPhase::Model);
                 self->queueAssistantDelta(chunk);
             }
         }, Qt::QueuedConnection);
     };
-    options.callbacks.on_tool_start = [self](const wuwe::llm_tool_call& call) {
+    options.callbacks.on_tool_start = [self, runId](const wuwe::llm_tool_call& call) {
         if (!self) {
             return;
         }
         const QString status = call.name == "run_analysis_script"
             ? AgentController::tr("Running analysis script...")
             : AgentController::tr("Reading analysis data...");
-        QMetaObject::invokeMethod(self.data(), [self, status] {
-            if (self) {
+        QMetaObject::invokeMethod(self.data(), [self, status, runId] {
+            if (self && self->activeRunId_ == runId) {
+                self->noteRunActivity(RunWaitPhase::Tool);
                 self->setStatus(status);
             }
         }, Qt::QueuedConnection);
     };
     options.callbacks.on_tool_result =
-        [self](const wuwe::llm_tool_call& call, const wuwe::llm_tool_result& result) {
+        [self, runId](const wuwe::llm_tool_call& call, const wuwe::llm_tool_result& result) {
             if (!self) {
                 return;
             }
             const bool ok = !result.error_code;
             const bool analysisScript = call.name == "run_analysis_script";
-            QMetaObject::invokeMethod(self.data(), [self, ok, analysisScript] {
-                if (self) {
+            QMetaObject::invokeMethod(self.data(), [self, ok, analysisScript, runId] {
+                if (self && self->activeRunId_ == runId) {
+                    self->noteRunActivity(RunWaitPhase::Other);
                     if (analysisScript) {
                         self->setStatus(ok
                             ? AgentController::tr("Analysis script completed.")
@@ -3953,14 +4353,18 @@ void AgentController::ask(const QString& question)
                 }
             }, Qt::QueuedConnection);
         };
-    options.callbacks.on_done = [self](const wuwe::llm_response&) {
+    options.callbacks.on_done = [self, runId](const wuwe::llm_response& response) {
         if (!self) {
             return;
         }
-        QMetaObject::invokeMethod(self.data(), [self] {
-            if (self) {
+        const QString finalText = QString::fromStdString(response.content);
+        QMetaObject::invokeMethod(self.data(), [self, finalText, runId] {
+            if (self && self->activeRunId_ == runId) {
+                self->stopRunWatchdog();
                 self->setRunning(false);
-                self->finishActiveAssistantMessage(AgentController::tr("No response."));
+                self->finishActiveAssistantMessage(finalText.trimmed().isEmpty()
+                    ? AgentController::tr("No response.")
+                    : finalText);
                 self->setStatus(AgentController::tr("Ready"));
                 self->resetRun();
                 self->startPendingQuestion();
@@ -3968,14 +4372,15 @@ void AgentController::ask(const QString& question)
         }, Qt::QueuedConnection);
     };
     options.callbacks.on_error =
-        [self](std::error_code ec, std::string_view message) {
+        [self, runId](std::error_code ec, std::string_view message) {
             if (!self) {
                 return;
             }
             const QString msg = agentErrorMessage(ec, fromStringView(message));
             const bool timedOut = ec == wuwe::agent::llm_error_code::timeout;
-            QMetaObject::invokeMethod(self.data(), [self, msg, timedOut] {
-                if (self) {
+            QMetaObject::invokeMethod(self.data(), [self, msg, timedOut, runId] {
+                if (self && self->activeRunId_ == runId) {
+                    self->stopRunWatchdog();
                     if (timedOut) {
                         self->setErrorMessage({});
                         self->finishInterruptedAssistantMessage(
@@ -3995,12 +4400,13 @@ void AgentController::ask(const QString& question)
                 }
             }, Qt::QueuedConnection);
         };
-    options.callbacks.on_cancelled = [self] {
+    options.callbacks.on_cancelled = [self, runId] {
         if (!self) {
             return;
         }
-        QMetaObject::invokeMethod(self.data(), [self] {
-            if (self) {
+        QMetaObject::invokeMethod(self.data(), [self, runId] {
+            if (self && self->activeRunId_ == runId) {
+                self->stopRunWatchdog();
                 self->setStatus(AgentController::tr("Analysis cancelled."));
                 self->finishActiveAssistantMessage(AgentController::tr("Analysis cancelled."));
                 self->setRunning(false);
@@ -4013,6 +4419,31 @@ void AgentController::ask(const QString& question)
     runtime_->run = runtime_->runner->run_async(std::move(request), std::move(options));
 #endif
 #endif
+}
+
+void AgentController::editUserMessage(int row, const QString& text)
+{
+    const QString trimmed = text.trimmed();
+    if (running_ || trimmed.isEmpty() || row < 0 || row >= messages_.size()) {
+        return;
+    }
+
+    const QVariantMap editedMessage = messages_.at(row).toMap();
+    if (editedMessage.value(QStringLiteral("role")).toString() != QStringLiteral("user")) {
+        return;
+    }
+
+    pendingQuestion_.clear();
+    activeAssistantMessage_ = -1;
+    for (int index = messages_.size() - 1; index >= row; --index) {
+        messages_.removeAt(index);
+        if (messageModel_ != nullptr) {
+            messageModel_->removeMessage(index);
+        }
+    }
+    emit messagesChanged();
+    rebuildTranscript();
+    ask(trimmed);
 }
 
 void AgentController::cancel()
@@ -4034,12 +4465,21 @@ void AgentController::cancelCurrentRun(bool clearPendingQuestion)
 #ifdef REARK_HAS_WUWE
     if (clearPendingQuestion) {
         pendingQuestion_.clear();
+        ++activeRunId_;
+        stopRunWatchdog();
     }
 #ifdef REARK_HAS_WUWE_REASONING
     if (runtime_->reasoningRun.has_value()) {
         runtime_->stopSource.request_stop();
         if (runtime_->reasoningRun->valid()) {
             runtime_->reasoningRun->request_stop();
+        }
+        if (clearPendingQuestion) {
+            setErrorMessage({});
+            finishInterruptedAssistantMessage(tr("Analysis cancelled."));
+            setRunning(false);
+            setStatus(tr("Analysis cancelled."));
+            return;
         }
         setStatus(tr("Cancelling..."));
         return;
@@ -4049,6 +4489,13 @@ void AgentController::cancelCurrentRun(bool clearPendingQuestion)
         runtime_->stopSource.request_stop();
         if (runtime_->run->valid()) {
             runtime_->run->request_stop();
+        }
+        if (clearPendingQuestion) {
+            setErrorMessage({});
+            finishInterruptedAssistantMessage(tr("Analysis cancelled."));
+            setRunning(false);
+            setStatus(tr("Analysis cancelled."));
+            return;
         }
         setStatus(tr("Cancelling..."));
         return;
@@ -4082,6 +4529,10 @@ void AgentController::newChat()
     if (runtime_->scratchpad != nullptr) {
         const std::scoped_lock lock(runtime_->scratchpad->mutex);
         runtime_->scratchpad->text.clear();
+    }
+    if (runtime_->pythonSession != nullptr) {
+        const std::scoped_lock lock(runtime_->pythonSession->mutex);
+        runtime_->pythonSession->prelude.clear();
     }
     setRunning(false);
     clearMessages();
@@ -4272,13 +4723,18 @@ void AgentController::finishActiveAssistantMessage(const QString& fallbackText)
         activeAssistantMessage_ = -1;
         return;
     }
-    if (!fallbackText.isEmpty()
-        && message.value(QStringLiteral("text")).toString().trimmed().isEmpty()) {
+    const QString currentText = message.value(QStringLiteral("text")).toString();
+    const QString finalCandidate = currentText.trimmed().isEmpty() ? fallbackText : currentText;
+    if (const auto toolName = plainTextToolCallName(finalCandidate)) {
+        message.insert(QStringLiteral("text"), plainTextToolCallFallbackMessage(*toolName));
+    } else if (!fallbackText.isEmpty()
+        && currentText.trimmed().isEmpty()) {
         message.insert(QStringLiteral("text"), fallbackText);
     }
     message.insert(QStringLiteral("state"), QStringLiteral("done"));
     messages_[activeAssistantMessage_] = message;
     if (messageModel_ != nullptr) {
+        messageModel_->setText(activeAssistantMessage_, message.value(QStringLiteral("text")).toString());
         messageModel_->finishStreaming(activeAssistantMessage_, fallbackText);
     }
     activeAssistantMessage_ = -1;
@@ -4415,8 +4871,78 @@ void AgentController::setStatus(const QString& status)
     emit statusChanged();
 }
 
+void AgentController::startRunWatchdog()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    runStartedAtMs_ = now;
+    lastRunActivityAtMs_ = now;
+    runWaitPhase_ = RunWaitPhase::Model;
+    if (runWatchdogTimer_ != nullptr && !runWatchdogTimer_->isActive()) {
+        runWatchdogTimer_->start();
+    }
+}
+
+void AgentController::stopRunWatchdog()
+{
+    if (runWatchdogTimer_ != nullptr) {
+        runWatchdogTimer_->stop();
+    }
+    runStartedAtMs_ = 0;
+    lastRunActivityAtMs_ = 0;
+    runWaitPhase_ = RunWaitPhase::Idle;
+}
+
+void AgentController::noteRunActivity(RunWaitPhase phase)
+{
+    lastRunActivityAtMs_ = QDateTime::currentMSecsSinceEpoch();
+    runWaitPhase_ = phase;
+}
+
+void AgentController::checkRunWatchdog()
+{
+    if (!running_ || lastRunActivityAtMs_ <= 0) {
+        return;
+    }
+
+    const qint64 idleMs = QDateTime::currentMSecsSinceEpoch() - lastRunActivityAtMs_;
+    if (runWaitPhase_ != RunWaitPhase::Model) {
+        return;
+    }
+
+    if (idleMs >= kAgentModelIdleStopMs) {
+#ifdef REARK_HAS_WUWE
+        runtime_->stopSource.request_stop();
+#ifdef REARK_HAS_WUWE_REASONING
+        if (runtime_->reasoningRun.has_value() && runtime_->reasoningRun->valid()) {
+            runtime_->reasoningRun->request_stop();
+        }
+#endif
+        if (runtime_->run.has_value() && runtime_->run->valid()) {
+            runtime_->run->request_stop();
+        }
+#endif
+        ++activeRunId_;
+        stopRunWatchdog();
+        setErrorMessage({});
+        finishInterruptedAssistantMessage(
+            tr("Model provider did not return another event for %1 seconds, so ReArk stopped this run. Partial output was preserved; ask Agent to continue from here.")
+                .arg(idleMs / 1000));
+        setRunning(false);
+        setStatus(tr("Analysis stopped after waiting %1 seconds for the model provider.")
+            .arg(idleMs / 1000));
+        return;
+    }
+
+    if (idleMs >= kAgentModelIdleWarningMs) {
+        setStatus(tr("Waiting for model response (%1s, auto-stop at %2s)...")
+            .arg(idleMs / 1000)
+            .arg(kAgentModelIdleStopMs / 1000));
+    }
+}
+
 void AgentController::resetRun()
 {
+    stopRunWatchdog();
     if (assistantDeltaTimer_ != nullptr) {
         assistantDeltaTimer_->stop();
     }

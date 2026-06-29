@@ -286,6 +286,10 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
         result.error = QStringLiteral("Output HAP path is required.");
         return result;
     }
+    if (request.stopToken.stop_requested()) {
+        result.error = QStringLiteral("Bundle rewrite cancelled.");
+        return result;
+    }
 
     QTemporaryDir unpacked(QStringLiteral("%1/ReArk-rewrite-hap-XXXXXX").arg(QDir::tempPath()));
     if (!unpacked.isValid()) {
@@ -305,6 +309,12 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
     int rewrittenAbcCount = 0;
     int rewrittenMetadataCount = 0;
     for (const auto& resource : session->resources()) {
+        if (request.stopToken.stop_requested()) {
+            result.error = QStringLiteral("Bundle rewrite cancelled.");
+            result.report = reports.join(QStringLiteral("\n\n"));
+            return result;
+        }
+
         const QString resourcePath = cleanResourcePath(resource.path);
         const QString outputPath = safeOutputPath(unpacked.path(), resourcePath);
         if (outputPath.isEmpty()) {
@@ -422,6 +432,11 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
         result.report = reports.join(QStringLiteral("\n\n"));
         return result;
     }
+    if (request.stopToken.stop_requested()) {
+        result.error = QStringLiteral("Bundle rewrite cancelled.");
+        result.report = reports.join(QStringLiteral("\n\n"));
+        return result;
+    }
 
     result.packingResult = CommandRunner::runBlocking(HarmonyHapSigner::packCommand({
         .javaProgram = request.javaProgram,
@@ -429,7 +444,7 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
         .unpackedDirectory = unpacked.path(),
         .outputHapPath = request.outputHapPath,
         .timeoutMs = request.timeoutMs
-    }));
+    }), request.stopToken);
     if (!result.packingResult.succeeded()) {
         unpacked.setAutoRemove(false);
         result.unpackedDirectory = unpacked.path();

@@ -60,6 +60,7 @@ Implemented:
 - Device runtime tools are exposed only when the latest request explicitly asks for installation, launch, HDC, logs, screenshots, UI automation, signing, or runtime verification.
 - Conversation context is denoised and compressed so old device/signing output does not pollute static analysis tasks.
 - A durable in-chat scratchpad lets the Agent save intermediate constants, candidate answers, script output, unresolved offsets, and next steps across follow-up turns.
+- Reusable Python analysis state lets the Agent preserve constants, helper functions, byte arrays, and extracted data across local analysis script calls.
 - Local Python analysis is encouraged for deterministic decoding, hashing, byte conversion, brute-force checks, and repeated string transforms instead of doing arithmetic in natural language.
 - The bounded Python execution timeout has been raised for larger static calculations.
 - ABC reference-flow analysis can combine literal resolution, cross-references, and call-argument flow evidence in one tool call.
@@ -67,7 +68,6 @@ Implemented:
 
 Planned next:
 
-- Add a persistent Python session or equivalent calculation engine so variables, helper functions, and extracted data can survive across tool calls.
 - Persist the Agent scratchpad to disk per chat or per loaded package, with explicit reset and cleanup behavior.
 - Add higher-level compound tools for common CTF workflows, such as finding an encryption routine, extracting constants, running a verifier script, and returning the candidate answer.
 - Add Agent run telemetry for task mode, tool-call count, elapsed time, budget-stop reason, scratchpad usage, and final outcome.

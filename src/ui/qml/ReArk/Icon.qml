@@ -43,6 +43,9 @@ Item {
         if (name === "check") {
             return "qrc:/icons/fontawesome/check.svg"
         }
+        if (name === "pencil") {
+            return "qrc:/icons/fontawesome/pencil.svg"
+        }
         return ""
     }
 

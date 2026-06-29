@@ -1259,7 +1259,11 @@ void DecompilerController::applyOpenResult(quint64 requestId, HyleDecompiler::Op
     setLoadingProgress(0.22);
     appendActivity(tr("Building file tree."));
     treeModel_.replaceFiles(std::move(result.files));
+    const bool alreadyHadPackage = hasPackage_;
     setHasPackage(true);
+    if (alreadyHadPackage) {
+        emit packageChanged();
+    }
     emit packageOpened(packagePath_, appIconDataUrl_);
     appendActivity(result.status);
     setStatus(result.status);

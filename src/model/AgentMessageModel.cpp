@@ -100,6 +100,21 @@ void AgentMessageModel::appendText(int row, const QString& text)
     emit dataChanged(changed, changed, { MessageTextRole, Qt::DisplayRole });
 }
 
+void AgentMessageModel::setText(int row, const QString& text)
+{
+    if (row < 0 || row >= messages_.size()) {
+        return;
+    }
+
+    if (messages_[row].text == text) {
+        return;
+    }
+
+    messages_[row].text = text;
+    const QModelIndex changed = index(row);
+    emit dataChanged(changed, changed, { MessageTextRole, Qt::DisplayRole });
+}
+
 void AgentMessageModel::setActivities(int row, const QVariantList& activities)
 {
     if (row < 0 || row >= messages_.size()) {

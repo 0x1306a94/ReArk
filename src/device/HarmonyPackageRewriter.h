@@ -4,6 +4,7 @@
 #include "core/CommandRunner.h"
 
 #include <QString>
+#include <stop_token>
 
 struct HarmonyBundleRewriteRequest {
     QString inputHapPath;
@@ -12,7 +13,8 @@ struct HarmonyBundleRewriteRequest {
     QString newBundleName;
     QString javaProgram;
     QString packingToolPath;
-    int timeoutMs = 120000;
+    std::stop_token stopToken;
+    int timeoutMs = 300000;
 };
 
 struct HarmonyBundleRewriteResult {

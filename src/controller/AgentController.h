@@ -43,6 +43,7 @@ public:
     [[nodiscard]] QString status() const;
 
     Q_INVOKABLE void ask(const QString& question);
+    Q_INVOKABLE void editUserMessage(int row, const QString& text);
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void newChat();
     Q_INVOKABLE void copyTextToClipboard(const QString& text) const;
@@ -56,6 +57,12 @@ signals:
 
 private:
     struct Runtime;
+    enum class RunWaitPhase {
+        Idle,
+        Model,
+        Tool,
+        Other
+    };
 
     void setRunning(bool running);
     void setTranscript(const QString& transcript);
@@ -76,6 +83,10 @@ private:
     void appendTranscript(const QString& text);
     void setErrorMessage(const QString& errorMessage);
     void setStatus(const QString& status);
+    void startRunWatchdog();
+    void stopRunWatchdog();
+    void noteRunActivity(RunWaitPhase phase);
+    void checkRunWatchdog();
     void resetRun();
     void cancelCurrentRun(bool clearPendingQuestion);
     void startPendingQuestion();
@@ -91,8 +102,13 @@ private:
     QString status_;
     QString pendingAssistantDelta_;
     QTimer* assistantDeltaTimer_ = nullptr;
+    QTimer* runWatchdogTimer_ = nullptr;
+    qint64 runStartedAtMs_ = 0;
+    qint64 lastRunActivityAtMs_ = 0;
+    RunWaitPhase runWaitPhase_ = RunWaitPhase::Idle;
     int activeAssistantMessage_ = -1;
     QString pendingQuestion_;
+    quint64 activeRunId_ = 0;
     bool running_ = false;
 };
 

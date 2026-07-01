@@ -70,6 +70,10 @@ public:
         const QString& text,
         const QString& targetId,
         int timeoutMs = 5000) const;
+    [[nodiscard]] CommandRequest uinputKeyboardTextRequest(
+        const QString& text,
+        const QString& targetId,
+        int timeoutMs = 10000) const;
     [[nodiscard]] CommandRequest keyEventRequest(
         const QString& key,
         const QString& targetId,

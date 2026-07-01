@@ -105,6 +105,11 @@ QString quoteRemoteShellArgument(QString text)
     return QStringLiteral("'%1'").arg(text);
 }
 
+QString remoteShellCommand(const QStringList& parts)
+{
+    return parts.join(QLatin1Char(' '));
+}
+
 bool textMatches(const QString& value, const QString& pattern, bool exact)
 {
     const QString needle = pattern.trimmed().toCaseFolded();
@@ -272,12 +277,14 @@ CommandRequest UiAutomationBackend::inputTextAtRequest(
 {
     QStringList arguments = targetArguments(targetId);
     arguments << QStringLiteral("shell")
-              << QStringLiteral("uitest")
-              << QStringLiteral("uiInput")
-              << QStringLiteral("inputText")
-              << QString::number(x)
-              << QString::number(y)
-              << quoteRemoteShellArgument(text);
+              << remoteShellCommand({
+                     QStringLiteral("uitest"),
+                     QStringLiteral("uiInput"),
+                     QStringLiteral("inputText"),
+                     QString::number(x),
+                     QString::number(y),
+                     quoteRemoteShellArgument(text)
+                 });
     return {
         .program = deviceBackend_.resolvedProgram(),
         .arguments = arguments,
@@ -292,10 +299,32 @@ CommandRequest UiAutomationBackend::inputFocusedTextRequest(
 {
     QStringList arguments = targetArguments(targetId);
     arguments << QStringLiteral("shell")
-              << QStringLiteral("uitest")
-              << QStringLiteral("uiInput")
-              << QStringLiteral("text")
-              << quoteRemoteShellArgument(text);
+              << remoteShellCommand({
+                     QStringLiteral("uitest"),
+                     QStringLiteral("uiInput"),
+                     QStringLiteral("text"),
+                     quoteRemoteShellArgument(text)
+                 });
+    return {
+        .program = deviceBackend_.resolvedProgram(),
+        .arguments = arguments,
+        .timeoutMs = timeoutMs
+    };
+}
+
+CommandRequest UiAutomationBackend::uinputKeyboardTextRequest(
+    const QString& text,
+    const QString& targetId,
+    int timeoutMs) const
+{
+    QStringList arguments = targetArguments(targetId);
+    arguments << QStringLiteral("shell")
+              << remoteShellCommand({
+                     QStringLiteral("uinput"),
+                     QStringLiteral("-K"),
+                     QStringLiteral("-t"),
+                     quoteRemoteShellArgument(text)
+                 });
     return {
         .program = deviceBackend_.resolvedProgram(),
         .arguments = arguments,

@@ -222,6 +222,36 @@ CommandRequest HdcDeviceBackend::hilogRequest(const QString& targetId, const QSt
     };
 }
 
+CommandRequest HdcDeviceBackend::clearHilogRequest(const QString& targetId, int timeoutMs) const
+{
+    QStringList arguments = targetArguments(targetId);
+    arguments << QStringLiteral("shell")
+              << QStringLiteral("hilog")
+              << QStringLiteral("-r");
+    return {
+        .program = resolvedProgram(),
+        .arguments = arguments,
+        .timeoutMs = timeoutMs
+    };
+}
+
+CommandRequest HdcDeviceBackend::shellCommandRequest(
+    const QString& script,
+    const QString& targetId,
+    int timeoutMs) const
+{
+    QStringList arguments = targetArguments(targetId);
+    arguments << QStringLiteral("shell")
+              << QStringLiteral("sh")
+              << QStringLiteral("-c")
+              << script;
+    return {
+        .program = resolvedProgram(),
+        .arguments = arguments,
+        .timeoutMs = timeoutMs
+    };
+}
+
 CommandRequest HdcDeviceBackend::screenshotCaptureRequest(
     const QString& remotePath,
     const QString& targetId,

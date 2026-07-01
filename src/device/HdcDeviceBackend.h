@@ -39,6 +39,13 @@ public:
         const QString& targetId,
         const QString& level = {},
         int timeoutMs = 10000) const;
+    [[nodiscard]] CommandRequest clearHilogRequest(
+        const QString& targetId,
+        int timeoutMs = 5000) const;
+    [[nodiscard]] CommandRequest shellCommandRequest(
+        const QString& script,
+        const QString& targetId,
+        int timeoutMs = 10000) const;
     [[nodiscard]] CommandRequest screenshotCaptureRequest(
         const QString& remotePath,
         const QString& targetId,

@@ -56,6 +56,7 @@
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -166,11 +167,20 @@ QString toolDisplayName(const std::string& name)
     if (name == "read_hilog") {
         return AgentController::tr("device hilog");
     }
+    if (name == "clear_hilog") {
+        return AgentController::tr("clear device hilog");
+    }
     if (name == "capture_device_screenshot") {
         return AgentController::tr("device screenshot");
     }
     if (name == "dump_ui_layout") {
         return AgentController::tr("UI layout");
+    }
+    if (name == "inspect_app_files") {
+        return AgentController::tr("app files");
+    }
+    if (name == "read_device_file") {
+        return AgentController::tr("device file");
     }
     if (name == "tap_ui") {
         return AgentController::tr("UI tap");
@@ -337,29 +347,12 @@ struct ReArkExecutionBackendSelection {
     QString promptNote;
 };
 
-QString sandboxBackendUnavailableText(
-    const std::optional<wuwe::agent::sandbox::sandbox_backend_info>& info,
-    const QString& fallback)
-{
-    if (!info.has_value()) {
-        return fallback;
-    }
-    if (!info->unavailable_reason.empty()) {
-        return QString::fromStdString(info->unavailable_reason);
-    }
-    if (!info->available) {
-        return QStringLiteral("%1 backend is unavailable.").arg(QString::fromStdString(info->name));
-    }
-    return fallback;
-}
-
 ReArkExecutionBackendSelection makeReArkExecutionBackend(
     const AgentSettings& settings,
     const PythonRuntimeProbe& pythonRuntime,
     const std::filesystem::path& workdir)
 {
     namespace execution = wuwe::agent::execution;
-    namespace sandbox = wuwe::agent::sandbox;
 
     execution::controlled_process_backend_config controlledConfig {
         .python_interpreter = PythonRuntimeResolver::toFilesystemPath(pythonRuntime.resolvedPath),
@@ -369,61 +362,14 @@ ReArkExecutionBackendSelection makeReArkExecutionBackend(
         .python_startup_timeout = std::chrono::milliseconds { 3000 }
     };
 
-    execution::restricted_process_backend_config restrictedConfig;
-    restrictedConfig.python_interpreter = controlledConfig.python_interpreter;
-    restrictedConfig.fallback_workdir = workdir;
-    restrictedConfig.runtime_staging_root = workdir / "restricted-runtime";
-    restrictedConfig.readable_roots = { workdir };
-    restrictedConfig.writable_roots = { workdir };
-    restrictedConfig.deny_network = true;
-    restrictedConfig.use_job_object = true;
-    restrictedConfig.inherit_parent_environment = false;
-    restrictedConfig.cleanup_runtime_staging = true;
-    restrictedConfig.python_startup_timeout = std::chrono::milliseconds { 3000 };
-
-    execution::execution_backend_registry_options registryOptions {
-        .controlled_process = std::move(controlledConfig),
-        .enable_restricted_process_backend = settings.enableRestrictedPythonBackend,
-        .restricted_process = std::move(restrictedConfig)
-    };
-    auto registry = execution::make_execution_backend_registry(std::move(registryOptions));
-
     ReArkExecutionBackendSelection selection;
     if (settings.enableRestrictedPythonBackend) {
-        execution::execution_backend_requirements requirements;
-        requirements.isolation = sandbox::isolation_level::restricted_process;
-        requirements.require_shell_disabled = true;
-        requirements.require_timeout = true;
-        requirements.require_cancellation = true;
-        requirements.require_stdout_limit = true;
-        requirements.require_stderr_limit = true;
-        requirements.require_environment_allowlist = true;
-        requirements.require_process_tree_cleanup = true;
-        requirements.require_filesystem_read_deny = true;
-        requirements.require_filesystem_write_deny = true;
-        requirements.require_network_deny = true;
-
-        selection.backend = registry.create_best(requirements);
-        if (selection.backend != nullptr) {
-            const auto info = selection.backend->info();
-            selection.promptNote = QStringLiteral(
-                "Local Python analysis uses Wuwe restricted_process. File access is limited to the temporary execution workdir, network access is denied, and backend result metadata reports enforcement status.");
-            if (!info.available && !info.unavailable_reason.empty()) {
-                selection.promptNote += QStringLiteral(" Backend availability note: %1")
-                    .arg(QString::fromStdString(info.unavailable_reason));
-            }
-            return selection;
-        }
-
         selection.promptNote = QStringLiteral(
-            "Local Python analysis is unavailable because Windows restricted_process was requested but no backend satisfying filesystem and network deny requirements is available: %1")
-            .arg(sandboxBackendUnavailableText(
-                registry.describe("restricted_process"),
-                QStringLiteral("restricted_process backend unavailable")));
+            "Local Python analysis is unavailable because Windows restricted_process was requested, but the installed Wuwe library does not expose a restricted_process execution backend.");
         return selection;
     }
 
-    selection.backend = registry.create("controlled_process");
+    selection.backend = execution::make_controlled_process_backend(std::move(controlledConfig));
     if (selection.backend != nullptr) {
         selection.promptNote = QStringLiteral(
             "Local Python analysis uses Wuwe controlled_process with bounded output, timeout, environment allowlist, and process cleanup where supported. It is not a file or network security sandbox.");
@@ -1223,6 +1169,40 @@ std::string deviceCommandToolContent(
     return toStdString(boundedSnapshotText(text, 24000));
 }
 
+QStringList uiTextInputRiskReasons(const QString& value)
+{
+    QStringList reasons;
+    if (value.contains(QRegularExpression(QStringLiteral(R"(\s)")))) {
+        reasons.append(QStringLiteral("contains_whitespace"));
+    }
+    if (value.contains(QRegularExpression(QStringLiteral(R"([\"'`$|&;<>()[\]{}!*?~\\])")))) {
+        reasons.append(QStringLiteral("contains_shell_or_keyboard_metacharacters"));
+    }
+    if (value.contains(QRegularExpression(QStringLiteral(R"([^\x20-\x7e])")))) {
+        reasons.append(QStringLiteral("contains_non_ascii_or_control_characters"));
+    }
+    if (value.size() >= 80) {
+        reasons.append(QStringLiteral("long_text"));
+    }
+    return reasons;
+}
+
+QString uiTextInputEvidenceNote(const QString& value)
+{
+    QStringList lines;
+    const QStringList reasons = uiTextInputRiskReasons(value);
+    lines += QStringLiteral("# input_semantics: best_effort");
+    lines += QStringLiteral("# exact_text_guarantee: false");
+    lines += QStringLiteral("# text_length: %1").arg(value.size());
+    lines += QStringLiteral("# high_risk_text: %1").arg(reasons.isEmpty() ? QStringLiteral("false") : QStringLiteral("true"));
+    if (!reasons.isEmpty()) {
+        lines += QStringLiteral("# risk_reasons: %1").arg(reasons.join(QLatin1Char(',')));
+    }
+    lines += QStringLiteral("# verification_required: true");
+    lines += QStringLiteral("# verification_guidance: A successful command only means the input event was accepted; verify exact input through readable UI text, or verify a Password field through business evidence such as Toast text, generated files, logs, or state changes.");
+    return lines.join(QLatin1Char('\n'));
+}
+
 bool isMissingSignatureInstallFailure(const CommandResult& result)
 {
     const QString text = QStringLiteral("%1\n%2\n%3")
@@ -1263,7 +1243,7 @@ bool containsAnyTerm(const QString& foldedText, const QStringList& terms)
 bool hasExplicitDeviceRuntimeIntent(const QString& question)
 {
     const QString folded = question.toCaseFolded();
-    return containsAnyTerm(folded, {
+    if (containsAnyTerm(folded, {
         QStringLiteral("device"),
         QStringLiteral("hdc"),
         QStringLiteral("hilog"),
@@ -1277,6 +1257,7 @@ bool hasExplicitDeviceRuntimeIntent(const QString& question)
         QStringLiteral("resign"),
         QStringLiteral("re-sign"),
         QStringLiteral("sign and install"),
+        QStringLiteral("runtime"),
         QStringLiteral("真机"),
         QStringLiteral("设备"),
         QStringLiteral("手机"),
@@ -1284,6 +1265,9 @@ bool hasExplicitDeviceRuntimeIntent(const QString& question)
         QStringLiteral("启动"),
         QStringLiteral("打开应用"),
         QStringLiteral("运行应用"),
+        QStringLiteral("运行态"),
+        QStringLiteral("动态验证"),
+        QStringLiteral("跑通"),
         QStringLiteral("重签"),
         QStringLiteral("重签名"),
         QStringLiteral("签名安装"),
@@ -1296,6 +1280,52 @@ bool hasExplicitDeviceRuntimeIntent(const QString& question)
         QStringLiteral("输入事件"),
         QStringLiteral("模拟输入"),
         QStringLiteral("投屏")
+    })) {
+        return true;
+    }
+
+    const bool asksToVerify = containsAnyTerm(folded, {
+        QStringLiteral("verify"),
+        QStringLiteral("verification"),
+        QStringLiteral("validation"),
+        QStringLiteral("test"),
+        QStringLiteral("测试"),
+        QStringLiteral("验证"),
+        QStringLiteral("检验"),
+        QStringLiteral("校验")
+    });
+    if (!asksToVerify) {
+        return false;
+    }
+
+    return containsAnyTerm(folded, {
+        QStringLiteral("device"),
+        QStringLiteral("hdc"),
+        QStringLiteral("runtime"),
+        QStringLiteral("install"),
+        QStringLiteral("launch"),
+        QStringLiteral("app"),
+        QStringLiteral("application"),
+        QStringLiteral("ui"),
+        QStringLiteral("input"),
+        QStringLiteral("toast"),
+        QStringLiteral("artifact"),
+        QStringLiteral("file"),
+        QStringLiteral("真机"),
+        QStringLiteral("设备"),
+        QStringLiteral("手机"),
+        QStringLiteral("运行态"),
+        QStringLiteral("动态"),
+        QStringLiteral("安装"),
+        QStringLiteral("启动"),
+        QStringLiteral("应用"),
+        QStringLiteral("界面"),
+        QStringLiteral("输入"),
+        QStringLiteral("点击"),
+        QStringLiteral("文件"),
+        QStringLiteral("日志"),
+        QStringLiteral("截图"),
+        QStringLiteral("生成")
     });
 }
 
@@ -1314,7 +1344,6 @@ bool hasStaticCtfIntent(const QString& question)
         QStringLiteral("encode"),
         QStringLiteral("hash"),
         QStringLiteral("maze"),
-        QStringLiteral("shctf"),
         QStringLiteral("口令"),
         QStringLiteral("破解"),
         QStringLiteral("解码"),
@@ -1327,9 +1356,331 @@ bool hasStaticCtfIntent(const QString& question)
     });
 }
 
+bool hasMetaReviewIntent(const QString& question)
+{
+    const QString folded = question.toCaseFolded();
+    if (containsAnyTerm(folded, {
+            QStringLiteral("反思"),
+            QStringLiteral("复盘"),
+            QStringLiteral("怎么回事"),
+            QStringLiteral("为什么"),
+            QStringLiteral("原因"),
+            QStringLiteral("问题在哪"),
+            QStringLiteral("哪里存在问题"),
+            QStringLiteral("哪里有问题"),
+            QStringLiteral("哪里错"),
+            QStringLiteral("错在哪"),
+            QStringLiteral("流程问题"),
+            QStringLiteral("总结问题"),
+            QStringLiteral("任务完成得不彻底"),
+            QStringLiteral("上下文"),
+            QStringLiteral("忘了"),
+            QStringLiteral("糊涂"),
+            QStringLiteral("越改越弱"),
+            QStringLiteral("更蠢"),
+            QStringLiteral("不专业"),
+            QStringLiteral("不稳定"),
+            QStringLiteral("不自然"),
+            QStringLiteral("what happened"),
+            QStringLiteral("what went wrong"),
+            QStringLiteral("where did you go wrong"),
+            QStringLiteral("reflect"),
+            QStringLiteral("postmortem"),
+            QStringLiteral("root cause"),
+            QStringLiteral("why"),
+            QStringLiteral("what is the issue"),
+            QStringLiteral("what's the issue"),
+            QStringLiteral("what is the problem"),
+            QStringLiteral("what's the problem")
+        })) {
+        return true;
+    }
+
+    const bool correctionOrReferenceAnswer = containsAnyTerm(folded, {
+        QStringLiteral("不是这个"),
+        QStringLiteral("不是这个口令"),
+        QStringLiteral("不对"),
+        QStringLiteral("又错"),
+        QStringLiteral("还是错"),
+        QStringLiteral("正确口令是"),
+        QStringLiteral("正确密码是"),
+        QStringLiteral("正确 flag 是"),
+        QStringLiteral("正确flag是"),
+        QStringLiteral("actual password"),
+        QStringLiteral("correct password"),
+        QStringLiteral("correct flag"),
+        QStringLiteral("not this"),
+        QStringLiteral("wrong again")
+    });
+    if (!correctionOrReferenceAnswer) {
+        return false;
+    }
+
+    const bool explicitFreshSolveRequest = containsAnyTerm(folded, {
+        QStringLiteral("重新破解"),
+        QStringLiteral("继续破解"),
+        QStringLiteral("再破解"),
+        QStringLiteral("重算"),
+        QStringLiteral("重新计算"),
+        QStringLiteral("重新解码"),
+        QStringLiteral("继续解码"),
+        QStringLiteral("重新分析"),
+        QStringLiteral("继续分析"),
+        QStringLiteral("solve again"),
+        QStringLiteral("crack again"),
+        QStringLiteral("decode again"),
+        QStringLiteral("recompute"),
+        QStringLiteral("reanalyze")
+    });
+    return !explicitFreshSolveRequest;
+}
+
 bool shouldUseStaticFastPath(const QString& question)
 {
-    return hasStaticCtfIntent(question) && !hasExplicitDeviceRuntimeIntent(question);
+    return hasStaticCtfIntent(question)
+        && !hasExplicitDeviceRuntimeIntent(question)
+        && !hasMetaReviewIntent(question);
+}
+
+QString hexDecimalMismatchNotice(const QString& answer)
+{
+    static const QRegularExpression hexPattern(
+        QStringLiteral(R"(0x([0-9a-fA-F]+))"));
+    static const QRegularExpression decimalAfterHexClaimPattern(
+        QStringLiteral(R"(^\s*(?:的\s*)?(?:decimal\s*)?(?:十进制(?:值)?\s*)?(?:=|＝|为|是|:|：)\s*(?:\*\*)?([0-9]+))"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression decimalAfterHexTableCellPattern(
+        QStringLiteral(R"(^\s*\|\s*(?:\*\*)?([0-9]+))"));
+
+    QRegularExpressionMatchIterator it = hexPattern.globalMatch(answer);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch match = it.next();
+        bool hexOk = false;
+        const qulonglong hexValue = match.captured(1).toULongLong(&hexOk, 16);
+        if (!hexOk) {
+            continue;
+        }
+
+        const QString tail = answer.mid(match.capturedEnd(), 80);
+        QRegularExpressionMatch decimalMatch = decimalAfterHexClaimPattern.match(tail);
+        if (!decimalMatch.hasMatch()) {
+            decimalMatch = decimalAfterHexTableCellPattern.match(tail);
+        }
+        if (!decimalMatch.hasMatch()) {
+            continue;
+        }
+
+        bool decimalOk = false;
+        const qulonglong decimalValue = decimalMatch.captured(1).toULongLong(&decimalOk, 10);
+        if (!decimalOk) {
+            continue;
+        }
+
+        if (hexValue != decimalValue) {
+            return QStringLiteral(
+                "答案里有一个十六进制到十进制的换算不一致：0x%1 被写成了 %2，但正确十进制值是 %3。需要重新用结构化证据或本地 Python 复核常量后再给结论。")
+                .arg(match.captured(1), decimalMatch.captured(1), QString::number(hexValue));
+        }
+    }
+    return {};
+}
+
+bool answerAlreadyMarksRuntimePending(const QString& foldedAnswer)
+{
+    return foldedAnswer.contains(QStringLiteral("static verification only"))
+        || foldedAnswer.contains(QStringLiteral("device verification pending"))
+        || foldedAnswer.contains(QStringLiteral("device input remains unverified"))
+        || foldedAnswer.contains(QStringLiteral("运行态未验证"))
+        || foldedAnswer.contains(QStringLiteral("未运行态验证"))
+        || foldedAnswer.contains(QStringLiteral("尚未设备验证"))
+        || foldedAnswer.contains(QStringLiteral("尚未在设备"))
+        || foldedAnswer.contains(QStringLiteral("未在设备"))
+        || foldedAnswer.contains(QStringLiteral("设备验证未完成"));
+}
+
+bool answerHasConcreteStaticCtfCandidate(const QString& answer, const QString& foldedAnswer)
+{
+    return answer.contains(QStringLiteral("正确口令"))
+        || answer.contains(QStringLiteral("完整口令"))
+        || answer.contains(QStringLiteral("候选口令"))
+        || answer.contains(QStringLiteral("候选值"))
+        || answer.contains(QStringLiteral("复核通过"))
+        || answer.contains(QStringLiteral("断言"))
+        || answer.contains(QStringLiteral("解码得"))
+        || answer.contains(QStringLiteral("解出的"))
+        || foldedAnswer.contains(QStringLiteral("candidate"))
+        || foldedAnswer.contains(QStringLiteral("password"))
+        || foldedAnswer.contains(QStringLiteral("flag{"))
+        || foldedAnswer.contains(QStringLiteral("encode(candidate) =="))
+        || foldedAnswer.contains(QStringLiteral("verifier assertion"));
+}
+
+bool answerHasRuntimeSemanticEvidence(const QString& answer, const QString& foldedAnswer)
+{
+    return answer.contains(QStringLiteral("口令正确"))
+        || answer.contains(QStringLiteral("密码正确"))
+        || answer.contains(QStringLiteral("成功 Toast"))
+        || answer.contains(QStringLiteral("成功Toast"))
+        || answer.contains(QStringLiteral("已生成文件"))
+        || answer.contains(QStringLiteral("文件已生成"))
+        || answer.contains(QStringLiteral("生成了文件"))
+        || answer.contains(QStringLiteral("已确认生成"))
+        || answer.contains(QStringLiteral("读取到文件"))
+        || answer.contains(QStringLiteral("文件内容为"))
+        || answer.contains(QStringLiteral("文件内容："))
+        || foldedAnswer.contains(QStringLiteral("success toast"))
+        || foldedAnswer.contains(QStringLiteral("observed generated file"))
+        || foldedAnswer.contains(QStringLiteral("generated file confirmed"))
+        || foldedAnswer.contains(QStringLiteral("file contents:"))
+        || foldedAnswer.contains(QStringLiteral("app-specific log"))
+        || foldedAnswer.contains(QStringLiteral("runtime evidence"))
+        || foldedAnswer.contains(QStringLiteral("device validation complete"));
+}
+
+bool answerHasFullStaticVerifierAssertion(const QString& foldedAnswer)
+{
+    static const QRegularExpression explicitVerifierEqualityPattern(
+        QStringLiteral(R"((?:encode|hash|verify|check|compare)\s*\([^)]*(?:candidate|password|passwd|flag|input)[^)]*\)\s*(?:==|===|=)\s*(?:verifier|secretkey|secret key|expected|target|true|ok))"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (explicitVerifierEqualityPattern.match(foldedAnswer).hasMatch()) {
+        return true;
+    }
+
+    return containsAnyTerm(foldedAnswer, {
+        QStringLiteral("candidate re-encodes to"),
+        QStringLiteral("full re-encode"),
+        QStringLiteral("full verifier match"),
+        QStringLiteral("full candidate verification passed"),
+        QStringLiteral("re-encryption matches"),
+        QStringLiteral("ciphertext matches"),
+        QStringLiteral("重加密验证"),
+        QStringLiteral("重新加密"),
+        QStringLiteral("重加密后的密文"),
+        QStringLiteral("密文完全一致"),
+        QStringLiteral("与硬编码密文完全一致"),
+        QStringLiteral("全量复编码"),
+        QStringLiteral("完整复编码"),
+        QStringLiteral("全量验证"),
+        QStringLiteral("完整验证"),
+        QStringLiteral("逐字符复编码"),
+        QStringLiteral("全部字符复编码")
+    });
+}
+
+QString finalAnswerRuntimeHandoffNotice(const QString& latestQuestion, const QString& answer)
+{
+    const QString foldedAnswer = answer.toCaseFolded();
+    if (answerAlreadyMarksRuntimePending(foldedAnswer)) {
+        return {};
+    }
+
+    const bool ctfLike = hasStaticCtfIntent(latestQuestion)
+        || foldedAnswer.contains(QStringLiteral("secretkey"))
+        || foldedAnswer.contains(QStringLiteral("encode("))
+        || foldedAnswer.contains(QStringLiteral("ctf"));
+    if (!ctfLike || !answerHasConcreteStaticCtfCandidate(answer, foldedAnswer)) {
+        return {};
+    }
+
+    if (answerHasRuntimeSemanticEvidence(answer, foldedAnswer)) {
+        return {};
+    }
+
+    return QStringLiteral(
+        "**运行态状态**\n\n"
+        "当前答案只完成静态验证，尚未包含设备运行态证据。下一步可连接设备安装应用、输入候选值，并用成功 Toast、生成文件、日志或 UI 状态确认；在拿到这些证据前，不应暗示设备验证已经完成。是否继续连接设备检验一遍？");
+}
+
+QString finalAnswerQualityNotice(
+    const QString& latestQuestion,
+    const QString& answer,
+    bool deviceRuntimeContinuation)
+{
+    const QString hexNotice = hexDecimalMismatchNotice(answer);
+    if (!hexNotice.isEmpty()) {
+        return hexNotice;
+    }
+
+    const QString foldedQuestion = latestQuestion.toCaseFolded();
+    const QString foldedAnswer = answer.toCaseFolded();
+    const bool ctfLike = hasStaticCtfIntent(latestQuestion)
+        || foldedAnswer.contains(QStringLiteral("secretkey"))
+        || foldedAnswer.contains(QStringLiteral("encode("))
+        || foldedAnswer.contains(QStringLiteral("ctf"));
+    const bool deviceRuntimeContext = hasExplicitDeviceRuntimeIntent(latestQuestion)
+        || deviceRuntimeContinuation;
+
+    if (ctfLike
+        && (answer.contains(QStringLiteral("请在本地运行"))
+            || answer.contains(QStringLiteral("建议在本地运行"))
+            || answer.contains(QStringLiteral("需本地Python"))
+            || answer.contains(QStringLiteral("无法执行 Python"))
+            || answer.contains(QStringLiteral("没有 Python 执行环境"))
+            || answer.contains(QStringLiteral("没有 Python 环境"))
+            || answer.contains(QStringLiteral("没有Python环境"))
+            || answer.contains(QStringLiteral("没有Python执行环境"))
+            || foldedAnswer.contains(QStringLiteral("no python environment"))
+            || foldedAnswer.contains(QStringLiteral("run this script locally")))) {
+        return QStringLiteral(
+            "这次 CTF 分析像是停在了“让用户本地跑脚本”，但没有给出候选值和完整校验结果。应优先使用当前可用的本地分析工具完成计算；如果工具不可用，需要明确说明具体阻塞原因。");
+    }
+
+    if (ctfLike
+        && answerHasConcreteStaticCtfCandidate(answer, foldedAnswer)
+        && !answerHasRuntimeSemanticEvidence(answer, foldedAnswer)
+        && !deviceRuntimeContext
+        && !answerHasFullStaticVerifierAssertion(foldedAnswer)) {
+        return QStringLiteral(
+            "这次 CTF 分析给出了候选值，但没有给出完整 verifier 断言。应使用 run_analysis_script 对完整候选值执行目标变换，并确认 encode(candidate) == verifier/secretKey、hash(candidate) == expected，或等价的全量比较后再给结论。");
+    }
+
+    if (ctfLike
+        && answerHasConcreteStaticCtfCandidate(answer, foldedAnswer)
+        && containsAnyTerm(foldedAnswer, {
+            QStringLiteral("随机抽查"),
+            QStringLiteral("随机抽样"),
+            QStringLiteral("抽样"),
+            QStringLiteral("spot-check"),
+            QStringLiteral("spot check"),
+            QStringLiteral("sample check")
+        })
+        && !answerHasFullStaticVerifierAssertion(foldedAnswer)) {
+        return QStringLiteral(
+            "这次 CTF 分析给出了候选值，但只提到了抽样检查。应重新跑完整目标变换，并确认 encode(candidate) == verifier/secretKey 后，才能把它作为已解决结论。");
+    }
+
+    const bool runtimeLike = hasExplicitDeviceRuntimeIntent(latestQuestion)
+        || foldedQuestion.contains(QStringLiteral("验证"))
+        || foldedAnswer.contains(QStringLiteral("install_current_hap"))
+        || foldedAnswer.contains(QStringLiteral("设备运行"));
+    if (runtimeLike
+        && foldedAnswer.contains(QStringLiteral("toast node mount"))
+        && (foldedAnswer.contains(QStringLiteral("成功")) || foldedAnswer.contains(QStringLiteral("success")))
+        && !answerHasRuntimeSemanticEvidence(answer, foldedAnswer)) {
+        return QStringLiteral(
+            "泛泛看到 Toast 节点或应用没有崩溃，不等于业务成功。需要确认成功 Toast 文本、预期文件/产物、文件内容、UI 状态或应用专属日志后，才能声称运行态验证成功。");
+    }
+
+    if (runtimeLike
+        && ctfLike
+        && containsAnyTerm(foldedAnswer, {
+            QStringLiteral("建议手动"),
+            QStringLiteral("你手动"),
+            QStringLiteral("由你手动"),
+            QStringLiteral("manually input"),
+            QStringLiteral("manual input")
+        })
+        && containsAnyTerm(foldedAnswer, {
+            QStringLiteral("输入"),
+            QStringLiteral("口令"),
+            QStringLiteral("flag"),
+            QStringLiteral("password")
+        })) {
+        return QStringLiteral(
+            "不应把 CTF 设备验证的主结论交给用户手动输入。若自动输入被阻塞，应说明已尝试的自动路径和证据，把原始输入投递标为未验证，并优先采用自动 verifier patch、产物或日志验证路径。");
+    }
+
+    return {};
 }
 
 enum class AgentTaskMode {
@@ -1367,11 +1718,11 @@ AgentTaskProfile classifyAgentTask(const QString& question)
     if (shouldUseStaticFastPath(question)) {
         profile.mode = AgentTaskMode::StaticFastPath;
         profile.deviceRuntimeToolsEnabled = false;
-        profile.maxHistoryMessages = 3;
-        profile.maxHistoryCharsPerMessage = 1800;
-        profile.maxSnapshotSummaryChars = 6000;
-        profile.maxEntryPointChars = 9000;
-        profile.maxFileListChars = 6000;
+        profile.maxHistoryMessages = 2;
+        profile.maxHistoryCharsPerMessage = 1200;
+        profile.maxSnapshotSummaryChars = 4000;
+        profile.maxEntryPointChars = 6000;
+        profile.maxFileListChars = 4000;
         return profile;
     }
 
@@ -1389,6 +1740,92 @@ AgentTaskProfile classifyAgentTask(const QString& question)
     return profile;
 }
 
+bool isAffirmativeDeviceVerificationFollowUp(const QString& question, const QVariantList& messages)
+{
+    const QString foldedQuestion = question.trimmed().toCaseFolded();
+    const bool affirmative = foldedQuestion == QStringLiteral("继续")
+        || foldedQuestion == QStringLiteral("继续吧")
+        || foldedQuestion == QStringLiteral("接着")
+        || foldedQuestion == QStringLiteral("接着吧")
+        || foldedQuestion == QStringLiteral("好")
+        || foldedQuestion == QStringLiteral("好的")
+        || foldedQuestion == QStringLiteral("可以")
+        || foldedQuestion == QStringLiteral("行")
+        || foldedQuestion == QStringLiteral("做吧")
+        || foldedQuestion == QStringLiteral("跑吧")
+        || foldedQuestion.contains(QStringLiteral("继续"))
+        || foldedQuestion.contains(QStringLiteral("接着"));
+    if (!affirmative) {
+        return false;
+    }
+
+    int startIndex = messages.size() - 1;
+    for (int index = messages.size() - 1; index >= 0; --index) {
+        const QVariantMap item = messages.at(index).toMap();
+        if (item.value(QStringLiteral("role")).toString() == QStringLiteral("user")
+            && item.value(QStringLiteral("text")).toString().trimmed() == question.trimmed()) {
+            startIndex = index - 1;
+            break;
+        }
+    }
+
+    int inspected = 0;
+    for (int index = startIndex; index >= 0; --index) {
+        const QVariantMap item = messages.at(index).toMap();
+        const QString role = item.value(QStringLiteral("role")).toString();
+        if (role != QStringLiteral("assistant") && role != QStringLiteral("user")) {
+            continue;
+        }
+        const QString foldedMessage = item.value(QStringLiteral("text")).toString().toCaseFolded();
+        if (containsAnyTerm(foldedMessage, {
+                QStringLiteral("device verification pending"),
+                QStringLiteral("是否继续连接设备检验一遍"),
+                QStringLiteral("尚未包含设备运行态证据"),
+                QStringLiteral("运行态未验证"),
+                QStringLiteral("尚未设备验证"),
+                QStringLiteral("真机验证"),
+                QStringLiteral("继续真机"),
+                QStringLiteral("设备验证"),
+                QStringLiteral("安装验证"),
+                QStringLiteral("运行态验证"),
+                QStringLiteral("hdc"),
+                QStringLiteral("install_current_hap"),
+                QStringLiteral("install_current_hap_with_abc_string_rewrite"),
+                QStringLiteral("start_harmony_app"),
+                QStringLiteral("dump_ui_layout"),
+                QStringLiteral("input_ui_text"),
+                QStringLiteral("tap_ui"),
+                QStringLiteral("read_hilog"),
+                QStringLiteral("clear_hilog")
+            })) {
+            return true;
+        }
+        ++inspected;
+        if (inspected >= 8) {
+            break;
+        }
+    }
+
+    return false;
+}
+
+AgentTaskProfile classifyAgentTask(const QString& question, bool forceDeviceRuntime)
+{
+    if (!forceDeviceRuntime) {
+        return classifyAgentTask(question);
+    }
+
+    AgentTaskProfile profile;
+    profile.mode = AgentTaskMode::DeviceRuntime;
+    profile.deviceRuntimeToolsEnabled = true;
+    profile.maxHistoryMessages = 10;
+    profile.maxHistoryCharsPerMessage = 3000;
+    profile.maxSnapshotSummaryChars = 10000;
+    profile.maxEntryPointChars = 10000;
+    profile.maxFileListChars = 10000;
+    return profile;
+}
+
 QString agentTaskModeInstruction(const AgentTaskProfile& profile)
 {
     if (profile.mode == AgentTaskMode::StaticFastPath) {
@@ -1396,9 +1833,17 @@ QString agentTaskModeInstruction(const AgentTaskProfile& profile)
             "\n\nTask mode:\n"
             "- Static CTF fast path is active for this request.\n"
             "- Treat flag, password, secretKey, maze, encode/decode, hash, and CTF prompts as static reverse-engineering tasks by default.\n"
-            "- First use the package summary, entry points, source/disassembly, ABC strings, literals, xrefs, call flows, and short Python calculations.\n"
+            "- Do not narrate planned tool use. If evidence is missing, call the needed ReArk tool immediately instead of writing progress prose.\n"
+            "- First use the package summary, entry points, source/disassembly, ABC strings, literals, xrefs, call flows, and one short Python calculation.\n"
+            "- Never hand-convert hexadecimal constants, character codes, modular arithmetic, hashes, or long strings; use structured ABC evidence and deterministic Python calculations.\n"
+            "- Do not say you need Python and then continue in prose; call run_analysis_script immediately when arithmetic, decoding, or full-candidate verification is needed.\n"
+            "- After deriving a candidate, verify it by running the target transform in Python and asserting that re-encoding, hashing, or comparison reproduces the verifier evidence.\n"
+            "- Spot checks or random samples are not enough for a final decoded candidate; verify the full candidate against the verifier evidence.\n"
+            "- Do not finish a flag/password/secret solve with only a script or instructions for the user to run locally. Continue until you have a concrete candidate value and a verifier assertion, or explicitly state the exact blocker.\n"
+            "- When a constant, formula, or candidate changes, reconcile it against previous scratchpad/Python-session state and keep the verified version; do not replace a verified candidate with a later unverified guess.\n"
             "- Do not attempt device install, app launch, hilog, screenshots, UI automation, or signing validation unless the latest user request explicitly asks for device verification.\n"
-            "- Once the decoding formula, key material, or flag/answer is supported by static evidence, stop calling tools and answer.");
+            "- If you stop after static proof because device runtime was not requested, label the result as static verification only / device verification pending, do not imply device validation is complete, and offer the next device verification step.\n"
+            "- Once the decoding formula, key material, or flag/answer is supported by static evidence, stop calling tools and answer concisely.");
     }
 
     if (profile.deviceRuntimeToolsEnabled) {
@@ -1408,6 +1853,19 @@ QString agentTaskModeInstruction(const AgentTaskProfile& profile)
             "- ReArk's install_current_hap tool installs the resolved HAP module from the current package.\n"
             "- If installation is rejected because the HAP is unsigned or signature verification fails, and Harmony signing is configured in Settings, install_current_hap automatically signs and retries.\n"
             "- If the package bundle identity differs from the configured signing profile bundle, install_current_hap can rewrite the HAP bundle identity, repack, sign, and retry installation.\n"
+            "- Do not use run_analysis_script for HDC installation, launch, screenshots, UI input, or other device I/O; it is only for short local Python analysis.\n"
+            "- Runtime verification is a closed loop: list/select device, install/sign, launch, dump layout, identify controls from node evidence, clear_hilog before decisive interactions when possible, input or tap, then collect success evidence from UI, success Toast text, fresh read_hilog output, generated files, or app state.\n"
+            "- When a concrete candidate has already been decoded and device runtime tools are enabled, do not stop at static proof; continue through device installation, launch, input, and semantic runtime evidence unless a tool result gives a concrete blocker.\n"
+            "- Do not treat coordinates, guessed bundle names, guessed artifact paths, or command success as proof; discover them from tool output, package/runtime evidence, UI layout, logs, code, inspect_app_files/read_device_file, or actual device artifacts.\n"
+            "- A generic Toast mount, input echo, process liveness, or absence of crash is not enough to claim success; require semantic success evidence such as the success Toast text, expected UI state, expected file contents from read_device_file, or app-specific log/artifact evidence.\n"
+            "- Do not assume filesDir, bundle-specific storage paths, Toast results, or artifact names; derive them from code, runtime output, logs, UI evidence, or actual device file evidence.\n"
+            "- Prefer UI layout selectors over guessed coordinates, and do not claim arbitrary shell, hook, breakpoint, packet capture, or dynamic debugging unless a dedicated ReArk tool exists for that action.\n"
+            "- If static evidence and runtime behavior disagree, stop guessing input variants; re-check constants and bytecode semantics with structured evidence and Python, then use a runtime probe when appropriate.\n"
+            "- When exact UI text delivery is blocked by a Password field, long secret, or metacharacter-heavy input, use install_current_hap_with_abc_string_rewrite to install a verifier-patched HAP and validate the real success branch with a short safe input instead of repeatedly trying lossy keyboard injection.\n"
+            "- When computing a verifier patch, derive the replacement from the same verified transform and short probe input, and verify that transform before installing the patched package.\n"
+            "- When using a patched verifier, explicitly distinguish success-branch validation from exact delivery of the original candidate.\n"
+            "- A verifier-patched HAP proves the success branch and artifact generation path, but it is not proof that the original long input was delivered exactly unless separate UI or business evidence confirms it.\n"
+            "- Do not hand off full-secret device validation to manual user input as the primary conclusion. If exact delivery remains blocked, report the automated attempts and keep original-input delivery unverified while preferring verifier-patch, artifact, log, or UI-state validation.\n"
             "- Do not tell the user ReArk lacks re-signing capability; if automatic signing cannot run, report the concrete signing settings or tool error from install_current_hap.\n"
             "- Do not claim install, signing, bundle rewrite, packing, or launch succeeded, failed, or timed out unless install_current_hap or another ReArk device tool actually returned that status.\n"
             "- Only say app_packing_tool.jar timed out when the tool output contains timed_out: true or Command timed out; otherwise say the operation was not actually executed or the exact observed error is unknown.");
@@ -1415,8 +1873,9 @@ QString agentTaskModeInstruction(const AgentTaskProfile& profile)
 
     return QStringLiteral(
         "\n\nTask mode:\n"
-        "- Static analysis tools are the default for this request.\n"
-        "- Device runtime tools are not part of the default path unless the latest user request explicitly asks for installation, launch, HDC, UI automation, logs, screenshots, signing, or runtime verification.");
+            "- Static analysis tools are the default for this request.\n"
+        "- Device runtime tools are not part of the default path unless the latest user request explicitly asks for installation, launch, HDC, UI automation, logs, screenshots, signing, verification, validation, or runtime verification.\n"
+        "- If a static CTF answer contains a concrete candidate but no semantic runtime evidence, mark it as static verification only / device verification pending and do not imply device validation is complete.");
 }
 
 QString signingSettingsStatusLine(const QString& validationMessage)
@@ -1444,6 +1903,16 @@ QString agentRewrittenHapFileName(const QString& sourcePath)
         baseName = QStringLiteral("reark-agent");
     }
     return baseName + QStringLiteral("-rebundle-unsigned.hap");
+}
+
+QString agentStringRewrittenHapFileName(const QString& sourcePath)
+{
+    const QFileInfo info(sourcePath);
+    QString baseName = info.completeBaseName().trimmed();
+    if (baseName.isEmpty()) {
+        baseName = QStringLiteral("reark-agent");
+    }
+    return baseName + QStringLiteral("-abc-string-unsigned.hap");
 }
 
 struct AgentPackageIdentity {
@@ -1531,6 +2000,30 @@ std::string installWithRewriteSignToolContent(
         text += QStringLiteral("\n[signed install]\n%1").arg(HdcDeviceBackend::resultSummary(signedInstall));
     }
     return toStdString(boundedSnapshotText(text, 36000));
+}
+
+QString abcStringRewriteSummary(const HarmonyAbcStringRewriteResult& rewriteResult)
+{
+    QString text;
+    text += QStringLiteral("# status: %1\n").arg(rewriteResult.ok ? QStringLiteral("ok") : QStringLiteral("error"));
+    text += QStringLiteral("# input_hap: %1\n").arg(rewriteResult.inputHapPath);
+    text += QStringLiteral("# output_hap: %1\n").arg(rewriteResult.outputHapPath);
+    text += QStringLiteral("# abc_count: %1\n").arg(rewriteResult.abcCount);
+    text += QStringLiteral("# rewritten_abc_count: %1\n").arg(rewriteResult.rewrittenAbcCount);
+    text += QStringLiteral("# replacement_count: %1\n").arg(rewriteResult.replacementCount);
+    if (!rewriteResult.unpackedDirectory.trimmed().isEmpty() && !rewriteResult.ok) {
+        text += QStringLiteral("# unpacked_dir: %1\n").arg(rewriteResult.unpackedDirectory);
+    }
+    if (!rewriteResult.error.trimmed().isEmpty()) {
+        text += QStringLiteral("# error: %1\n").arg(rewriteResult.error.trimmed());
+    }
+    if (!rewriteResult.report.trimmed().isEmpty()) {
+        text += QStringLiteral("\n%1\n").arg(rewriteResult.report.trimmed());
+    }
+    if (rewriteResult.packingResult.started || !rewriteResult.packingResult.program.isEmpty()) {
+        text += QStringLiteral("\n[pack]\n%1\n").arg(HarmonyHapSigner::resultSummary(rewriteResult.packingResult));
+    }
+    return text.trimmed();
 }
 
 bool commandOutputContains(const CommandResult& result, const QString& needle)
@@ -1641,6 +2134,63 @@ QString agentLayoutPath()
     dir.mkpath(QStringLiteral("ReArk"));
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
     return dir.filePath(QStringLiteral("ReArk/reark-agent-ui-layout-%1.json").arg(timestamp));
+}
+
+QString agentDeviceFilePath(const QString& remotePath)
+{
+    QDir dir(QDir::tempPath());
+    dir.mkpath(QStringLiteral("ReArk"));
+    QString baseName = QFileInfo(remotePath.trimmed()).fileName();
+    if (baseName.isEmpty()) {
+        baseName = QStringLiteral("device-file");
+    }
+    baseName.replace(QRegularExpression(QStringLiteral(R"([^A-Za-z0-9._-])")), QStringLiteral("_"));
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"));
+    return dir.filePath(QStringLiteral("ReArk/reark-agent-device-file-%1-%2").arg(timestamp, baseName));
+}
+
+QString remoteShellSingleQuoted(QString value)
+{
+    value.replace(QLatin1Char('\''), QStringLiteral("'\"'\"'"));
+    return QStringLiteral("'%1'").arg(value);
+}
+
+QString cleanedRelativeDevicePath(QString value)
+{
+    value = value.trimmed();
+    while (value.startsWith(QLatin1Char('/'))) {
+        value.remove(0, 1);
+    }
+    return QDir::cleanPath(value);
+}
+
+bool isSafeRelativeDevicePath(const QString& value)
+{
+    if (value.isEmpty() || value == QStringLiteral(".")) {
+        return true;
+    }
+    if (value.startsWith(QLatin1Char('/'))) {
+        return false;
+    }
+    const QString normalized = QDir::cleanPath(value);
+    return normalized != QStringLiteral("..")
+        && !normalized.startsWith(QStringLiteral("../"))
+        && !normalized.contains(QStringLiteral("/../"));
+}
+
+bool isMostlyTextData(const QByteArray& data)
+{
+    if (data.isEmpty()) {
+        return true;
+    }
+    int printable = 0;
+    for (char ch : data) {
+        const unsigned char value = static_cast<unsigned char>(ch);
+        if (value == '\n' || value == '\r' || value == '\t' || (value >= 0x20 && value <= 0x7e)) {
+            ++printable;
+        }
+    }
+    return printable >= data.size() * 9 / 10;
 }
 
 struct AgentUiLayoutEvidence {
@@ -2605,6 +3155,250 @@ struct install_current_hap {
     }
 };
 
+struct install_current_hap_with_abc_string_rewrite {
+    static constexpr std::string_view description =
+        "Rewrite one exact ABC string literal in the currently loaded HAP module, repack it, sign it when Harmony signing is configured, and install it to a HarmonyOS target. Use this for sample-independent runtime verification when a CTF password or other value cannot be delivered exactly through UI text injection: replace the encoded verifier constant with the encoded form of a short safe input, then verify the real success branch using that safe input.";
+
+    wuwe::field<std::string> old_text {
+        .description = "Exact ABC string literal to replace, for example the original encoded secretKey."
+    };
+    wuwe::field<std::string> new_text {
+        .description = "Replacement ABC string literal, for example the encoded form of a short ASCII probe value when patching an encoded password verifier."
+    };
+    wuwe::field<std::string> module {
+        .default_value = std::string {},
+        .description = "Optional module display name, file name, or path when the active APP contains multiple HAP modules."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id. Leave empty to let hdc use its default target."
+    };
+    wuwe::field<bool> require_unique {
+        .default_value = true,
+        .description = "Require the old string to appear once in each rewritten ABC. Keep true for secret constants; set false only after static evidence shows repeated constants are intentional."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        if (!context.snapshot || context.snapshot->packagePath.trimmed().isEmpty()) {
+            return { .content = "No active ReArk package is loaded." };
+        }
+
+        const QString oldText = QString::fromStdString(old_text.value);
+        const QString newText = QString::fromStdString(new_text.value);
+        if (oldText.isEmpty() || newText.isEmpty()) {
+            return {
+                .content = "old_text and new_text are required.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        HdcDeviceBackend backend = agentDeviceBackend();
+        InstallablePackageSelection selection = InstallablePackageResolver::select(
+            installablePackageCandidates(*context.snapshot),
+            context.snapshot->packagePath,
+            QString::fromStdString(module.value));
+        if (!selection.ok) {
+            return {
+                .content = toStdString(selection.diagnostic),
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        QTemporaryDir workDir(QDir::temp().filePath(QStringLiteral("ReArk-agent-abc-string-install-XXXXXX")));
+        if (!workDir.isValid()) {
+            return {
+                .content = "Could not create temporary ABC string rewrite directory.",
+                .error_code = std::make_error_code(std::errc::io_error)
+            };
+        }
+
+        const QString target = QString::fromStdString(target_id.value);
+        const QString rewrittenHapPath = workDir.filePath(agentStringRewrittenHapFileName(selection.path));
+        const HarmonyAbcStringRewriteResult stringRewriteResult =
+            HarmonyPackageRewriter::rewriteAbcString({
+                .inputHapPath = selection.path,
+                .outputHapPath = rewrittenHapPath,
+                .oldText = oldText,
+                .newText = newText,
+                .javaProgram = HarmonyHapSigner::resolvedJavaProgram(),
+                .packingToolPath = HarmonyHapSigner::bundledPackingToolPath(),
+                .stopToken = context.stopToken,
+                .requireUnique = require_unique.value
+            });
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        if (!stringRewriteResult.ok) {
+            workDir.setAutoRemove(false);
+            QString text;
+            text += QStringLiteral("# status: error\n");
+            text += QStringLiteral("# operation: install_current_hap_with_abc_string_rewrite\n");
+            text += QStringLiteral("# active_package: %1\n").arg(context.snapshot->packagePath);
+            text += QStringLiteral("# installable_hap: %1\n").arg(selection.path);
+            text += QStringLiteral("# source_module: %1\n").arg(selection.displayName);
+            text += QStringLiteral("# rewritten_hap: %1\n").arg(rewrittenHapPath);
+            text += QStringLiteral("# old_text_length: %1\n# new_text_length: %2\n\n")
+                .arg(oldText.size())
+                .arg(newText.size());
+            text += QStringLiteral("[abc string rewrite]\n%1").arg(abcStringRewriteSummary(stringRewriteResult));
+            return {
+                .content = toStdString(boundedSnapshotText(text, 36000)),
+                .error_code = std::make_error_code(std::errc::io_error)
+            };
+        }
+
+        const HarmonySigningSettings signingSettings = SigningSettingsStore::loadHarmony();
+        const QString validationMessage = SigningSettingsStore::harmonyValidationMessage(signingSettings);
+        const AgentPackageIdentity packageIdentity = readAgentPackageIdentity(rewrittenHapPath);
+        QString installInputHapPath = rewrittenHapPath;
+        HarmonyBundleRewriteResult bundleRewriteResult;
+        bool bundleRewriteUsed = false;
+        CommandResult signResult;
+        CommandResult installResult;
+        QString signedHapPath;
+
+        if (validationMessage.trimmed().isEmpty()) {
+            const SigningMaterialStatus materialStatus =
+                SigningMaterialInspector::inspectHarmony(signingSettings);
+            if (!packageIdentity.bundleName.isEmpty()
+                && !materialStatus.profileBundleName.isEmpty()
+                && packageIdentity.bundleName != materialStatus.profileBundleName) {
+                bundleRewriteUsed = true;
+                const QString rebundledHapPath = workDir.filePath(agentRewrittenHapFileName(rewrittenHapPath));
+                bundleRewriteResult = HarmonyPackageRewriter::rewriteBundleIdentity({
+                    .inputHapPath = rewrittenHapPath,
+                    .outputHapPath = rebundledHapPath,
+                    .oldBundleName = packageIdentity.bundleName,
+                    .newBundleName = materialStatus.profileBundleName,
+                    .javaProgram = HarmonyHapSigner::resolvedJavaProgram(),
+                    .packingToolPath = HarmonyHapSigner::bundledPackingToolPath(),
+                    .stopToken = context.stopToken
+                });
+                if (auto cancelled = cancelledToolResult(context)) {
+                    return *cancelled;
+                }
+                if (!bundleRewriteResult.ok) {
+                    workDir.setAutoRemove(false);
+                    QString text;
+                    text += QStringLiteral("# status: error\n");
+                    text += QStringLiteral("# operation: install_current_hap_with_abc_string_rewrite\n");
+                    text += QStringLiteral("# active_package: %1\n").arg(context.snapshot->packagePath);
+                    text += QStringLiteral("# installable_hap: %1\n").arg(selection.path);
+                    text += QStringLiteral("# source_module: %1\n").arg(selection.displayName);
+                    text += QStringLiteral("# rewritten_hap: %1\n").arg(rewrittenHapPath);
+                    text += QStringLiteral("# package_bundle: %1\n# signing_profile_bundle: %2\n")
+                        .arg(packageIdentity.bundleName, materialStatus.profileBundleName);
+                    text += signingSettingsStatusLine(validationMessage) + QStringLiteral("\n\n");
+                    text += QStringLiteral("[abc string rewrite]\n%1\n\n").arg(abcStringRewriteSummary(stringRewriteResult));
+                    text += QStringLiteral("[bundle rewrite]\n# status: error\n# error: %1\n").arg(bundleRewriteResult.error.trimmed());
+                    if (!bundleRewriteResult.report.trimmed().isEmpty()) {
+                        text += QStringLiteral("\n%1").arg(bundleRewriteResult.report.trimmed());
+                    }
+                    return {
+                        .content = toStdString(boundedSnapshotText(text, 42000)),
+                        .error_code = std::make_error_code(std::errc::io_error)
+                    };
+                }
+                installInputHapPath = rebundledHapPath;
+            }
+
+            signedHapPath = workDir.filePath(agentSignedHapFileName(installInputHapPath));
+            signResult = CommandRunner::runBlocking(HarmonyHapSigner::signCommand({
+                .javaProgram = HarmonyHapSigner::resolvedJavaProgram(),
+                .signToolPath = HarmonyHapSigner::bundledSignToolPath(),
+                .keystorePath = signingSettings.keystorePath,
+                .keystorePassword = signingSettings.keystorePassword,
+                .keyAlias = signingSettings.keyAlias,
+                .keyPassword = signingSettings.keyPassword,
+                .profilePath = signingSettings.profilePath,
+                .certificatePath = signingSettings.certificatePath,
+                .inputHapPath = installInputHapPath,
+                .outputHapPath = signedHapPath,
+                .compatibleVersion = packageCompatibleVersionFromSummary(context.snapshot->packageSummary)
+            }), context.stopToken);
+            if (auto cancelled = cancelledToolResult(context)) {
+                return *cancelled;
+            }
+            if (signResult.succeeded()) {
+                installResult = CommandRunner::runBlocking(
+                    backend.installRequest(signedHapPath, target),
+                    context.stopToken);
+            }
+        } else {
+            installResult = CommandRunner::runBlocking(
+                backend.installRequest(installInputHapPath, target),
+                context.stopToken);
+        }
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        const bool signOk = validationMessage.trimmed().isEmpty() && signResult.succeeded();
+        const bool installOk = HdcDeviceBackend::installSucceeded(installResult);
+        if (!installOk || (validationMessage.trimmed().isEmpty() && !signOk)) {
+            workDir.setAutoRemove(false);
+        }
+
+        QString text;
+        text += QStringLiteral("# status: %1\n").arg(installOk ? QStringLiteral("ok") : QStringLiteral("error"));
+        text += QStringLiteral("# operation: install_current_hap_with_abc_string_rewrite\n");
+        text += QStringLiteral("# active_package: %1\n").arg(context.snapshot->packagePath);
+        text += QStringLiteral("# installable_hap: %1\n").arg(selection.path);
+        text += QStringLiteral("# source_module: %1\n").arg(selection.displayName);
+        text += QStringLiteral("# hdc: %1\n").arg(backend.resolvedProgram());
+        text += QStringLiteral("# old_text_length: %1\n# new_text_length: %2\n")
+            .arg(oldText.size())
+            .arg(newText.size());
+        text += QStringLiteral("# rewritten_hap: %1\n")
+            .arg(installOk ? QStringLiteral("temporary") : rewrittenHapPath);
+        text += QStringLiteral("# auto_sign: %1\n").arg(validationMessage.trimmed().isEmpty()
+                ? QStringLiteral("used")
+                : QStringLiteral("unavailable"));
+        text += signingSettingsStatusLine(validationMessage) + QStringLiteral("\n");
+        text += QStringLiteral("# bundle_rewrite: %1\n").arg(bundleRewriteUsed ? QStringLiteral("used") : QStringLiteral("not_needed"));
+        if (!packageIdentity.bundleName.isEmpty()) {
+            text += QStringLiteral("# package_bundle: %1\n").arg(packageIdentity.bundleName);
+        }
+        if (!packageIdentity.summaryError.isEmpty()) {
+            text += QStringLiteral("# package_summary_warning: %1\n").arg(packageIdentity.summaryError);
+        }
+        if (!signedHapPath.isEmpty()) {
+            text += QStringLiteral("# signed_hap: %1\n")
+                .arg(installOk ? QStringLiteral("temporary") : signedHapPath);
+        }
+        text += QStringLiteral("\n[abc string rewrite]\n%1\n").arg(abcStringRewriteSummary(stringRewriteResult));
+        if (bundleRewriteUsed) {
+            text += QStringLiteral("\n[bundle rewrite]\n");
+            text += QStringLiteral("# status: %1\n# input_hap: %2\n# output_hap: %3\n")
+                .arg(bundleRewriteResult.ok ? QStringLiteral("ok") : QStringLiteral("error"))
+                .arg(bundleRewriteResult.inputHapPath, bundleRewriteResult.outputHapPath);
+            if (!bundleRewriteResult.report.trimmed().isEmpty()) {
+                text += QStringLiteral("\n%1\n").arg(bundleRewriteResult.report.trimmed());
+            }
+        }
+        if (signResult.started || !signResult.program.isEmpty()) {
+            text += QStringLiteral("\n[sign]\n%1\n").arg(HarmonyHapSigner::resultSummary(signResult));
+        }
+        if (installResult.started || !installResult.program.isEmpty()) {
+            text += QStringLiteral("\n[install]\n%1").arg(HdcDeviceBackend::resultSummary(installResult));
+        }
+        if (!validationMessage.trimmed().isEmpty()) {
+            text += QStringLiteral("\n\nABC string rewrite succeeded, but Harmony signing is not configured. The raw rewritten HAP install result above is the only attempted install path.");
+        }
+
+        return {
+            .content = toStdString(boundedSnapshotText(text, 52000)),
+            .error_code = installOk
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
 struct start_harmony_app {
     static constexpr std::string_view description =
         "Start a HarmonyOS bundle/ability through hdc aa start. Requires explicit bundle name and optional ability name.";
@@ -2736,6 +3530,249 @@ struct read_hilog {
         return {
             .content = deviceCommandToolContent(QStringLiteral("read_hilog"), result, extra),
             .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct clear_hilog {
+    static constexpr std::string_view description =
+        "Clear the HarmonyOS hilog buffer before an interaction so later read_hilog output can be treated as a fresh evidence window.";
+
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        HdcDeviceBackend backend = agentDeviceBackend();
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.clearHilogRequest(QString::fromStdString(target_id.value)),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        const QString extra = QStringLiteral("# evidence_window: cleared_before_next_interaction\n# note: If this device rejects hilog -r, use timestamps and bounded read_hilog output instead.");
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("clear_hilog"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct inspect_app_files {
+    static constexpr std::string_view description =
+        "Probe common HarmonyOS app data locations and optional relative artifact paths for a bundle. This is sample-independent evidence collection; it reports exact hdc shell output and permission failures instead of assuming filesDir paths.";
+
+    wuwe::field<std::string> bundle_name {
+        .description = "Bundle name discovered from package metadata or runtime evidence."
+    };
+    wuwe::field<std::string> relative_path {
+        .default_value = std::string {},
+        .description = "Optional relative artifact path to probe under each discovered/common app data root, for example files/What or What. Absolute paths are rejected; use read_device_file for an exact absolute path."
+    };
+    wuwe::field<std::string> filename_filter {
+        .default_value = std::string {},
+        .description = "Optional filename substring used for a bounded find under candidate app data roots."
+    };
+    wuwe::field<int> max_lines {
+        .default_value = 300,
+        .description = "Maximum shell output lines to keep."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        const QString bundle = QString::fromStdString(bundle_name.value).trimmed();
+        if (bundle.isEmpty()) {
+            return {
+                .content = "bundle_name is required.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        const QString rawRelativePath = QString::fromStdString(relative_path.value).trimmed();
+        if (!isSafeRelativeDevicePath(rawRelativePath)) {
+            return {
+                .content = "relative_path must be relative and must not contain '..'. Use read_device_file for an exact absolute path.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+        const QString relativePath = cleanedRelativeDevicePath(rawRelativePath);
+        const QString filter = QString::fromStdString(filename_filter.value).trimmed();
+        const int boundedLines = std::clamp(max_lines.value <= 0 ? 300 : max_lines.value, 20, 1000);
+
+        QString script;
+        script += QStringLiteral("set +e\n");
+        script += QStringLiteral("bundle=%1\n").arg(remoteShellSingleQuoted(bundle));
+        script += QStringLiteral("relative=%1\n").arg(remoteShellSingleQuoted(relativePath == QStringLiteral(".") ? QString {} : relativePath));
+        script += QStringLiteral("filter=%1\n").arg(remoteShellSingleQuoted(filter));
+        script += QStringLiteral("limit=%1\n").arg(boundedLines);
+        script += QStringLiteral("echo '# app_file_probe: start'\n");
+        script += QStringLiteral("echo \"# bundle: $bundle\"\n");
+        script += QStringLiteral("echo \"# relative_path: ${relative:-<root>}\"\n");
+        script += QStringLiteral("echo \"# filename_filter: ${filter:-<none>}\"\n");
+        script += QStringLiteral("probe_root() {\n");
+        script += QStringLiteral("  root=\"$1\"\n");
+        script += QStringLiteral("  [ -e \"$root\" ] || return 0\n");
+        script += QStringLiteral("  path=\"$root\"\n");
+        script += QStringLiteral("  [ -n \"$relative\" ] && path=\"${root%/}/$relative\"\n");
+        script += QStringLiteral("  echo\n");
+        script += QStringLiteral("  echo \"## root: $root\"\n");
+        script += QStringLiteral("  if [ -e \"$path\" ]; then\n");
+        script += QStringLiteral("    echo \"# path_exists: $path\"\n");
+        script += QStringLiteral("    ls -la \"$path\" 2>&1 | head -n \"$limit\"\n");
+        script += QStringLiteral("    [ -f \"$path\" ] && { echo '[file_size]'; wc -c \"$path\" 2>&1; }\n");
+        script += QStringLiteral("  else\n");
+        script += QStringLiteral("    echo \"# path_missing: $path\"\n");
+        script += QStringLiteral("    ls -la \"$root\" 2>&1 | head -n \"$limit\"\n");
+        script += QStringLiteral("  fi\n");
+        script += QStringLiteral("  if [ -n \"$filter\" ] && [ -d \"$root\" ]; then\n");
+        script += QStringLiteral("    echo \"[matches]\"\n");
+        script += QStringLiteral("    pattern=\"*$filter*\"\n");
+        script += QStringLiteral("    find \"$root\" -maxdepth 6 -name \"$pattern\" -print -exec ls -ld {} \\; 2>&1 | head -n \"$limit\"\n");
+        script += QStringLiteral("  fi\n");
+        script += QStringLiteral("}\n");
+        const QStringList roots {
+            QStringLiteral("/data/storage/el2/base/files"),
+            QStringLiteral("/data/storage/el1/base/files"),
+            QStringLiteral("/data/storage/el2/distributedfiles"),
+            QStringLiteral("/data/app/el2/100/base/%1").arg(bundle),
+            QStringLiteral("/data/app/el1/100/base/%1").arg(bundle),
+            QStringLiteral("/data/app/el2/0/base/%1").arg(bundle),
+            QStringLiteral("/data/app/el1/0/base/%1").arg(bundle),
+            QStringLiteral("/data/accounts/account_0/appdata/%1").arg(bundle),
+            QStringLiteral("/data/accounts/account_0/applications/%1").arg(bundle)
+        };
+        for (const QString& root : roots) {
+            script += QStringLiteral("probe_root %1\n").arg(remoteShellSingleQuoted(root));
+        }
+        script += QStringLiteral("echo\n");
+        script += QStringLiteral("echo '## bundle_path_search'\n");
+        script += QStringLiteral("for base in /data/app /data/accounts /data/storage; do\n");
+        script += QStringLiteral("  [ -e \"$base\" ] || continue\n");
+        script += QStringLiteral("  find \"$base\" -maxdepth 8 -path \"*$bundle*\" -print -exec ls -ld {} \\; 2>&1 | head -n \"$limit\"\n");
+        script += QStringLiteral("done\n");
+        script += QStringLiteral("echo '# app_file_probe: end'\n");
+
+        HdcDeviceBackend backend = agentDeviceBackend();
+        const CommandResult result = CommandRunner::runBlocking(
+            backend.shellCommandRequest(script, QString::fromStdString(target_id.value), 15000),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+        QString output = result.standardOutput + result.standardError;
+        output = HdcDeviceBackend::filterHilog(output, QString {}, boundedLines);
+        QString extra = QStringLiteral("# bundle_name: %1\n# relative_path: %2\n# filename_filter: %3\n# lines_returned: %4\n# evidence_semantics: file_probe_not_success_claim")
+            .arg(bundle)
+            .arg(relativePath == QStringLiteral(".") ? QStringLiteral("<root>") : relativePath)
+            .arg(filter.isEmpty() ? QStringLiteral("<none>") : filter)
+            .arg(output.isEmpty() ? 0 : output.count(QLatin1Char('\n')) + 1);
+        if (!output.isEmpty()) {
+            extra += QStringLiteral("\n\n[file_probe_output]\n%1").arg(output);
+        }
+        return {
+            .content = deviceCommandToolContent(QStringLiteral("inspect_app_files"), result, extra),
+            .error_code = result.succeeded()
+                ? std::error_code {}
+                : std::make_error_code(std::errc::io_error)
+        };
+    }
+};
+
+struct read_device_file {
+    static constexpr std::string_view description =
+        "Download a specific absolute device file path through hdc file recv and return bounded content evidence. Use this after code, logs, or inspect_app_files identifies an artifact path.";
+
+    wuwe::field<std::string> remote_path {
+        .description = "Absolute device path to download."
+    };
+    wuwe::field<int> max_bytes {
+        .default_value = 4096,
+        .description = "Maximum bytes of local file content to include in the tool result."
+    };
+    wuwe::field<std::string> target_id {
+        .default_value = std::string {},
+        .description = "Optional hdc target id."
+    };
+
+    wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
+    {
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        const QString remotePath = QString::fromStdString(remote_path.value).trimmed();
+        if (!remotePath.startsWith(QLatin1Char('/')) || remotePath.contains(QStringLiteral(".."))) {
+            return {
+                .content = "remote_path must be an absolute device path and must not contain '..'.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
+        const int boundedMaxBytes = std::clamp(max_bytes.value <= 0 ? 4096 : max_bytes.value, 1, 65536);
+        const QString localPath = agentDeviceFilePath(remotePath);
+        HdcDeviceBackend backend = agentDeviceBackend();
+        const CommandResult receive = CommandRunner::runBlocking(
+            backend.receiveFileRequest(remotePath, localPath, QString::fromStdString(target_id.value), 15000),
+            context.stopToken);
+        if (auto cancelled = cancelledToolResult(context)) {
+            return *cancelled;
+        }
+
+        QByteArray content;
+        qint64 totalSize = -1;
+        QString localReadError;
+        if (receive.succeeded()) {
+            QFile file(localPath);
+            if (file.open(QIODevice::ReadOnly)) {
+                totalSize = file.size();
+                content = file.read(boundedMaxBytes);
+            } else {
+                localReadError = file.errorString();
+            }
+        }
+        const bool ok = receive.succeeded() && totalSize >= 0;
+
+        QString text;
+        text += QStringLiteral("# status: %1\n").arg(ok ? QStringLiteral("ok") : QStringLiteral("error"));
+        text += QStringLiteral("# operation: read_device_file\n");
+        text += QStringLiteral("# remote_path: %1\n").arg(remotePath);
+        text += QStringLiteral("# local_path: %1\n").arg(localPath);
+        text += QStringLiteral("# total_size: %1\n").arg(totalSize >= 0 ? QString::number(totalSize) : QStringLiteral("<unavailable>"));
+        text += QStringLiteral("# bytes_included: %1\n").arg(content.size());
+        text += QStringLiteral("# max_bytes: %1\n").arg(boundedMaxBytes);
+        if (!localReadError.isEmpty()) {
+            text += QStringLiteral("# local_read_error: %1\n").arg(localReadError.trimmed());
+        }
+        if (!content.isEmpty()) {
+            if (isMostlyTextData(content)) {
+                text += QStringLiteral("\n[content_text]\n%1\n").arg(QString::fromUtf8(content));
+            } else {
+                text += QStringLiteral("\n[content_hex]\n%1\n").arg(QString::fromLatin1(content.toHex(' ')));
+            }
+        }
+        text += QStringLiteral("\n[receive]\n%1").arg(HdcDeviceBackend::resultSummary(receive));
+
+        return {
+            .content = toStdString(boundedSnapshotText(text, 24000)),
+            .error_code = ok
                 ? std::error_code {}
                 : std::make_error_code(std::errc::io_error)
         };
@@ -3099,10 +4136,10 @@ struct tap_ui_text {
 
 struct input_ui_text {
     static constexpr std::string_view description =
-        "Input text through HarmonyOS uitest. Use x/y to focus a coordinate first, or omit them to type into the currently focused field. Pass the intended text exactly; ReArk quotes the remote hdc shell argument so spaces and characters such as double quotes, pipes, dollar signs, and angle brackets can be tried directly.";
+        "Best-effort text input through HarmonyOS device automation. Use x/y to focus a coordinate first, or omit them to type into the currently focused field. Pass the intended text literally; ReArk protects the remote shell argument. This tool does not guarantee exact text delivery for Password fields, long secrets, or shell/keyboard metacharacters, so verify the result through readable UI text or business evidence such as Toast text, generated files, logs, or state changes.";
 
     wuwe::field<std::string> text {
-        .description = "Text to input exactly. Do not pre-escape shell metacharacters; ReArk handles remote shell quoting."
+        .description = "Text to input literally. Do not pre-escape shell metacharacters; ReArk handles remote shell quoting."
     };
     wuwe::field<int> x {
         .default_value = -1,
@@ -3115,6 +4152,10 @@ struct input_ui_text {
     wuwe::field<std::string> target_id {
         .default_value = std::string {},
         .description = "Optional hdc target id."
+    };
+    wuwe::field<std::string> strategy {
+        .default_value = std::string { "uitest" },
+        .description = "Input strategy: uitest for Harmony uitest uiInput text/inputText, or uinput for /bin/uinput keyboard text after optional focus tap."
     };
 
     wuwe::llm_tool_result invoke(const ReArkToolContext& context) const
@@ -3132,22 +4173,50 @@ struct input_ui_text {
         UiAutomationBackend backend = agentUiBackend();
         const QString target = QString::fromStdString(target_id.value);
         const QString value = QString::fromStdString(text.value);
+        const QString normalizedStrategy = QString::fromStdString(strategy.value).trimmed().toCaseFolded();
+        const bool useUitest = normalizedStrategy.isEmpty() || normalizedStrategy == QStringLiteral("uitest");
+        const bool useUinput = normalizedStrategy == QStringLiteral("uinput");
+        if (!useUitest && !useUinput) {
+            return {
+                .content = "strategy must be uitest or uinput.",
+                .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::invalid_tool_arguments)
+            };
+        }
+
         const bool hasPoint = x.value >= 0 && y.value >= 0;
+        CommandResult focusTap;
+        if (useUinput && hasPoint) {
+            focusTap = CommandRunner::runBlocking(
+                backend.tapRequest(x.value, y.value, target),
+                context.stopToken);
+            if (auto cancelled = cancelledToolResult(context)) {
+                return *cancelled;
+            }
+        }
+
         const CommandResult result = CommandRunner::runBlocking(
-            hasPoint
-                ? backend.inputTextAtRequest(x.value, y.value, value, target)
-                : backend.inputFocusedTextRequest(value, target),
+            useUinput
+                ? backend.uinputKeyboardTextRequest(value, target)
+                : (hasPoint
+                    ? backend.inputTextAtRequest(x.value, y.value, value, target)
+                    : backend.inputFocusedTextRequest(value, target)),
             context.stopToken);
         if (auto cancelled = cancelledToolResult(context)) {
             return *cancelled;
         }
-        const QString extra = QStringLiteral("# mode: %1\n# x: %2\n# y: %3")
+        const bool ok = result.succeeded() && (!useUinput || !hasPoint || focusTap.succeeded());
+        QString extra = QStringLiteral("# mode: %1\n# strategy: %2\n# x: %3\n# y: %4\n%5")
             .arg(hasPoint ? QStringLiteral("coordinate") : QStringLiteral("focused"))
+            .arg(useUinput ? QStringLiteral("uinput") : QStringLiteral("uitest"))
             .arg(x.value)
-            .arg(y.value);
+            .arg(y.value)
+            .arg(uiTextInputEvidenceNote(value));
+        if (useUinput && hasPoint) {
+            extra += QStringLiteral("\n\n[focus_tap]\n%1").arg(HdcDeviceBackend::resultSummary(focusTap));
+        }
         return {
-            .content = deviceCommandToolContent(QStringLiteral("input_ui_text"), result, extra),
-            .error_code = result.succeeded()
+            .content = deviceCommandToolContent(QStringLiteral("input_ui_text"), result, extra, ok, true),
+            .error_code = ok
                 ? std::error_code {}
                 : std::make_error_code(std::errc::io_error)
         };
@@ -3253,11 +4322,13 @@ public:
         std::shared_ptr<const DecompilerController::AgentSnapshot> snapshot,
         std::shared_ptr<AgentScratchpad> scratchpad,
         std::shared_ptr<PythonSessionState> pythonSession,
-        bool includeDeviceRuntimeTools)
+        AgentTaskMode taskMode)
         : snapshot_(std::move(snapshot))
         , scratchpad_(std::move(scratchpad))
         , pythonSession_(std::move(pythonSession))
     {
+        const bool staticFastPath = taskMode == AgentTaskMode::StaticFastPath;
+        const bool includeDeviceRuntimeTools = taskMode == AgentTaskMode::DeviceRuntime;
         registerTool<read_agent_scratchpad>();
         registerTool<update_agent_scratchpad>();
         registerTool<read_python_session>();
@@ -3274,17 +4345,23 @@ public:
         registerTool<find_abc_xrefs>();
         registerTool<find_abc_call_argument_flows>();
         registerTool<analyze_abc_reference_flow>();
-        registerTool<inspect_entry_points>();
-        registerTool<explain_signature>();
+        if (!staticFastPath) {
+            registerTool<inspect_entry_points>();
+            registerTool<explain_signature>();
+        }
         if (!includeDeviceRuntimeTools) {
             return;
         }
         registerTool<list_harmony_devices>();
         registerTool<install_current_hap>();
+        registerTool<install_current_hap_with_abc_string_rewrite>();
         registerTool<start_harmony_app>();
+        registerTool<clear_hilog>();
         registerTool<read_hilog>();
         registerTool<capture_device_screenshot>();
         registerTool<dump_ui_layout>();
+        registerTool<inspect_app_files>();
+        registerTool<read_device_file>();
         registerTool<tap_ui>();
         registerTool<tap_ui_text>();
         registerTool<input_ui_text>();
@@ -3601,9 +4678,12 @@ bool staticFastPathHistoryNoise(
         QStringLiteral("install_current_hap"),
         QStringLiteral("list_harmony_devices"),
         QStringLiteral("start_harmony_app"),
+        QStringLiteral("clear_hilog"),
         QStringLiteral("read_hilog"),
         QStringLiteral("capture_device_screenshot"),
         QStringLiteral("dump_ui_layout"),
+        QStringLiteral("inspect_app_files"),
+        QStringLiteral("read_device_file"),
         QStringLiteral("hdc"),
         QStringLiteral("signature"),
         QStringLiteral("signing"),
@@ -3739,6 +4819,354 @@ QString reasoningCancelledMessage(const wuwe::agent::reasoning::reasoning_result
     return AgentController::tr("Analysis cancelled.");
 }
 
+wuwe::llm_response staticFastPathContractError(std::string message)
+{
+    return {
+        .content = std::move(message),
+        .error_code = std::make_error_code(std::errc::protocol_error),
+    };
+}
+
+wuwe::llm_response staticFastPathCancelledResponse(
+    const wuwe::llm_agent_callbacks& callbacks)
+{
+    if (callbacks.on_cancelled) {
+        callbacks.on_cancelled();
+    }
+    return {
+        .error_code = wuwe::agent::make_error_code(wuwe::agent::llm_error_code::cancelled),
+    };
+}
+
+bool isToolChoiceUnsupportedResponse(const wuwe::llm_response& response)
+{
+    if (!response.error_code) {
+        return false;
+    }
+
+    QString text = QString::fromStdString(response.content).toCaseFolded();
+    if (!response.stop_reason.empty()) {
+        text += QLatin1Char('\n') + QString::fromStdString(response.stop_reason).toCaseFolded();
+    }
+    for (const auto& [key, value] : response.metadata) {
+        text += QLatin1Char('\n') + QString::fromStdString(key).toCaseFolded();
+        text += QLatin1Char('\n') + QString::fromStdString(value).toCaseFolded();
+    }
+
+    return text.contains(QStringLiteral("tool_choice"))
+        && (text.contains(QStringLiteral("not support"))
+            || text.contains(QStringLiteral("does not support"))
+            || text.contains(QStringLiteral("unsupported"))
+            || text.contains(QStringLiteral("不支持")));
+}
+
+void emitStaticFastPathAgentEvent(
+    const wuwe::llm_agent_callbacks& callbacks,
+    const wuwe::llm_agent_event& event)
+{
+    if (callbacks.on_event) {
+        callbacks.on_event(event);
+    }
+}
+
+wuwe::agent::reasoning::reasoning_agent_complete makeStaticFastPathFirstToolAgentComplete(
+    wuwe::llm_client& client,
+    std::shared_ptr<wuwe::composite_tool_provider> provider,
+    QString executionPromptNote)
+{
+    return [&client, provider = std::move(provider), executionPromptNote = std::move(executionPromptNote)](
+               wuwe::llm_request request,
+               wuwe::llm_agent_run_options runOptions,
+               const wuwe::agent::reasoning::reasoning_policy& policy) {
+        if (provider == nullptr) {
+            return staticFastPathContractError(
+                "静态 CTF 快速分析需要读取当前包证据，但当前没有可用工具提供者。请重新加载样本或重启 Agent 后再试。（诊断：static_fast_path_first_tool_required/no_provider）");
+        }
+        if (runOptions.stop_token.stop_requested()) {
+            return staticFastPathCancelledResponse(runOptions.callbacks);
+        }
+
+        wuwe::llm_request firstRequest = request;
+        firstRequest.tools = provider->tools();
+        if (firstRequest.tools.empty()) {
+            return staticFastPathContractError(
+                "静态 CTF 快速分析需要先读取当前包证据，但当前工具列表为空。请确认样本已加载且 Agent 工具初始化成功。（诊断：static_fast_path_first_tool_required/no_tools）");
+        }
+        std::vector<wuwe::llm_tool> scriptTools;
+        std::copy_if(
+            firstRequest.tools.begin(),
+            firstRequest.tools.end(),
+            std::back_inserter(scriptTools),
+            [](const wuwe::llm_tool& tool) {
+                return isScriptToolName(tool.name);
+            });
+        const bool scriptToolAvailable = !scriptTools.empty();
+        firstRequest.tool_choice = wuwe::llm_tool_choice {
+            .mode = wuwe::llm_tool_choice_mode::required,
+        };
+
+        auto completeToolRequest = [&](wuwe::llm_request& toolRequest) {
+            if (runOptions.callbacks.on_model_start
+                && !runOptions.callbacks.on_model_start(toolRequest)) {
+                return staticFastPathCancelledResponse(runOptions.callbacks);
+            }
+            emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                .type = wuwe::llm_agent_event_type::model_started,
+                .request = &toolRequest,
+            });
+
+            wuwe::llm_response response;
+            if (client.supports_streaming()) {
+                wuwe::llm_stream_callbacks streamCallbacks;
+                bool sawFirstEvent = false;
+                streamCallbacks.on_event = [&](const wuwe::llm_stream_event& event) {
+                    if (!sawFirstEvent) {
+                        sawFirstEvent = true;
+                        emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                            .type = wuwe::llm_agent_event_type::model_first_event,
+                            .request = &toolRequest,
+                            .stream_event = &event,
+                        });
+                    }
+                    if (runOptions.callbacks.on_stream_event) {
+                        runOptions.callbacks.on_stream_event(event);
+                    }
+                    if (event.type == wuwe::llm_stream_event_type::tool_call_delta) {
+                        emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                            .type = wuwe::llm_agent_event_type::tool_call_building,
+                            .request = &toolRequest,
+                            .stream_event = &event,
+                        });
+                    } else if (event.type == wuwe::llm_stream_event_type::tool_call_done
+                               && event.tool_call.has_value()) {
+                        emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                            .type = wuwe::llm_agent_event_type::tool_call_ready,
+                            .message = event.tool_call->name,
+                            .request = &toolRequest,
+                            .stream_event = &event,
+                            .tool_call = &*event.tool_call,
+                        });
+                    }
+                };
+                response = client.complete_stream(
+                    toolRequest,
+                    streamCallbacks,
+                    runOptions.stop_token);
+            } else {
+                response = client.complete(toolRequest, runOptions.stop_token);
+                if (!response.tool_calls.empty()) {
+                    emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                        .type = wuwe::llm_agent_event_type::model_first_event,
+                        .request = &toolRequest,
+                    });
+                }
+                for (const auto& call : response.tool_calls) {
+                    emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                        .type = wuwe::llm_agent_event_type::tool_call_ready,
+                        .message = call.name,
+                        .request = &toolRequest,
+                        .tool_call = &call,
+                    });
+                }
+            }
+            emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                .type = wuwe::llm_agent_event_type::model_completed,
+                .request = &toolRequest,
+                .response = &response,
+            });
+            return response;
+        };
+
+        auto completeWithToolChoiceFallback = [&](wuwe::llm_request& toolRequest) {
+            wuwe::llm_response response = completeToolRequest(toolRequest);
+            if (isToolChoiceUnsupportedResponse(response)) {
+                toolRequest.tool_choice.reset();
+                response = completeToolRequest(toolRequest);
+            }
+            return response;
+        };
+
+        auto appendAndRunToolCalls = [&](const wuwe::llm_response& response) {
+            bool ranAnalysisScript = false;
+            request.messages.push_back({
+                .role = "assistant",
+                .content = response.content,
+                .tool_calls = response.tool_calls,
+            });
+
+            for (const auto& call : response.tool_calls) {
+                if (runOptions.stop_token.stop_requested()) {
+                    return std::optional<bool> {};
+                }
+                if (runOptions.callbacks.allow_tool_call
+                    && !runOptions.callbacks.allow_tool_call(call)) {
+                    return std::optional<bool> {};
+                }
+
+                emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                    .type = wuwe::llm_agent_event_type::tool_started,
+                    .message = call.name,
+                    .tool_call = &call,
+                });
+                if (runOptions.callbacks.on_tool_start) {
+                    runOptions.callbacks.on_tool_start(call);
+                }
+
+                const wuwe::llm_tool_result toolResult = provider->invoke(
+                    call.name,
+                    call.arguments_json,
+                    runOptions.stop_token);
+                ranAnalysisScript = ranAnalysisScript || isScriptToolName(call.name);
+
+                emitStaticFastPathAgentEvent(runOptions.callbacks, {
+                    .type = wuwe::llm_agent_event_type::tool_completed,
+                    .message = toolResult.content,
+                    .tool_call = &call,
+                    .tool_result = &toolResult,
+                });
+                if (runOptions.callbacks.on_tool_result) {
+                    runOptions.callbacks.on_tool_result(call, toolResult);
+                }
+
+                request.messages.push_back({
+                    .role = "tool",
+                    .content = toolResult.content.empty()
+                        ? toolResult.error_code.message()
+                        : toolResult.content,
+                    .name = call.name,
+                    .tool_call_id = call.id,
+                });
+            }
+            return std::optional<bool> { ranAnalysisScript };
+        };
+
+        auto appendHostPythonPreflight = [&]() {
+            nlohmann::json arguments = {
+                { "code", "print('reark_python_preflight_ok')" },
+                { "timeout_ms", 3000 }
+            };
+            const wuwe::llm_tool_result toolResult = provider->invoke(
+                "run_analysis_script",
+                arguments.dump(),
+                runOptions.stop_token);
+            if (toolResult.error_code) {
+                return std::optional<std::string> {
+                    toolResult.content.empty()
+                        ? toolResult.error_code.message()
+                        : toolResult.content
+                };
+            }
+
+            request.messages.push_back({
+                .role = "user",
+                .content =
+                    "Host Python preflight for static CTF analysis succeeded. "
+                    "run_analysis_script is available and returned: "
+                    + toolResult.content
+                    + "\nUse run_analysis_script for all arithmetic, decoding, and full verifier assertions instead of natural-language calculation."
+            });
+            return std::optional<std::string> {};
+        };
+
+        wuwe::llm_response firstResponse = completeWithToolChoiceFallback(firstRequest);
+        if (isToolChoiceUnsupportedResponse(firstResponse)) {
+            firstRequest.tool_choice.reset();
+            firstResponse = completeToolRequest(firstRequest);
+        }
+
+        if (firstResponse.error_code) {
+            if (runOptions.stop_token.stop_requested()
+                || firstResponse.error_code == wuwe::agent::make_error_code(wuwe::agent::llm_error_code::cancelled)) {
+                return staticFastPathCancelledResponse(runOptions.callbacks);
+            }
+            return firstResponse;
+        }
+        if (firstResponse.tool_calls.empty()) {
+            return staticFastPathContractError(
+                "模型没有按静态 CTF 流程先调用证据工具，而是直接返回了文字。为避免猜测结论，本次已停止；请重试或检查模型的 tool_choice 支持情况。（诊断：static_fast_path_first_tool_required/prose_without_tool）");
+        }
+
+        const std::optional<bool> firstScriptResult = appendAndRunToolCalls(firstResponse);
+        if (!firstScriptResult.has_value()) {
+            return staticFastPathCancelledResponse(runOptions.callbacks);
+        }
+
+        if (!*firstScriptResult && !scriptToolAvailable) {
+            std::string message =
+                "静态 CTF 分析需要本地 Python 工具做确定性计算和完整复核，但当前工具列表没有注册 run_analysis_script，因此不能专业地完成破解流程。";
+            if (!executionPromptNote.trimmed().isEmpty()) {
+                message += toStdString(executionPromptNote.trimmed());
+            } else {
+                message += "请检查 Agent 设置里的 Python 解释器路径，并确认使用的是启用了 Wuwe execution 的 ReArk 构建；Windows App Execution Aliases 可能不是可直接发现的真实可执行文件。";
+            }
+            message += "（诊断：static_fast_path_python_unavailable/run_analysis_script_not_registered）";
+            return staticFastPathContractError(std::move(message));
+        }
+
+        if (!*firstScriptResult) {
+            const std::optional<std::string> preflightError = appendHostPythonPreflight();
+            if (preflightError.has_value()) {
+                return staticFastPathContractError(
+                    "静态 CTF 分析需要本地 Python 工具做确定性计算，但 run_analysis_script 预检失败："
+                    + *preflightError
+                    + "（诊断：static_fast_path_python_preflight_failed）");
+            }
+
+            wuwe::llm_request scriptRequest = request;
+            scriptRequest.tools = scriptTools;
+            scriptRequest.tool_choice = wuwe::llm_tool_choice {
+                .mode = wuwe::llm_tool_choice_mode::named,
+                .name = "run_analysis_script",
+            };
+            scriptRequest.messages.push_back({
+                .role = "user",
+                .content =
+                    "Static CTF execution contract: do not answer in prose. "
+                    "Call run_analysis_script now to compute or verify the candidate deterministically. "
+                    "If constants or strings are still missing, write a short Python script that reports the missing evidence explicitly."
+            });
+
+            wuwe::llm_response scriptResponse = completeWithToolChoiceFallback(scriptRequest);
+            if (scriptResponse.error_code) {
+                if (runOptions.stop_token.stop_requested()
+                    || scriptResponse.error_code == wuwe::agent::make_error_code(wuwe::agent::llm_error_code::cancelled)) {
+                    return staticFastPathCancelledResponse(runOptions.callbacks);
+                }
+                return scriptResponse;
+            }
+            if (scriptResponse.tool_calls.empty()) {
+                request.messages.push_back({
+                    .role = "user",
+                    .content =
+                        "The model did not call run_analysis_script in the forced Python step. "
+                        "Continue the analysis, but any final password/flag/key candidate must be backed by a later run_analysis_script full verifier assertion. "
+                        "Do not answer from mental arithmetic or partial samples."
+                });
+            } else {
+                const std::optional<bool> scriptResult = appendAndRunToolCalls(scriptResponse);
+                if (!scriptResult.has_value()) {
+                    return staticFastPathCancelledResponse(runOptions.callbacks);
+                }
+                if (!*scriptResult) {
+                    request.messages.push_back({
+                        .role = "user",
+                        .content =
+                            "The forced deterministic step selected a non-Python tool. "
+                            "Host Python preflight has already succeeded, so continue with normal tools, but call run_analysis_script before producing any decoded candidate or verifier conclusion."
+                    });
+                }
+            }
+        }
+
+        request.tool_choice.reset();
+        wuwe::llm_agent_runner runner(
+            client,
+            provider,
+            static_cast<int>(policy.budget.max_tool_rounds));
+        return runner.complete(std::move(request), std::move(runOptions));
+    };
+}
+
 wuwe::agent::reasoning::reasoning_policy rearkReasoningPolicy(
     const std::string& input,
     const AgentTaskProfile& profile)
@@ -3748,14 +5176,15 @@ wuwe::agent::reasoning::reasoning_policy rearkReasoningPolicy(
     auto policy = reasoning::select_policy(reasoning::reasoning_task_description {
         .input = input,
         .has_tools = true,
-        .requires_tools = false
+        .requires_tools = profile.mode == AgentTaskMode::StaticFastPath
     });
     if (profile.mode == AgentTaskMode::StaticFastPath) {
-        policy.budget.max_model_calls = 64;
-        policy.budget.max_tool_calls = 160;
-        policy.budget.max_tool_rounds = 40;
-        policy.budget.max_steps = 96;
-        policy.budget.timeout = std::chrono::milliseconds { 900000 };
+        policy.mode = reasoning::reasoning_mode::react;
+        policy.budget.max_model_calls = 24;
+        policy.budget.max_tool_calls = 72;
+        policy.budget.max_tool_rounds = 18;
+        policy.budget.max_steps = 48;
+        policy.budget.timeout = std::chrono::milliseconds { 360000 };
         return policy;
     }
 
@@ -3929,13 +5358,15 @@ void AgentController::ask(const QString& question)
         resetRun();
         return;
     }
-    const AgentTaskProfile taskProfile = classifyAgentTask(trimmed);
+    const AgentTaskProfile taskProfile = classifyAgentTask(
+        trimmed,
+        isAffirmativeDeviceVerificationFollowUp(trimmed, messages_));
     const bool deviceRuntimeToolsEnabled = taskProfile.deviceRuntimeToolsEnabled;
     runtime_->rearkProvider = std::make_shared<ReArkToolProvider>(
         snapshot,
         runtime_->scratchpad,
         runtime_->pythonSession,
-        deviceRuntimeToolsEnabled);
+        taskProfile.mode);
 #ifdef REARK_HAS_WUWE_EXECUTION
     runtime_->executionWorkdir = std::make_unique<QTemporaryDir>(
         QDir::temp().filePath(QStringLiteral("ReArk-agent-analysis-XXXXXX")));
@@ -4000,16 +5431,19 @@ void AgentController::ask(const QString& question)
     QString systemPrompt =
         QStringLiteral("You are an expert HarmonyOS NEXT application reverse engineering assistant embedded in ReArk. "
             "Use ReArk tools when you need package, source, disassembly, resource, signature, or entry-point data, "
+            "ReArk Agent must be sample-independent: never rely on a contest name, previous sample answer, remembered path, or hardcoded verifier value unless it is present in the currently loaded package or current tool output. "
             "When ABC disassembly references literal@0x... values, resolve them with ABC literal evidence instead of guessing from text. "
             "For hardcoded credentials, hashes, crypto constants, or call-argument questions, prefer structured ABC string, xref, and call-flow evidence when available. "
             "When investigating one ABC string, method, or literal reference, prefer the compound ABC reference-flow tool before separately calling literal, xref, and call-flow tools. "
             "but do not keep calling tools after you have enough evidence to answer. "
+            "Do not hand-convert hexadecimal constants, byte values, modular inverses, or long strings in natural language; use structured tool output and bounded Python analysis, then verify the candidate by reproducing the target comparison such as encode(candidate) == verifier. "
+            "For CTF-style password, flag, key, or verifier tasks, a complete answer must include the concrete candidate value, the verifier evidence, and the result of a deterministic re-check; do not end with only a script for the user to run when local Python analysis is available. "
+            "Do not present spot checks or random samples as proof of a full decoded candidate; run the whole candidate through the target transform and assert encode(candidate) == verifier/secretKey, hash(candidate) == expected, or the exact equivalent full comparison. "
+            "If a CTF-style answer stops after static proof because runtime tools were not requested, explicitly mark it as static verification only / device verification pending, do not imply device validation is complete, and offer to continue with device installation, input, and semantic runtime validation. "
+            "If local Python analysis is unavailable, use the exact runtime availability note from this prompt; do not infer or invent 'no Python environment', and do not contradict available Python-session or execution-tool evidence. "
+            "Before changing a previously stated constant, formula, or candidate, reconcile it with scratchpad and Python-session state, explain the evidence that invalidated the old value, and save the corrected verified value. "
             "For overview questions such as app purpose, features, entry points, pages, permissions, or architecture, "
             "first use the current snapshot, important files, and entry-point list below, then call only the tools that are truly needed. "
-            "When the user asks to verify on a connected HarmonyOS device, use ReArk's fixed device runtime tools for HDC target listing, current package installation, app launch, bounded hilog capture, screenshots, UI layout dumps, and controlled UI input; "
-            "Do not use run_analysis_script for HDC installation, launch, screenshots, UI input, or other device I/O; it is only for short local Python analysis. "
-            "For UI text input, pass the intended text to input_ui_text exactly, including spaces and punctuation, and try the full string before assuming shell escaping or special characters are a blocker. "
-            "prefer UI layout selectors over guessed coordinates, and do not claim to have arbitrary shell, hook, breakpoint, packet capture, or dynamic debugging unless a dedicated ReArk tool exists for that action. "
             "If a tool reports that a file is unavailable, unsupported, or not matched, do not retry the same unavailable path repeatedly; "
             "answer from the available evidence and clearly state what could not be read. "
             "Do not infer concrete tool outcomes such as install failed, signing failed, packing timed out, or app launched unless a ReArk tool result explicitly says so; distinguish verified tool output from a hypothesis. "
@@ -4046,8 +5480,9 @@ void AgentController::ask(const QString& question)
     }
     if (runtime_->guardedExecutionProvider != nullptr) {
         systemPrompt += QStringLiteral(
-            " Use the bounded local Python analysis capability when a short deterministic calculation would verify decoding, "
+            " Local Python analysis is available in this run through run_analysis_script. Use it when a short deterministic calculation would verify decoding, "
             "decryption, hashing, byte conversion, or other reverse-engineering arithmetic. "
+            "Do not tell the user to run a local Python script for calculations you can execute with run_analysis_script. "
             "When using local Python analysis, pass required data through the script or stdin and keep the script short, deterministic, and side-effect free. "
             "For multi-step calculations, keep reusable constants and helpers in Python analysis state instead of rediscovering them. "
             "Local Python analysis accepts only code, stdin_text, and timeout_ms; code must be at most %1 bytes, stdin_text at most %2 bytes, and timeout_ms at most %3.")
@@ -4158,17 +5593,42 @@ void AgentController::ask(const QString& question)
     };
 
     const std::stop_token reasoningStopToken = runtime_->stopSource.get_token();
-    runtime_->reasoningRunner = std::make_unique<reasoning::reasoning_runner>(
-        reasoning::make_default_agentic_runner(
-            *runtime_->client,
-            runtime_->provider,
-            reasoning::default_agentic_runner_options {
-                .model = toStdString(settings.model),
+    if (taskProfile.mode == AgentTaskMode::StaticFastPath) {
+        QString staticFastPathExecutionPromptNote;
+#ifdef REARK_HAS_WUWE_EXECUTION
+        staticFastPathExecutionPromptNote = runtime_->executionPromptNote;
+#else
+        staticFastPathExecutionPromptNote = tr(
+            "Local Python analysis is unavailable because this ReArk build was compiled without Wuwe execution backend support.");
+#endif
+        runtime_->reasoningRunner = std::make_unique<reasoning::reasoning_runner>(
+            reasoning::reasoning_runner_options {
+                .client = runtime_->client.get(),
+                .agent_complete = makeStaticFastPathFirstToolAgentComplete(
+                    *runtime_->client,
+                    runtime_->provider,
+                    staticFastPathExecutionPromptNote),
+                .available_tools = [provider = runtime_->provider] {
+                    return provider != nullptr ? provider->tools() : std::vector<wuwe::llm_tool> {};
+                },
                 .observer = std::move(onEvent),
                 .should_cancel = [reasoningStopToken] {
                     return reasoningStopToken.stop_requested();
                 }
-            }));
+            });
+    } else {
+        runtime_->reasoningRunner = std::make_unique<reasoning::reasoning_runner>(
+            reasoning::make_default_agentic_runner(
+                *runtime_->client,
+                runtime_->provider,
+                reasoning::default_agentic_runner_options {
+                    .model = toStdString(settings.model),
+                    .observer = std::move(onEvent),
+                    .should_cancel = [reasoningStopToken] {
+                        return reasoningStopToken.stop_requested();
+                    }
+                }));
+    }
 
     reasoning::reasoning_request request;
     request.input = toStdString(conversationInputForReasoning(messages_, taskProfile));
@@ -4724,13 +6184,39 @@ void AgentController::finishActiveAssistantMessage(const QString& fallbackText)
         return;
     }
     const QString currentText = message.value(QStringLiteral("text")).toString();
-    const QString finalCandidate = currentText.trimmed().isEmpty() ? fallbackText : currentText;
+    QString finalCandidate = currentText.trimmed().isEmpty() ? fallbackText : currentText;
     if (const auto toolName = plainTextToolCallName(finalCandidate)) {
-        message.insert(QStringLiteral("text"), plainTextToolCallFallbackMessage(*toolName));
+        finalCandidate = plainTextToolCallFallbackMessage(*toolName);
     } else if (!fallbackText.isEmpty()
         && currentText.trimmed().isEmpty()) {
-        message.insert(QStringLiteral("text"), fallbackText);
+        finalCandidate = fallbackText;
     }
+
+    QString latestQuestion;
+    for (int index = messages_.size() - 1; index >= 0; --index) {
+        const QVariantMap item = messages_.at(index).toMap();
+        if (item.value(QStringLiteral("role")).toString() == QStringLiteral("user")) {
+            latestQuestion = item.value(QStringLiteral("text")).toString();
+            break;
+        }
+    }
+    const bool deviceRuntimeContinuation = isAffirmativeDeviceVerificationFollowUp(
+        latestQuestion,
+        messages_);
+    const QString qualityNotice = finalAnswerQualityNotice(
+        latestQuestion,
+        finalCandidate,
+        deviceRuntimeContinuation);
+    if (!qualityNotice.isEmpty()) {
+        finalCandidate = QStringLiteral("**需要复核**\n\n%1\n\n%2")
+            .arg(qualityNotice, finalCandidate);
+    } else {
+        const QString runtimeHandoffNotice = finalAnswerRuntimeHandoffNotice(latestQuestion, finalCandidate);
+        if (!runtimeHandoffNotice.isEmpty()) {
+            finalCandidate = finalCandidate.trimmed() + QStringLiteral("\n\n") + runtimeHandoffNotice;
+        }
+    }
+    message.insert(QStringLiteral("text"), finalCandidate);
     message.insert(QStringLiteral("state"), QStringLiteral("done"));
     messages_[activeAssistantMessage_] = message;
     if (messageModel_ != nullptr) {

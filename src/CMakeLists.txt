@@ -490,6 +490,24 @@ if(BUILD_TESTING AND EXISTS "${REARK_ABC_EVIDENCE_SAMPLE}")
     endif()
     add_test(NAME reark_hyle_abc_evidence_test
         COMMAND reark_hyle_abc_evidence_test "${REARK_ABC_EVIDENCE_SAMPLE}")
+
+    qt_add_executable(reark_abc_evidence_dump
+        tests/AbcEvidenceDump.cpp
+    )
+    target_include_directories(reark_abc_evidence_dump PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_abc_evidence_dump PRIVATE
+        reark_core
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_abc_evidence_dump POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_abc_evidence_dump>
+                $<TARGET_FILE_DIR:reark_abc_evidence_dump>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endif()
 
 if(BUILD_TESTING)
@@ -512,6 +530,30 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reark_command_runner_test
         COMMAND reark_command_runner_test)
+
+    qt_add_executable(reark_agent_prompt_contract_test
+        tests/AgentPromptContractTest.cpp
+    )
+    target_include_directories(reark_agent_prompt_contract_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_agent_prompt_contract_test PRIVATE
+        Qt6::Core
+    )
+    target_compile_definitions(reark_agent_prompt_contract_test PRIVATE
+        REARK_AGENT_CONTROLLER_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/controller/AgentController.cpp"
+        REARK_SOURCE_ROOT="${CMAKE_SOURCE_DIR}"
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_agent_prompt_contract_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_agent_prompt_contract_test>
+                $<TARGET_FILE_DIR:reark_agent_prompt_contract_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    add_test(NAME reark_agent_prompt_contract_test
+        COMMAND reark_agent_prompt_contract_test)
 
     qt_add_executable(reark_hdc_device_backend_test
         tests/HdcDeviceBackendTest.cpp

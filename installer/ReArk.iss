@@ -1,8 +1,8 @@
 #define MyAppName "ReArk"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "Miles Li"
 #define MyAppExeName "ReArk.exe"
-#define MyPackageName "ReArk-0.1.0-windows-x64"
+#define MyPackageName "ReArk-0.2.0-windows-x64"
 
 [Setup]
 AppId={{1C2B22E1-8C94-4D18-94D4-83B0B87456CE}

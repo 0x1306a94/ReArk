@@ -61,6 +61,40 @@ QStringList bundledPythonCandidates()
     };
 }
 
+QStringList installedPythonCandidates()
+{
+    QStringList candidates;
+#ifdef Q_OS_WIN
+    const QStringList roots {
+        QDir::fromNativeSeparators(envString("LOCALAPPDATA"))
+            + QStringLiteral("/Programs/Python"),
+        QDir::fromNativeSeparators(envString("ProgramFiles"))
+            + QStringLiteral("/Python"),
+        QDir::fromNativeSeparators(envString("ProgramFiles(x86)"))
+            + QStringLiteral("/Python")
+    };
+
+    for (const QString& root : roots) {
+        const QDir dir(root);
+        if (!dir.exists()) {
+            continue;
+        }
+        const QStringList subdirs = dir.entryList(
+            { QStringLiteral("Python*") },
+            QDir::Dirs | QDir::NoDotAndDotDot,
+            QDir::Name | QDir::Reversed);
+        for (const QString& subdir : subdirs) {
+            const QString python = dir.absoluteFilePath(
+                subdir + QStringLiteral("/python.exe"));
+            if (QFileInfo::exists(python)) {
+                candidates.push_back(python);
+            }
+        }
+    }
+#endif
+    return candidates;
+}
+
 QString findSystemPython()
 {
     const QStringList names {
@@ -108,6 +142,14 @@ QVector<PythonCandidate> candidatesFor(const QString& configuredPath)
         candidates.push_back({
             .path = envPath,
             .source = QStringLiteral("environment"),
+            .requireExistingFile = true
+        });
+    }
+
+    for (const QString& path : installedPythonCandidates()) {
+        candidates.push_back({
+            .path = path,
+            .source = QStringLiteral("installed"),
             .requireExistingFile = true
         });
     }

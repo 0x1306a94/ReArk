@@ -2,6 +2,7 @@
 
 #include "signing/HarmonyHapSigner.h"
 
+#include <hyle/hap/core/abc_checksum.h>
 #include <hyle/hap/hap.h>
 
 #include <QByteArray>
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace {
@@ -155,6 +157,89 @@ QString formatPatchReport(
     }
     if (report.items.size() > maxItems) {
         text += QStringLiteral("- [truncated %1 more item(s)]\n").arg(report.items.size() - maxItems);
+    }
+    return text.trimmed();
+}
+
+QString formatStringRewriteReport(
+    const hyle::hap::abc_patch_report& report,
+    const QString& resourcePath,
+    qsizetype inputBytes,
+    qsizetype outputBytes,
+    int matchedStrings)
+{
+    QString text = formatPatchReport(report, resourcePath, inputBytes, outputBytes);
+    text += QStringLiteral("\nmatched_strings=%1").arg(matchedStrings);
+    return text.trimmed();
+}
+
+std::vector<qsizetype> findRawByteOccurrences(
+    const std::vector<std::byte>& bytes,
+    const std::string& needle)
+{
+    std::vector<qsizetype> offsets;
+    if (needle.empty() || bytes.empty()) {
+        return offsets;
+    }
+
+    auto it = bytes.cbegin();
+    while (it != bytes.cend()) {
+        it = std::search(
+            it,
+            bytes.cend(),
+            needle.cbegin(),
+            needle.cend(),
+            [](std::byte lhs, char rhs) {
+                return static_cast<unsigned char>(lhs)
+                    == static_cast<unsigned char>(rhs);
+            });
+        if (it == bytes.cend()) {
+            break;
+        }
+        offsets.push_back(std::distance(bytes.cbegin(), it));
+        ++it;
+    }
+    return offsets;
+}
+
+void replaceRawBytesAt(
+    std::vector<std::byte>* bytes,
+    qsizetype offset,
+    const std::string& replacement)
+{
+    if (bytes == nullptr) {
+        return;
+    }
+    for (qsizetype i = 0; i < static_cast<qsizetype>(replacement.size()); ++i) {
+        bytes->at(static_cast<std::size_t>(offset + i)) =
+            static_cast<std::byte>(static_cast<unsigned char>(replacement.at(static_cast<std::size_t>(i))));
+    }
+}
+
+QString formatInPlaceStringRewriteReport(
+    const QString& resourcePath,
+    qsizetype inputBytes,
+    qsizetype outputBytes,
+    int matchedStrings,
+    const std::vector<qsizetype>& rawOffsets,
+    const QString& oldText,
+    const QString& newText)
+{
+    QString text;
+    text += QStringLiteral("[abc rewrite] %1\n").arg(resourcePath);
+    text += QStringLiteral("input_bytes=%1\n").arg(inputBytes);
+    text += QStringLiteral("output_bytes=%1\n").arg(outputBytes);
+    text += QStringLiteral("strategy=in_place_equal_length\n");
+    text += QStringLiteral("matched_strings=%1\n").arg(matchedStrings);
+    text += QStringLiteral("raw_occurrences=%1\n").arg(rawOffsets.size());
+    const std::size_t maxItems = std::min<std::size_t>(rawOffsets.size(), 80);
+    for (std::size_t i = 0; i < maxItems; ++i) {
+        text += QStringLiteral("- kind=string_in_place raw_offset=0x%1 old=\"%2\" new=\"%3\"\n")
+            .arg(rawOffsets.at(i), 0, 16)
+            .arg(oldText, newText);
+    }
+    if (rawOffsets.size() > maxItems) {
+        text += QStringLiteral("- [truncated %1 more item(s)]\n").arg(rawOffsets.size() - maxItems);
     }
     return text.trimmed();
 }
@@ -434,6 +519,247 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
     }
     if (request.stopToken.stop_requested()) {
         result.error = QStringLiteral("Bundle rewrite cancelled.");
+        result.report = reports.join(QStringLiteral("\n\n"));
+        return result;
+    }
+
+    result.packingResult = CommandRunner::runBlocking(HarmonyHapSigner::packCommand({
+        .javaProgram = request.javaProgram,
+        .packingToolPath = request.packingToolPath,
+        .unpackedDirectory = unpacked.path(),
+        .outputHapPath = request.outputHapPath,
+        .timeoutMs = request.timeoutMs
+    }), request.stopToken);
+    if (!result.packingResult.succeeded()) {
+        unpacked.setAutoRemove(false);
+        result.unpackedDirectory = unpacked.path();
+        result.error = QStringLiteral("Official HAP packing failed.");
+        result.report = reports.join(QStringLiteral("\n\n"));
+        return result;
+    }
+
+    result.report = reports.join(QStringLiteral("\n\n"));
+    result.ok = true;
+    return result;
+}
+
+HarmonyAbcStringRewriteResult HarmonyPackageRewriter::rewriteAbcString(
+    const HarmonyAbcStringRewriteRequest& request)
+{
+    HarmonyAbcStringRewriteResult result;
+    result.inputHapPath = request.inputHapPath;
+    result.outputHapPath = request.outputHapPath;
+
+    const QFileInfo inputInfo(request.inputHapPath);
+    if (!inputInfo.exists() || !inputInfo.isFile()) {
+        result.error = QStringLiteral("Input HAP does not exist: %1").arg(request.inputHapPath);
+        return result;
+    }
+    if (request.oldText.isEmpty()) {
+        result.error = QStringLiteral("oldText is required.");
+        return result;
+    }
+    if (request.newText.isEmpty()) {
+        result.error = QStringLiteral("newText is required.");
+        return result;
+    }
+    if (request.outputHapPath.trimmed().isEmpty()) {
+        result.error = QStringLiteral("Output HAP path is required.");
+        return result;
+    }
+    if (request.stopToken.stop_requested()) {
+        result.error = QStringLiteral("ABC string rewrite cancelled.");
+        return result;
+    }
+
+    QTemporaryDir unpacked(QStringLiteral("%1/ReArk-rewrite-abc-string-XXXXXX").arg(QDir::tempPath()));
+    if (!unpacked.isValid()) {
+        result.error = QStringLiteral("Could not create temporary HAP rewrite directory.");
+        return result;
+    }
+    result.unpackedDirectory = unpacked.path();
+
+    auto session = hyle::hap::open_decompiled_package(toStdString(request.inputHapPath));
+    if (!session) {
+        result.error = QStringLiteral("Open HAP failed: %1").arg(fromStdString(session.error().message()));
+        return result;
+    }
+
+    const std::string oldText = toStdString(request.oldText);
+    const std::string newText = toStdString(request.newText);
+    QStringList reports;
+    for (const auto& resource : session->resources()) {
+        if (request.stopToken.stop_requested()) {
+            result.error = QStringLiteral("ABC string rewrite cancelled.");
+            result.report = reports.join(QStringLiteral("\n\n"));
+            return result;
+        }
+
+        const QString resourcePath = cleanResourcePath(resource.path);
+        const QString outputPath = safeOutputPath(unpacked.path(), resourcePath);
+        if (outputPath.isEmpty()) {
+            result.error = QStringLiteral("Unsafe HAP resource path: %1").arg(fromStdString(resource.path));
+            return result;
+        }
+
+        if (resource.is_directory) {
+            QDir().mkpath(outputPath);
+            continue;
+        }
+
+        auto content = session->read_resource(resource.id);
+        if (!content) {
+            result.error = QStringLiteral("Read HAP resource failed: %1: %2")
+                .arg(resourcePath, fromStdString(content.error().message()));
+            return result;
+        }
+
+        std::vector<std::byte> bytes = content->bytes;
+        if (resource.is_abc || resource.kind == hyle::hap::hap_resource_kind::abc || hasAbcSuffix(resourcePath)) {
+            ++result.abcCount;
+            hyle::hap::abc_parser parser(bytes);
+            auto parsed = parser.parse();
+            if (!parsed) {
+                result.error = QStringLiteral("Parse ABC failed: %1: %2")
+                    .arg(resourcePath, fromStdString(parsed.error().message()));
+                return result;
+            }
+
+            const hyle::hap::abc_strings strings = parser.collect_all_strings();
+            std::vector<std::uint32_t> offsets;
+            for (const auto& item : strings) {
+                if (item.second.data() == oldText) {
+                    offsets.push_back(item.first);
+                }
+            }
+
+            if (!offsets.empty()) {
+                if (request.requireUnique && offsets.size() > 1) {
+                    result.error = QStringLiteral("ABC string rewrite expected one match, found %1 in %2.")
+                        .arg(offsets.size())
+                        .arg(resourcePath);
+                    result.report = reports.join(QStringLiteral("\n\n"));
+                    return result;
+                }
+
+                if (oldText.size() == newText.size()) {
+                    const std::vector<qsizetype> rawOffsets = findRawByteOccurrences(bytes, oldText);
+                    if (rawOffsets.size() != offsets.size()) {
+                        result.error = QStringLiteral(
+                            "Equal-length ABC string rewrite expected raw byte occurrence count %1 to match parsed string count %2 in %3.")
+                            .arg(rawOffsets.size())
+                            .arg(offsets.size())
+                            .arg(resourcePath);
+                        result.report = reports.join(QStringLiteral("\n\n"));
+                        return result;
+                    }
+                    if (request.requireUnique && rawOffsets.size() > 1) {
+                        result.error = QStringLiteral("Equal-length ABC string rewrite expected one raw match, found %1 in %2.")
+                            .arg(rawOffsets.size())
+                            .arg(resourcePath);
+                        result.report = reports.join(QStringLiteral("\n\n"));
+                        return result;
+                    }
+
+                    for (qsizetype rawOffset : rawOffsets) {
+                        replaceRawBytesAt(&bytes, rawOffset, newText);
+                    }
+                    hyle::hap::update_abc_checksum(bytes);
+
+                    const auto verify = hyle::hap::verify_abc(bytes);
+                    if (!verify.valid) {
+                        result.error = QStringLiteral("Verify in-place rewritten ABC failed: %1: %2")
+                            .arg(resourcePath, fromStdString(verify.message));
+                        result.report = reports.join(QStringLiteral("\n\n"));
+                        return result;
+                    }
+
+                    ++result.rewrittenAbcCount;
+                    result.replacementCount += static_cast<int>(rawOffsets.size());
+                    reports.append(formatInPlaceStringRewriteReport(
+                        resourcePath,
+                        static_cast<qsizetype>(content->bytes.size()),
+                        static_cast<qsizetype>(bytes.size()),
+                        static_cast<int>(offsets.size()),
+                        rawOffsets,
+                        request.oldText,
+                        request.newText));
+                    QString writeError;
+                    if (!writeBytes(outputPath, bytes, &writeError)) {
+                        result.error = writeError;
+                        return result;
+                    }
+                    continue;
+                }
+
+                hyle::hap::abc_modifier modifier(parser);
+                for (std::uint32_t offset : offsets) {
+                    auto replaced = modifier.replace_string(offset, newText);
+                    if (!replaced) {
+                        result.error = QStringLiteral("Rewrite ABC string failed: %1 offset=0x%2: %3")
+                            .arg(resourcePath)
+                            .arg(offset, 0, 16)
+                            .arg(fromStdString(replaced.error().message()));
+                        result.report = reports.join(QStringLiteral("\n\n"));
+                        return result;
+                    }
+                }
+
+                auto patched = modifier.build({ true });
+                if (!patched) {
+                    result.error = QStringLiteral("Build rewritten ABC failed: %1: %2")
+                        .arg(resourcePath, fromStdString(patched.error().message()));
+                    result.report = reports.join(QStringLiteral("\n\n"));
+                    return result;
+                }
+
+                const auto verify = hyle::hap::verify_abc(*patched);
+                if (!verify.valid) {
+                    result.error = QStringLiteral("Verify rewritten ABC failed: %1: %2")
+                        .arg(resourcePath, fromStdString(verify.message));
+                    result.report = reports.join(QStringLiteral("\n\n"));
+                    return result;
+                }
+
+                ++result.rewrittenAbcCount;
+                result.replacementCount += static_cast<int>(offsets.size());
+                reports.append(formatStringRewriteReport(
+                    modifier.patch_report(),
+                    resourcePath,
+                    static_cast<qsizetype>(bytes.size()),
+                    static_cast<qsizetype>(patched->size()),
+                    static_cast<int>(offsets.size())));
+                bytes = std::move(*patched);
+            }
+        }
+
+        QString writeError;
+        if (!writeBytes(outputPath, bytes, &writeError)) {
+            result.error = writeError;
+            return result;
+        }
+    }
+
+    QDir(unpacked.path()).mkpath(QStringLiteral("ets"));
+    QDir(unpacked.path()).mkpath(QStringLiteral("libs"));
+    QDir(unpacked.path()).mkpath(QStringLiteral("resources"));
+
+    const QString packingInputError = requiredPackingInputError(unpacked.path());
+    if (!packingInputError.isEmpty()) {
+        result.error = packingInputError;
+        return result;
+    }
+    if (result.abcCount == 0) {
+        result.error = QStringLiteral("HAP contains no ABC resource to rewrite: %1").arg(request.inputHapPath);
+        return result;
+    }
+    if (result.replacementCount == 0) {
+        result.error = QStringLiteral("ABC string was not found in HAP: %1").arg(request.oldText);
+        result.report = reports.join(QStringLiteral("\n\n"));
+        return result;
+    }
+    if (request.stopToken.stop_requested()) {
+        result.error = QStringLiteral("ABC string rewrite cancelled.");
         result.report = reports.join(QStringLiteral("\n\n"));
         return result;
     }

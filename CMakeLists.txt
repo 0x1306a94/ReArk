@@ -42,7 +42,7 @@ if(DEFINED ENV{WUWE_INSTALL_PREFIX} AND NOT "$ENV{WUWE_INSTALL_PREFIX}" STREQUAL
     set(DEFAULT_WUWE_INSTALL_PREFIX "$ENV{WUWE_INSTALL_PREFIX}")
 endif()
 set(WUWE_INSTALL_PREFIX "${DEFAULT_WUWE_INSTALL_PREFIX}" CACHE PATH "Installed wuwe package prefix")
-option(REARK_ENABLE_WUWE_EXECUTION "Enable Wuwe execution backend integration when the installed Wuwe package supports it" OFF)
+option(REARK_ENABLE_WUWE_EXECUTION "Enable Wuwe execution backend integration when the installed Wuwe package supports it" ON)
 if(EXISTS "${WUWE_INSTALL_PREFIX}")
     list(APPEND CMAKE_PREFIX_PATH "${WUWE_INSTALL_PREFIX}")
 endif()

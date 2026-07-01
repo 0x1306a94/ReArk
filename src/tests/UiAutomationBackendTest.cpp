@@ -55,16 +55,35 @@ int main(int argc, char* argv[])
         20,
         QStringLiteral("hello\nworld"),
         QStringLiteral("target-1"));
-    if (textRequest.arguments.last() != QStringLiteral("'hello world'")) {
-        return fail(QStringLiteral("input text should normalize newlines and shell-quote the remote text argument"));
+    if (textRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("uitest uiInput inputText 10 20 'hello world'") })) {
+        return fail(QStringLiteral("inputText should pass one quoted remote shell command to hdc shell"));
     }
 
     const QString specialText = QStringLiteral("u}\"xJ x\"K|y<z\\$a'b");
     const CommandRequest specialTextRequest = backend.inputFocusedTextRequest(
         specialText,
         QStringLiteral("target-1"));
-    if (specialTextRequest.arguments.last() != QStringLiteral("'u}\"xJ x\"K|y<z\\$a'\\''b'")) {
-        return fail(QStringLiteral("input text should protect shell-special characters for hdc shell uitest"));
+    if (specialTextRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("uitest uiInput text 'u}\"xJ x\"K|y<z\\$a'\\''b'") })) {
+        return fail(QStringLiteral("focused input text should protect shell-special characters for hdc shell uitest"));
+    }
+
+    const CommandRequest uinputTextRequest = backend.uinputKeyboardTextRequest(
+        specialText,
+        QStringLiteral("target-1"));
+    if (uinputTextRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("uinput -K -t 'u}\"xJ x\"K|y<z\\$a'\\''b'") })) {
+        return fail(QStringLiteral("uinput text should protect shell-special characters for hdc shell"));
     }
 
     const QByteArray layout = R"json(

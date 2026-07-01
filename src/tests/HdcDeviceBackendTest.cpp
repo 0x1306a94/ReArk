@@ -139,6 +139,31 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("level-filtered hilog argv changed unexpectedly"));
     }
 
+    const CommandRequest clearHilogRequest = backend.clearHilogRequest(QStringLiteral("target-1"));
+    if (clearHilogRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("hilog"),
+            QStringLiteral("-r") })) {
+        return fail(QStringLiteral("clear hilog argv changed unexpectedly"));
+    }
+
+    const CommandRequest shellCommandRequest = backend.shellCommandRequest(
+        QStringLiteral("printf '%s\\n' evidence"),
+        QStringLiteral("target-1"),
+        7000);
+    if (shellCommandRequest.timeoutMs != 7000
+        || shellCommandRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("shell"),
+            QStringLiteral("sh"),
+            QStringLiteral("-c"),
+            QStringLiteral("printf '%s\\n' evidence") })) {
+        return fail(QStringLiteral("shell command argv should use sh -c with the script as one remote argument"));
+    }
+
     const CommandRequest screenshotRequest = backend.screenshotCaptureRequest(
         QStringLiteral("/data/local/tmp/reark-screenshot.jpeg"),
         QStringLiteral("target-1"));

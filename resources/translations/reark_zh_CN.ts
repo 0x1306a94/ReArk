@@ -2583,6 +2583,11 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <translation>复制路径</translation>
     </message>
     <message>
+        <location filename="../../src/ui/qml/ReArk/MainWorkspace.qml" line="198"/>
+        <source>Close Current Package</source>
+        <translation>关闭当前应用</translation>
+    </message>
+    <message>
         <location filename="../../src/ui/qml/ReArk/MainWorkspace.qml" line="396"/>
         <location filename="../../src/ui/qml/ReArk/MainWorkspace.qml" line="423"/>
         <source>Close</source>

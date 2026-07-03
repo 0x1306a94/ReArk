@@ -191,6 +191,14 @@ Rectangle {
                         enabled: hasPackage && root.fileName.length > 0
                         onTriggered: decompilerController.copyTextToClipboard(root.fileName)
                     }
+
+                    CompactMenuSeparator {}
+
+                    Action {
+                        text: qsTr("Close Current Package")
+                        enabled: hasPackage
+                        onTriggered: decompilerController.clear()
+                    }
                 }
 
                 Rectangle {

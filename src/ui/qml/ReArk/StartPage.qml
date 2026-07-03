@@ -370,6 +370,26 @@ Rectangle {
                     ToolTip.delay: 450
                     onClicked: root.recentFileRequested(path)
 
+                    CompactMenu {
+                        id: recentItemMenu
+                        minimumItemWidth: 152
+
+                        Action {
+                            text: qsTr("Remove from Recent")
+                            onTriggered: recentFilesModel.removeFile(recentDelegate.path)
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.RightButton
+                        hoverEnabled: false
+                        onClicked: function(mouse) {
+                            recentItemMenu.popup(recentDelegate, mouse.x, mouse.y)
+                            mouse.accepted = true
+                        }
+                    }
+
                     background: Rectangle {
                         radius: 4
                         color: recentDelegate.hovered ? root.hoverColor : "transparent"

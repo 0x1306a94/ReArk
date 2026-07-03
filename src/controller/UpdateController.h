@@ -5,6 +5,7 @@
 #include <QString>
 #include <QUrl>
 
+class LanguageController;
 class QNetworkAccessManager;
 class QNetworkReply;
 
@@ -13,16 +14,19 @@ class UpdateController : public QObject {
     Q_PROPERTY(bool checking READ checking NOTIFY checkingChanged)
     Q_PROPERTY(QString latestVersion READ latestVersion NOTIFY latestReleaseChanged)
     Q_PROPERTY(QString releaseUrl READ releaseUrl NOTIFY latestReleaseChanged)
+    Q_PROPERTY(bool updatePreviewAvailable READ updatePreviewAvailable CONSTANT)
 
 public:
-    explicit UpdateController(QObject* parent = nullptr);
+    explicit UpdateController(LanguageController* languageController = nullptr, QObject* parent = nullptr);
 
     [[nodiscard]] bool checking() const;
     [[nodiscard]] QString latestVersion() const;
     [[nodiscard]] QString releaseUrl() const;
+    [[nodiscard]] bool updatePreviewAvailable() const;
 
     Q_INVOKABLE void checkForUpdates(bool silent = false);
     Q_INVOKABLE void checkForUpdatesIfDue();
+    Q_INVOKABLE void previewUpdateAvailable();
     Q_INVOKABLE void openReleasePage(const QString& releaseUrl) const;
 
 signals:
@@ -39,6 +43,7 @@ private:
     void setChecking(bool checking);
     void handleLatestReleaseReply(QNetworkReply* reply, bool silent);
     void resetLatestRelease();
+    [[nodiscard]] QString preferredReleaseNotesLocale() const;
     [[nodiscard]] static bool automaticCheckDue();
     static void recordAutomaticCheckAttempt();
     [[nodiscard]] static bool isNewerVersion(const QString& candidate, const QString& current);
@@ -46,6 +51,7 @@ private:
     [[nodiscard]] static QString networkErrorMessage(QNetworkReply* reply);
 
     QNetworkAccessManager* networkManager_ = nullptr;
+    LanguageController* languageController_ = nullptr;
     bool checking_ = false;
     QString latestVersion_;
     QString releaseUrl_;

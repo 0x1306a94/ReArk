@@ -308,9 +308,7 @@ ApplicationWindow {
             settingsWindow.currentTheme = mainWindow.currentTheme
             settingsWindow.settingsController = rearkSettingsController
             settingsWindow.signingController = rearkSigningController
-            settingsWindow.show()
-            settingsWindow.raise()
-            settingsWindow.requestActivate()
+            activateWindow(settingsWindow)
             return
         }
 
@@ -331,12 +329,21 @@ ApplicationWindow {
                 return
             }
             settingsWindow = window
-            window.show()
-            window.raise()
-            window.requestActivate()
+            activateWindow(window)
         } else {
             console.error(factory.errorString())
         }
+    }
+
+    function activateWindow(window) {
+        Qt.callLater(function() {
+            if (window === null) {
+                return
+            }
+            window.show()
+            window.raise()
+            window.requestActivate()
+        })
     }
 
     function openFileUrl(fileUrl) {

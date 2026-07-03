@@ -67,7 +67,7 @@ void AppInitializer::initializeContext()
     recentFilesModel_ = new RecentFilesModel(&engine_);
     signingController_ = new SigningController(&engine_);
     settingsController_ = new SettingsController(&engine_);
-    updateController_ = new UpdateController(&engine_);
+    updateController_ = new UpdateController(languageController_, &engine_);
     windowChrome_ = new WindowChrome(&engine_);
 
     QObject::connect(

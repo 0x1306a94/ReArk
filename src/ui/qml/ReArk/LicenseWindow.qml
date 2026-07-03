@@ -37,7 +37,9 @@ ApplicationWindow {
         if (closeCallback) {
             closeCallback()
         }
-        destroy()
+        Qt.callLater(function() {
+            licenseWindow.destroy()
+        })
     }
 
     Component.onCompleted: loadLicense()

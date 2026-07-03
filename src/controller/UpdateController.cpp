@@ -1,15 +1,20 @@
 #include "controller/UpdateController.h"
 
+#include "controller/LanguageController.h"
+#include "controller/ReleaseNotesLocalizer.h"
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QtGlobal>
 
 #include <algorithm>
 
@@ -21,6 +26,19 @@ constexpr auto kUserAgent = "ReArkUpdater/1.0";
 constexpr auto kUpdateSettingsGroup = "Updates";
 constexpr auto kLastAutomaticCheckKey = "lastAutomaticCheckUtc";
 constexpr qint64 kAutomaticCheckIntervalSeconds = 24 * 60 * 60;
+
+bool previewEnabledByEnvironment()
+{
+#ifdef QT_DEBUG
+    const QString value = qEnvironmentVariable("REARK_UPDATE_PREVIEW").trimmed().toLower();
+    return value == QLatin1String("1")
+           || value == QLatin1String("true")
+           || value == QLatin1String("yes")
+           || value == QLatin1String("on");
+#else
+    return false;
+#endif
+}
 
 QString normalizeVersionText(const QString& version)
 {
@@ -50,9 +68,10 @@ QList<int> versionParts(const QString& version)
 
 } // namespace
 
-UpdateController::UpdateController(QObject* parent)
+UpdateController::UpdateController(LanguageController* languageController, QObject* parent)
     : QObject(parent)
     , networkManager_(new QNetworkAccessManager(this))
+    , languageController_(languageController)
 {
 }
 
@@ -69,6 +88,11 @@ QString UpdateController::latestVersion() const
 QString UpdateController::releaseUrl() const
 {
     return releaseUrl_;
+}
+
+bool UpdateController::updatePreviewAvailable() const
+{
+    return previewEnabledByEnvironment();
 }
 
 void UpdateController::checkForUpdates(bool silent)
@@ -95,6 +119,59 @@ void UpdateController::checkForUpdatesIfDue()
     }
     recordAutomaticCheckAttempt();
     checkForUpdates(true);
+}
+
+void UpdateController::previewUpdateAvailable()
+{
+#ifdef QT_DEBUG
+    if (!updatePreviewAvailable()) {
+        return;
+    }
+
+    latestVersion_ = QStringLiteral("0.2.1");
+    releaseUrl_ = QString::fromLatin1(kProjectReleaseUrl);
+    emit latestReleaseChanged();
+    emit updateAvailable(
+        latestVersion_,
+        QStringLiteral(R"(Include following updates:
+
+**1. ReArk Agent upgrades**
+- Added ABC evidence tools for strings, literals, xrefs, call argument flows, ABC tree inspection, source reading, and disassembly reading.
+- Added richer package context for the Agent, including package summary, entry points, signature state, and installable HAP candidates.
+- Improved Agent execution boundaries and internal tool routing.
+
+**2. HarmonyOS Device Runtime**
+- Added a dedicated Device Runtime workspace.
+- Added bundled HDC-based device discovery, package install, ability launch, hilog capture, screenshot capture, and UI layout inspection.
+- Added UI node overlay, node tapping, coordinate tapping, text input, Back/Home key events, swipe gestures, and screenshot auto-refresh.
+- Added explicit user confirmation before re-signing and installing packages that fail due to missing or invalid signatures.
+
+**3. Harmony HAP packing and signing workflow**
+- Added Harmony signing settings for `.p12`, key alias, `.p7b` profile, and `.cer` certificate.
+- Added protected local storage for signing passwords.
+- Added signing material inspection, including profile/certificate validity and profile bundle name detection.
+- Bundled Harmony signing tools: `hap-sign-tool.jar` and `app_packing_tool.jar`.
+- Added HAP signing, official packing, and bundle identity rewrite support.
+
+**4. Package install and re-sign flow**
+- Added APP container installable HAP resolution.
+- Improved HDC install result detection when `hdc` exits with code 0 but reports install failure in stdout.
+- Added automatic handling for unsigned HAP detection, with user-approved re-signing and signed reinstall.
+- Added command log evidence for initial install, signing, bundle rewrite, and signed install steps.
+
+**5. UI and settings improvements**
+- Added a cleaner Device Runtime interface independent from the code/tree workspace.
+- Refined Settings UI with flatter controls and icon-only secret visibility buttons.
+- Added shared `ReArkTextField` to fix floating placeholder/border overlap.
+- Reduced UI clutter by hiding empty sections, temporary paths, and duplicate runtime controls.
+
+**6. Infrastructure and tests**
+- Added `CommandRunner`, `HdcDeviceBackend`, `UiAutomationBackend`, `HarmonyHapSigner`, and `HarmonyPackageRewriter`.
+- Added tests for HDC command handling, UI automation parsing, HAP signing, package rewriting, and ABC evidence.
+- Added HarmonyOS sample packages and release screenshots.)"),
+        releaseUrl_,
+        QStringLiteral("2026-07-02T10:30:00Z"));
+#endif
 }
 
 void UpdateController::openReleasePage(const QString& releaseUrl) const
@@ -143,7 +220,9 @@ void UpdateController::handleLatestReleaseReply(QNetworkReply* reply, bool silen
     const QJsonObject object = document.object();
     const QString tagName = object.value(QStringLiteral("tag_name")).toString();
     const QString htmlUrl = object.value(QStringLiteral("html_url")).toString(QString::fromLatin1(kProjectReleaseUrl));
-    const QString changelog = object.value(QStringLiteral("body")).toString();
+    const QString changelog = ReleaseNotesLocalizer::selectForLocale(
+        object.value(QStringLiteral("body")).toString(),
+        preferredReleaseNotesLocale());
     const QString releaseDate = object.value(QStringLiteral("published_at")).toString();
     if (tagName.isEmpty()) {
         if (!silent) {
@@ -174,6 +253,14 @@ void UpdateController::resetLatestRelease()
     latestVersion_.clear();
     releaseUrl_.clear();
     emit latestReleaseChanged();
+}
+
+QString UpdateController::preferredReleaseNotesLocale() const
+{
+    if (languageController_ != nullptr) {
+        return languageController_->currentLanguage();
+    }
+    return QLocale::system().name();
 }
 
 bool UpdateController::automaticCheckDue()

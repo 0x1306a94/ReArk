@@ -7,7 +7,7 @@
 对当前 HAP 样本完成以下闭环：
 
 - 静态定位口令校验逻辑。
-- 从 ABC 证据中提取 `secretKey` 和编码常量。
+- 从 ABC迹索中提取 `secretKey` 和编码常量。
 - 用脚本复算口令，避免手算常量。
 - 用 `encode(candidate) == secretKey` 做静态正确性证明。
 - 连接设备安装、启动、输入并验证运行态结果。
@@ -178,7 +178,7 @@ len(password) == 177
 不要这样做：
 
 - 手动把 `0x1d4b42` 转成十进制。
-- 只看源码文本，不用 ABC literal/xref/call-flow 证据确认。
+- 只看源码文本，不用 ABC literal/xref/call-flow 迹索确认。
 - 算出口令后不执行 `encode(candidate) == secretKey` 复核。
 - 把 `inputText` 或 `uinput` 返回成功当作业务成功。
 - 对 Password 字段要求 UI layout 回显明文。
@@ -193,7 +193,7 @@ len(password) == 177
 1. 常量手算错误。
    - Agent 把 `0x1d4b42` 错算成 `1917762`。
    - 正确值是 `1919810`。
-   - 这类值必须由结构化 ABC 证据或脚本输出得到。
+   - 这类值必须由结构化 ABC迹索或脚本输出得到。
 
 2. 没有保持上下文连续。
    - 前面已经提到 Python 能力、候选公式和候选口令，后面仍反复说“没有 Python 环境”或重新从头推导。

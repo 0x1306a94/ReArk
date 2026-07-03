@@ -42,7 +42,9 @@ ApplicationWindow {
         if (closeCallback) {
             closeCallback()
         }
-        destroy()
+        Qt.callLater(function() {
+            aboutWindow.destroy()
+        })
     }
 
     Rectangle {

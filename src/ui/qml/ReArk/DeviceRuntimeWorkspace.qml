@@ -33,6 +33,9 @@ Rectangle {
     readonly property color secondaryTextColor: darkTheme ? "#a6a6a6" : "#5f6872"
     readonly property color dangerColor: darkTheme ? "#f48771" : "#a1260d"
     readonly property int runtimeActionWidth: 72
+    readonly property int runtimeFieldSpacing: 8
+    readonly property int runtimeCoordinateFieldWidth: 72
+    readonly property int launchBundleFieldWidth: runtimeCoordinateFieldWidth * 2 + runtimeFieldSpacing
 
     signal backRequested()
 
@@ -500,7 +503,7 @@ Rectangle {
 
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 8
+                                    spacing: root.runtimeFieldSpacing
 
                                     FormRowLabel {
                                         text: qsTr("Launch")
@@ -508,8 +511,7 @@ Rectangle {
 
                                     RuntimeTextField {
                                         id: bundleField
-                                        Layout.fillWidth: true
-                                        Layout.preferredWidth: 230
+                                        Layout.preferredWidth: root.launchBundleFieldWidth
                                         placeholderText: qsTr("Bundle")
                                     }
 
@@ -537,7 +539,7 @@ Rectangle {
 
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 8
+                                    spacing: root.runtimeFieldSpacing
 
                                     FormRowLabel {
                                         text: qsTr("Tap")
@@ -545,20 +547,20 @@ Rectangle {
 
                                     RuntimeTextField {
                                         id: tapXField
-                                        Layout.preferredWidth: 72
+                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
                                         placeholderText: qsTr("x")
                                         validator: IntValidator { bottom: 0; top: 100000 }
                                     }
 
                                     RuntimeTextField {
                                         id: tapYField
-                                        Layout.preferredWidth: 72
+                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
                                         placeholderText: qsTr("y")
                                         validator: IntValidator { bottom: 0; top: 100000 }
                                     }
 
                                     RuntimeButton {
-                                        Layout.preferredWidth: 72
+                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
                                         text: qsTr("Tap")
                                         enabled: root.controller !== null
                                                  && root.hasSelectedDevice
@@ -569,7 +571,7 @@ Rectangle {
                                     }
 
                                     RuntimeButton {
-                                        Layout.preferredWidth: 92
+                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
                                         text: qsTr("Tap Node")
                                         enabled: root.controller !== null
                                                  && root.hasSelectedDevice

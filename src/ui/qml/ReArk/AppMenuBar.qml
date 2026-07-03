@@ -74,14 +74,23 @@ Rectangle {
         })
     }
 
+    function activateOwnedWindow(window) {
+        Qt.callLater(function() {
+            if (window === null) {
+                return
+            }
+            window.show()
+            window.raise()
+            window.requestActivate()
+        })
+    }
+
     function showOwnedWindow(window, properties) {
         if (window !== null) {
             for (var key in properties) {
                 window[key] = properties[key]
             }
-            window.show()
-            window.raise()
-            window.requestActivate()
+            activateOwnedWindow(window)
             return window
         }
         return null
@@ -101,9 +110,7 @@ Rectangle {
             return null
         }
 
-        window.show()
-        window.raise()
-        window.requestActivate()
+        activateOwnedWindow(window)
         return window
     }
 
@@ -645,6 +652,23 @@ Rectangle {
             text: updateController.checking ? qsTr("Checking for Updates...") : qsTr("Check for Updates")
             enabled: !updateController.checking
             onTriggered: updateController.checkForUpdates(false)
+        }
+
+        Instantiator {
+            model: updateController.updatePreviewAvailable ? 1 : 0
+
+            delegate: Action {
+                text: qsTr("Preview Update Available")
+                onTriggered: updateController.previewUpdateAvailable()
+            }
+
+            onObjectAdded: function(index, object) {
+                helpMenu.insertAction(5 + index, object)
+            }
+
+            onObjectRemoved: function(index, object) {
+                helpMenu.removeAction(object)
+            }
         }
 
         CompactMenuSeparator {}

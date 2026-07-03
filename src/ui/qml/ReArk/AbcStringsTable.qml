@@ -85,6 +85,11 @@ Rectangle {
         decompilerController.copyTextToClipboard(row.offset || "")
     }
 
+    function displayOffset(offset) {
+        const text = offset || ""
+        return /^0x[0-9a-f]+$/i.test(text) ? text.slice(2) : text
+    }
+
     function sourceFor(row) {
         return row.sourceKind || row.source_kind || row.type || ""
     }
@@ -413,7 +418,7 @@ Rectangle {
 
                         CellLabel {
                             Layout.preferredWidth: root.offsetWidth
-                            text: rowDelegate.modelData.offset || ""
+                            text: root.displayOffset(rowDelegate.modelData.offset)
                             color: root.accentColor
                         }
 

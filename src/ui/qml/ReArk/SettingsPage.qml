@@ -1016,11 +1016,15 @@ Rectangle {
 
         implicitWidth: 260
         implicitHeight: 32
+        leftPadding: 0
+        rightPadding: 0
+        topPadding: 0
+        bottomPadding: 0
         font.pixelSize: 13
         hoverEnabled: true
 
         contentItem: Text {
-            leftPadding: 8
+            leftPadding: 9
             rightPadding: 26
             text: comboRoot.displayText
             color: root.primaryTextColor
@@ -1029,11 +1033,125 @@ Rectangle {
             font: comboRoot.font
         }
 
+        indicator: Canvas {
+            id: settingsComboChevron
+
+            x: comboRoot.width - width - 10
+            y: Math.round((comboRoot.height - height) / 2)
+            width: 9
+            height: 6
+            opacity: comboRoot.enabled ? 1.0 : 0.45
+
+            Connections {
+                target: comboRoot.popup
+
+                function onVisibleChanged() {
+                    settingsComboChevron.requestPaint()
+                }
+            }
+
+            onPaint: {
+                const context = getContext("2d")
+                context.reset()
+                context.lineWidth = 1.6
+                context.lineCap = "round"
+                context.lineJoin = "round"
+                context.strokeStyle = root.secondaryTextColor
+                context.beginPath()
+                if (comboRoot.popup.visible) {
+                    context.moveTo(1, 5)
+                    context.lineTo(width / 2, 1)
+                    context.lineTo(width - 1, 5)
+                } else {
+                    context.moveTo(1, 1)
+                    context.lineTo(width / 2, 5)
+                    context.lineTo(width - 1, 1)
+                }
+                context.stroke()
+            }
+        }
+
         background: Rectangle {
             radius: 2
-            color: root.inputColor
+            color: comboRoot.hovered || comboRoot.popup.visible
+                   ? (root.darkTheme ? "#24272b" : "#f7fafb")
+                   : root.inputColor
             border.width: 1
-            border.color: comboRoot.activeFocus ? root.inputFocusColor : root.borderColor
+            border.color: comboRoot.activeFocus || comboRoot.popup.visible
+                          ? root.inputFocusColor
+                          : root.borderColor
+        }
+
+        delegate: ItemDelegate {
+            id: comboDelegate
+
+            required property int index
+            required property var model
+            required property var modelData
+
+            width: comboRoot.width
+            height: 28
+            padding: 0
+            highlighted: comboRoot.highlightedIndex === index
+
+            contentItem: Text {
+                leftPadding: 9
+                rightPadding: 9
+                text: comboRoot.delegateText(comboDelegate.model, comboDelegate.modelData)
+                color: comboDelegate.enabled ? root.primaryTextColor : root.subtleTextColor
+                font: comboRoot.font
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
+
+            background: Rectangle {
+                color: comboDelegate.highlighted
+                       ? (root.darkTheme ? "#2a3038" : "#e4eef7")
+                       : comboDelegate.hovered
+                         ? root.rowHoverColor
+                         : root.inputColor
+            }
+        }
+
+        popup: Popup {
+            y: comboRoot.height + 4
+            width: comboRoot.width
+            implicitHeight: Math.min(contentItem.implicitHeight + 2, 220)
+            padding: 1
+            modal: false
+            focus: true
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+
+            contentItem: ListView {
+                implicitHeight: contentHeight
+                clip: true
+                model: comboRoot.popup.visible ? comboRoot.delegateModel : null
+                currentIndex: comboRoot.highlightedIndex
+                boundsBehavior: Flickable.StopAtBounds
+
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                }
+            }
+
+            background: Rectangle {
+                radius: 3
+                color: root.inputColor
+                border.width: 1
+                border.color: root.inputFocusColor
+            }
+        }
+
+        function delegateText(model, modelData) {
+            const role = comboRoot.textRole || ""
+            if (role.length > 0
+                    && model !== null
+                    && model !== undefined
+                    && model[role] !== undefined
+                    && model[role] !== null) {
+                return model[role]
+            }
+            return modelData === null || modelData === undefined ? "" : modelData
         }
     }
 

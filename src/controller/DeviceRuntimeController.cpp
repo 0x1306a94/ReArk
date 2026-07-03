@@ -542,6 +542,9 @@ DeviceRuntimeController::DeviceRuntimeController(QObject* parent)
     screenRefreshStatus_ = tr("Screen refresh stopped.");
     screenRefreshTimer_.setSingleShot(false);
     connect(&screenRefreshTimer_, &QTimer::timeout, this, &DeviceRuntimeController::captureAutoRefreshFrame);
+    initialUiSnapshotTimer_.setSingleShot(true);
+    initialUiSnapshotTimer_.setInterval(160);
+    connect(&initialUiSnapshotTimer_, &QTimer::timeout, this, &DeviceRuntimeController::performInitialUiSnapshot);
 }
 
 DeviceRuntimeController::~DeviceRuntimeController()
@@ -572,6 +575,7 @@ void DeviceRuntimeController::setSelectedDeviceId(const QString& selectedDeviceI
     if (!launchMetadataPackagePath_.isEmpty()) {
         refreshLaunchMetadata(launchMetadataPackagePath_);
     }
+    scheduleInitialUiSnapshot();
 }
 
 bool DeviceRuntimeController::busy() const
@@ -692,6 +696,7 @@ void DeviceRuntimeController::refreshDevices()
         setStatus(targets.isEmpty()
                 ? tr("No HDC targets found.")
                 : tr("Found %n HDC target(s).", nullptr, targets.size()));
+        scheduleInitialUiSnapshot();
     });
 }
 
@@ -948,6 +953,41 @@ void DeviceRuntimeController::readHilog(const QString& filter, const QString& le
 void DeviceRuntimeController::captureScreenshot()
 {
     captureScreenshot(ScreenshotRequestKind::Manual);
+}
+
+void DeviceRuntimeController::scheduleInitialUiSnapshot()
+{
+    const QString targetId = currentTargetId();
+    if (targetId.isEmpty()
+        || targetId == initialUiSnapshotDeviceId_
+        || screenRefreshTimer_.isActive()
+        || initialUiSnapshotTimer_.isActive()) {
+        return;
+    }
+    if (!screenshotPath_.isEmpty() && !uiNodes_.isEmpty()) {
+        return;
+    }
+    initialUiSnapshotTimer_.start();
+}
+
+void DeviceRuntimeController::performInitialUiSnapshot()
+{
+    const QString targetId = currentTargetId();
+    if (targetId.isEmpty()
+        || targetId == initialUiSnapshotDeviceId_
+        || screenRefreshTimer_.isActive()) {
+        return;
+    }
+    if (!screenshotPath_.isEmpty() && !uiNodes_.isEmpty()) {
+        return;
+    }
+    if (busy_) {
+        initialUiSnapshotTimer_.start();
+        return;
+    }
+
+    initialUiSnapshotDeviceId_ = targetId;
+    captureUiSnapshot();
 }
 
 void DeviceRuntimeController::captureScreenshot(ScreenshotRequestKind kind)
@@ -1455,6 +1495,8 @@ void DeviceRuntimeController::clearDeviceSessionState()
         screenRefreshTimer_.stop();
         emit screenRefreshStateChanged();
     }
+    initialUiSnapshotTimer_.stop();
+    initialUiSnapshotDeviceId_.clear();
     screenRefreshFrameCount_ = 0;
     screenRefreshFps_ = 0.0;
     emit screenRefreshFrameChanged();

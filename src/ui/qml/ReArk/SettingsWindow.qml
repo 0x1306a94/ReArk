@@ -29,7 +29,9 @@ ApplicationWindow {
         if (closeCallback) {
             closeCallback()
         }
-        destroy()
+        Qt.callLater(function() {
+            settingsWindow.destroy()
+        })
     }
 
     SettingsPage {

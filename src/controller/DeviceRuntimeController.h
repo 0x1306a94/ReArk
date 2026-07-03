@@ -135,6 +135,8 @@ private:
         const CommandRequest& request,
         std::function<void(const CommandResult&)> onFinished = {});
     void captureScreenshot(ScreenshotRequestKind kind);
+    void scheduleInitialUiSnapshot();
+    void performInitialUiSnapshot();
     void captureAutoRefreshFrame();
     void appendCommandLog(const CommandResult& result);
     void setBusy(bool busy, const QString& operation = {});
@@ -161,6 +163,7 @@ private:
     HdcDeviceBackend backend_;
     UiAutomationBackend uiBackend_;
     QTimer screenRefreshTimer_;
+    QTimer initialUiSnapshotTimer_;
     QElapsedTimer screenRefreshElapsed_;
     QVariantList devices_;
     QVariantList uiNodes_;
@@ -181,6 +184,7 @@ private:
     QString pendingSigningPackagePath_;
     QString pendingSigningTargetId_;
     CommandResult pendingSigningInitialInstall_;
+    QString initialUiSnapshotDeviceId_;
     QString uiNodeSummary_;
     QString uiNodeFilter_;
     QString screenRefreshStatus_;

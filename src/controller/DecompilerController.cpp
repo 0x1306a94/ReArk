@@ -895,8 +895,12 @@ void DecompilerController::copyTextToClipboard(const QString& text) const
 
 QString DecompilerController::agentPackageSummary() const
 {
+    if (!hasPackage_) {
+        return tr("No package loaded.");
+    }
+
     QString summary;
-    summary += QStringLiteral("Package: %1\n").arg(hasPackage_ ? packagePath_ : QStringLiteral("<none>"));
+    summary += QStringLiteral("Package: %1\n").arg(packagePath_);
     summary += QStringLiteral("Status: %1\n").arg(status_);
     summary += QStringLiteral("Busy: %1\n").arg(busy_ ? QStringLiteral("true") : QStringLiteral("false"));
     summary += QStringLiteral("Active tab: %1\n").arg(tabsModel_.activePath());

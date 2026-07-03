@@ -5,8 +5,10 @@
 #include <QObject>
 #include <QString>
 #include <QVariantList>
+#include <QVariantMap>
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stop_token>
 
@@ -64,10 +66,25 @@ private:
         Other
     };
 
+    struct RunUiUpdate {
+        QString status;
+        QVariantMap activity;
+        RunWaitPhase phase = RunWaitPhase::Other;
+    };
+
     void setRunning(bool running);
     void setTranscript(const QString& transcript);
     void clearMessages();
     void appendMessage(const QString& role, const QString& text, const QString& state = {});
+    void enqueueAssistantDeltaFromWorker(quint64 runId, const QString& text);
+    void enqueueAssistantReasoningDeltaFromWorker(quint64 runId, const QString& text);
+    void enqueueRunUiUpdateFromWorker(
+        quint64 runId,
+        const QString& status,
+        const QVariantMap& activity,
+        RunWaitPhase phase);
+    void drainWorkerAssistantDeltas();
+    [[nodiscard]] std::optional<RunUiUpdate> drainWorkerRunUiUpdate();
     void queueAssistantDelta(const QString& text);
     void queueAssistantReasoningDelta(const QString& text);
     void flushPendingAssistantDelta();
@@ -102,6 +119,17 @@ private:
     AgentMessageModel* messageModel_ = nullptr;
     QString errorMessage_;
     QString status_;
+    std::mutex workerAssistantDeltaMutex_;
+    QString workerAssistantDelta_;
+    QString workerAssistantReasoningDelta_;
+    quint64 workerAssistantDeltaRunId_ = 0;
+    bool workerAssistantDeltaFlushQueued_ = false;
+    std::mutex workerRunUiMutex_;
+    QString workerRunStatus_;
+    QVariantMap workerRunActivity_;
+    RunWaitPhase workerRunPhase_ = RunWaitPhase::Other;
+    quint64 workerRunUiRunId_ = 0;
+    bool workerRunUiFlushQueued_ = false;
     QString pendingAssistantDelta_;
     QString pendingAssistantReasoningDelta_;
     QTimer* assistantDeltaTimer_ = nullptr;

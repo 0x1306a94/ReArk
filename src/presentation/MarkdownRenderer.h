@@ -13,7 +13,7 @@ public:
     explicit MarkdownRenderer(QObject* parent = nullptr);
 
     Q_INVOKABLE QVariantList renderBlocks(const QString& markdown, bool darkTheme) const;
-    Q_INVOKABLE int renderBlocksAsync(const QString& markdown, bool darkTheme);
+    Q_INVOKABLE int renderBlocksAsync(const QString& markdown, bool darkTheme, bool cacheResult);
 
 signals:
     void blocksReady(int requestId, const QVariantList& blocks);

@@ -296,12 +296,25 @@ Rectangle {
             readonly property bool activeAssistantMessage: streaming && !userMessage
             readonly property bool showStreamStatus: activeAssistantMessage
             readonly property bool showReasoningText: activeAssistantMessage
+                                                     && messageText.trim().length === 0
                                                      && messageReasoningText.trim().length > 0
             readonly property string visibleMessageText: showReasoningText
                                                          ? messageReasoningText
                                                          : messageText
+            readonly property bool showMessageBody: visibleMessageText.trim().length > 0
             readonly property var visibleActivities: root.activityList(messageActivities)
             readonly property var currentActivity: root.currentActivity(messageActivities)
+            readonly property string activeStatusText: root.agentRunning && root.agentStatus.length > 0
+                                                       ? root.agentStatus
+                                                       : currentActivity
+                                                         && currentActivity.detail
+                                                         && currentActivity.detail.length > 0
+                                                         ? currentActivity.detail
+                                                         : currentActivity
+                                                           && currentActivity.title
+                                                           && currentActivity.title.length > 0
+                                                           ? currentActivity.title
+                                                           : qsTr("Starting analysis...")
             readonly property bool editing: root.editingMessageIndex === index
             readonly property bool copied: root.copiedMessageIndex === index
             readonly property real maxBubbleWidth: messageDelegate.userMessage
@@ -354,8 +367,10 @@ Rectangle {
                                      : messageDelegate.maxBubbleWidth
                     implicitHeight: (messageDelegate.editing
                                      ? editMessageInput.implicitHeight + editActionRow.implicitHeight + 30
-                                     : messageBody.implicitHeight + 22)
-                                    + (messageDelegate.showStreamStatus ? streamStatus.implicitHeight + 10 : 0)
+                                     : messageDelegate.showMessageBody
+                                       ? messageBody.implicitHeight + 22
+                                       : 0)
+                                    + (messageDelegate.showStreamStatus ? streamStatus.implicitHeight + 20 : 0)
 
                     Rectangle {
                         anchors.fill: parent
@@ -408,7 +423,7 @@ Rectangle {
                         visible: false
                         text: messageDelegate.visibleMessageText.length > 0
                               ? messageDelegate.visibleMessageText
-                              : messageBody.emptyText
+                              : ""
                         font.pixelSize: messageBody.textPixelSize
                         wrapMode: Text.NoWrap
                     }
@@ -416,7 +431,7 @@ Rectangle {
                     MarkdownMessage {
                         id: messageBody
 
-                        visible: !messageDelegate.editing
+                        visible: !messageDelegate.editing && messageDelegate.showMessageBody
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -429,9 +444,8 @@ Rectangle {
                         markdownEnabled: !messageDelegate.userMessage
                         streaming: messageDelegate.streaming
                         suppressRawMarkdownFallback: !messageDelegate.userMessage
-                        emptyText: messageDelegate.activeAssistantMessage
-                                   ? (messageDelegate.visibleActivities.length > 0 ? "" : qsTr("Starting analysis..."))
-                                   : ""
+                                                     && !messageDelegate.streaming
+                        emptyText: ""
                         darkTheme: root.darkTheme
                         textColor: root.primaryTextColor
                         accentColor: root.accentColor
@@ -623,15 +637,17 @@ Rectangle {
 
                             Label {
                                 Layout.fillWidth: true
-                                text: messageDelegate.showReasoningText
-                                      ? qsTr("Analyzing...")
+                                text: root.agentRunning && root.agentStatus.length > 0
+                                      ? root.agentStatus
+                                      : messageDelegate.currentActivity
+                                      && messageDelegate.currentActivity.title
+                                      && messageDelegate.currentActivity.state !== "done"
+                                      ? messageDelegate.currentActivity.title
                                       : messageDelegate.messageText.trim().length > 0
                                       ? qsTr("Generating answer...")
-                                      : messageDelegate.currentActivity && messageDelegate.currentActivity.title
-                                      ? messageDelegate.currentActivity.title
-                                      : (root.agentRunning && root.agentStatus.length > 0
-                                         ? root.agentStatus
-                                         : qsTr("Working..."))
+                                      : messageDelegate.showReasoningText
+                                      ? qsTr("Analyzing...")
+                                      : qsTr("Working...")
                                 color: root.secondaryTextColor
                                 font.pixelSize: 11
                                 wrapMode: Text.Wrap

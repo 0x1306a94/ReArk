@@ -31,6 +31,7 @@ public:
     void appendText(int row, const QString& text);
     void setText(int row, const QString& text);
     void appendReasoningText(int row, const QString& text);
+    void setReasoningText(int row, const QString& text);
     void clearReasoningText(int row);
     void setActivities(int row, const QVariantList& activities);
     void finishStreaming(int row, const QString& fallbackText);

@@ -484,6 +484,15 @@
 <context>
     <name>AgentController</name>
     <message>
+        <location filename="../../src/controller/AgentController.cpp" line="80"/>
+        <source>[Only the most recent reasoning output is shown to keep the window responsive.]
+
+</source>
+        <translation>[为保持窗口响应，只显示最近的分析过程。]
+
+</translation>
+    </message>
+    <message>
         <location filename="../../src/controller/AgentController.cpp" line="73"/>
         <source>Agent tool call rounds were exhausted before a final answer was produced.</source>
         <translation>Agent 工具调用轮次已用尽，尚未生成最终答案。</translation>
@@ -701,117 +710,117 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <location filename="../../src/controller/AgentController.cpp" line="4462"/>
         <location filename="../../src/controller/AgentController.cpp" line="5426"/>
         <source>Preparing analysis context...</source>
-        <translation type="unfinished"></translation>
+        <translation>正在准备分析上下文...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4464"/>
         <source>Model analysis round %1: deciding the next step...</source>
-        <translation type="unfinished"></translation>
+        <translation>第 %1 轮模型分析：正在判断下一步...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4467"/>
         <source>Model analysis round %1: receiving response...</source>
-        <translation type="unfinished"></translation>
+        <translation>第 %1 轮模型分析：正在接收响应...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4470"/>
         <source>Preparing the next evidence request...</source>
-        <translation type="unfinished"></translation>
+        <translation>正在准备下一步迹索请求...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4473"/>
         <source>Local analysis script is ready to run...</source>
-        <translation type="unfinished"></translation>
+        <translation>本地分析脚本已准备执行...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4474"/>
         <source>Evidence request is ready...</source>
-        <translation type="unfinished"></translation>
+        <translation>迹索请求已准备好...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4477"/>
         <source>Step %1: %2...</source>
-        <translation type="unfinished"></translation>
+        <translation>第 %1 步：%2...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4480"/>
         <source>running local analysis script</source>
-        <translation type="unfinished"></translation>
+        <translation>运行本地分析脚本</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4481"/>
         <source>reading %1</source>
-        <translation type="unfinished"></translation>
+        <translation>读取 %1</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4482"/>
         <source>Step %1: reading analysis data...</source>
-        <translation type="unfinished"></translation>
+        <translation>第 %1 步：正在读取分析数据...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4486"/>
         <source>Local analysis script failed.</source>
-        <translation type="unfinished"></translation>
+        <translation>本地分析脚本失败。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4487"/>
         <source>Local analysis script completed.</source>
-        <translation type="unfinished"></translation>
+        <translation>本地分析脚本已完成。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4490"/>
         <source>Evidence read failed.</source>
-        <translation type="unfinished"></translation>
+        <translation>迹索读取失败。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4491"/>
         <source>Evidence collected.</source>
-        <translation type="unfinished"></translation>
+        <translation>迹索已收集。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4493"/>
         <source>Model round %1 completed.</source>
-        <translation type="unfinished"></translation>
+        <translation>第 %1 轮模型调用已完成。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4495"/>
         <source>Reviewing the answer...</source>
-        <translation type="unfinished"></translation>
+        <translation>正在复核回答...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4497"/>
         <source>Review completed.</source>
-        <translation type="unfinished"></translation>
+        <translation>复核已完成。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4499"/>
         <source>Plan created</source>
-        <translation type="unfinished"></translation>
+        <translation>计划已创建</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4501"/>
         <source>Running plan step...</source>
-        <translation type="unfinished"></translation>
+        <translation>正在执行计划步骤...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4503"/>
         <source>Plan step completed</source>
-        <translation type="unfinished"></translation>
+        <translation>计划步骤已完成</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4505"/>
         <source>Plan step failed</source>
-        <translation type="unfinished"></translation>
+        <translation>计划步骤失败</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4507"/>
         <source>Plan step blocked</source>
-        <translation type="unfinished"></translation>
+        <translation>计划步骤受阻</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4509"/>
         <source>Plan revised</source>
-        <translation type="unfinished"></translation>
+        <translation>计划已调整</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4511"/>
@@ -886,7 +895,7 @@ Use a model that supports function/tool calling for Agent actions, or run the op
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4563"/>
         <source>The provider is streaming a visible reasoning summary.</source>
-        <translation>Provider 正在返回可展示的分析摘要。</translation>
+        <translation>模型提供方正在返回可展示的分析摘要。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="4564"/>
@@ -1139,17 +1148,32 @@ Use a model that supports function/tool calling for Agent actions, or run the op
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="6414"/>
         <source>Model provider did not return another event for %1 seconds, so ReArk stopped this run. Partial output was preserved; ask Agent to continue from here.</source>
-        <translation type="unfinished"></translation>
+        <translation>模型提供方连续 %1 秒没有返回新事件，ReArk 已停止本次运行。已保留当前输出；可以让 Agent 从这里继续。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="6417"/>
         <source>Analysis stopped after waiting %1 seconds for the model provider.</source>
-        <translation type="unfinished"></translation>
+        <translation>等待模型提供方 %1 秒后已停止分析。</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="6423"/>
         <source>Waiting for model response (%1s, auto-stop at %2s)...</source>
-        <translation type="unfinished"></translation>
+        <translation>正在等待模型响应（%1 秒，%2 秒后自动停止）...</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/AgentController.cpp" line="6680"/>
+        <source>The current tool call did not finish for %1 seconds, so ReArk stopped this run. Partial output was preserved; ask Agent to continue from here.</source>
+        <translation>当前工具调用连续 %1 秒没有完成，ReArk 已停止本次运行。已保留当前输出；可以让 Agent 从这里继续。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/AgentController.cpp" line="6686"/>
+        <source>Analysis stopped after waiting %1 seconds for the current tool call.</source>
+        <translation>等待当前工具调用 %1 秒后已停止分析。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/AgentController.cpp" line="6695"/>
+        <source>Waiting for tool call to finish (%1s, auto-stop at %2s)...</source>
+        <translation>正在等待工具调用完成（%1 秒，%2 秒后自动停止）...</translation>
     </message>
     <message>
         <location filename="../../src/controller/AgentController.cpp" line="6475"/>

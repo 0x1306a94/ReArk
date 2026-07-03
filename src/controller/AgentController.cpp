@@ -58,14 +58,34 @@
 #include <filesystem>
 #include <functional>
 #include <iterator>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
 namespace {
+
+constexpr int kAssistantDeltaFlushIntervalMs = 180;
+constexpr int kAssistantDeltaImmediateFlushChars = 4096;
+constexpr int kMaxVisibleReasoningChars = 12000;
+
+QString boundedVisibleReasoningText(const QString& text)
+{
+    if (text.size() <= kMaxVisibleReasoningChars) {
+        return text;
+    }
+
+    const QString notice = AgentController::tr(
+        "[Only the most recent reasoning output is shown to keep the window responsive.]\n\n");
+    const int keepChars = std::max(
+        0,
+        kMaxVisibleReasoningChars - static_cast<int>(notice.size()));
+    return notice + text.right(keepChars);
+}
 
 #ifdef REARK_HAS_WUWE
 
@@ -305,6 +325,8 @@ constexpr int kMaxPythonSessionUpdateChars = 24000;
 constexpr qint64 kAgentWatchdogIntervalMs = 5000;
 constexpr qint64 kAgentModelIdleWarningMs = 15000;
 constexpr qint64 kAgentModelIdleStopMs = 95000;
+constexpr qint64 kAgentToolIdleWarningMs = 30000;
+constexpr qint64 kAgentToolIdleStopMs = 180000;
 
 struct PythonSessionState {
     mutable std::mutex mutex;
@@ -720,6 +742,144 @@ QString responseLanguageInstruction(const QString& question)
         "- Any provider-visible reasoning summary, thinking summary, intermediate narration, and final answer must use that same dominant natural language.\n"
         "- Ignore the UI language and tool-output language when choosing the response language.\n"
         "- Keep identifiers, package names, file paths, API names, and quoted source text unchanged.");
+}
+
+QString responseLanguageTag(const QString& question)
+{
+    int latinLetters = 0;
+    int cjkCharacters = 0;
+    for (const QChar ch : question) {
+        const ushort unicode = ch.unicode();
+        if ((unicode >= u'A' && unicode <= u'Z') || (unicode >= u'a' && unicode <= u'z')) {
+            ++latinLetters;
+        } else if ((unicode >= 0x3400 && unicode <= 0x9fff)
+            || (unicode >= 0xf900 && unicode <= 0xfaff)) {
+            ++cjkCharacters;
+        }
+    }
+
+    if (cjkCharacters > 0 && latinLetters < cjkCharacters * 2) {
+        return QStringLiteral("zh-CN");
+    }
+    if (latinLetters >= 3 && cjkCharacters == 0) {
+        return QStringLiteral("en");
+    }
+    if (cjkCharacters > 0) {
+        return QStringLiteral("zh-CN");
+    }
+    return {};
+}
+
+wuwe::llm_language_preferences languagePreferencesForQuestion(const QString& question)
+{
+    wuwe::llm_language_preferences preferences;
+    const QString language = responseLanguageTag(question);
+    if (language.isEmpty()) {
+        return preferences;
+    }
+
+    const std::string tag = toStdString(language);
+    preferences.response_language = tag;
+    preferences.reasoning_language = tag;
+    preferences.locale = tag;
+    return preferences;
+}
+
+bool reasoningLanguageMismatch(const std::map<std::string, std::string>& metadata)
+{
+    const auto it = metadata.find("language_mismatch");
+    return it != metadata.end() && QString::fromStdString(it->second).trimmed().toCaseFolded()
+        == QStringLiteral("true");
+}
+
+bool reasoningTextLanguageMismatch(const QString& requestedLanguage, const QString& text)
+{
+    const QString language = requestedLanguage.trimmed().toCaseFolded();
+    if (language.isEmpty() || text.trimmed().isEmpty()) {
+        return false;
+    }
+
+    int latinLetters = 0;
+    int cjkCharacters = 0;
+    for (const QChar ch : text) {
+        const ushort unicode = ch.unicode();
+        if ((unicode >= u'A' && unicode <= u'Z') || (unicode >= u'a' && unicode <= u'z')) {
+            ++latinLetters;
+        } else if ((unicode >= 0x3400 && unicode <= 0x9fff)
+            || (unicode >= 0xf900 && unicode <= 0xfaff)) {
+            ++cjkCharacters;
+        }
+    }
+
+    if (language.startsWith(QStringLiteral("zh"))) {
+        return cjkCharacters == 0 && latinLetters >= 8;
+    }
+    if (language.startsWith(QStringLiteral("en"))) {
+        return cjkCharacters >= 4 && latinLetters < cjkCharacters;
+    }
+    return false;
+}
+
+QString visibleReasoningTextForLanguage(const QString& requestedLanguage, const QString& text)
+{
+    const QString language = requestedLanguage.trimmed().toCaseFolded();
+    const QString trimmed = text.trimmed();
+    if (language.isEmpty() || trimmed.isEmpty()) {
+        return text;
+    }
+
+    auto containsCjk = [](const QString& value) {
+        for (const QChar ch : value) {
+            const ushort unicode = ch.unicode();
+            if ((unicode >= 0x3400 && unicode <= 0x9fff)
+                || (unicode >= 0xf900 && unicode <= 0xfaff)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto latinLetterCount = [](const QString& value) {
+        int count = 0;
+        for (const QChar ch : value) {
+            const ushort unicode = ch.unicode();
+            if ((unicode >= u'A' && unicode <= u'Z') || (unicode >= u'a' && unicode <= u'z')) {
+                ++count;
+            }
+        }
+        return count;
+    };
+
+    if (language.startsWith(QStringLiteral("zh"))) {
+        QStringList kept;
+        const QStringList parts = text.split(QRegularExpression(QStringLiteral("(?<=[。！？!?\\.])\\s+|\\n+")));
+        for (const QString& part : parts) {
+            const QString item = part.trimmed();
+            if (item.isEmpty()) {
+                continue;
+            }
+            if (containsCjk(item)) {
+                kept.append(item);
+            }
+        }
+        return kept.join(QStringLiteral("\n"));
+    }
+
+    if (language.startsWith(QStringLiteral("en"))) {
+        QStringList kept;
+        const QStringList parts = text.split(QRegularExpression(QStringLiteral("(?<=[。！？!?\\.])\\s+|\\n+")));
+        for (const QString& part : parts) {
+            const QString item = part.trimmed();
+            if (item.isEmpty()) {
+                continue;
+            }
+            if (!containsCjk(item) && latinLetterCount(item) >= 3) {
+                kept.append(item);
+            }
+        }
+        return kept.join(QStringLiteral(" "));
+    }
+
+    return text;
 }
 
 QStringList queryTerms(const QString& query)
@@ -4410,9 +4570,15 @@ bool staticFastPathHistoryNoise(
 
 QString conversationInputForReasoning(
     const QVariantList& messages,
-    const AgentTaskProfile& profile)
+    const AgentTaskProfile& profile,
+    const QString& latestQuestion)
 {
     QStringList lines;
+    const QString languageInstruction = responseLanguageInstruction(latestQuestion).trimmed();
+    if (!languageInstruction.isEmpty()) {
+        lines.append(languageInstruction);
+        lines.append(QString());
+    }
     lines.append(QStringLiteral("Task profile: %1").arg(agentTaskModeName(profile.mode)));
     lines.append(QStringLiteral("Conversation:"));
     QVector<QPair<QString, QString>> selected;
@@ -5032,7 +5198,7 @@ AgentController::AgentController(
     , runWatchdogTimer_(new QTimer(this))
 {
     assistantDeltaTimer_->setSingleShot(true);
-    assistantDeltaTimer_->setInterval(50);
+    assistantDeltaTimer_->setInterval(kAssistantDeltaFlushIntervalMs);
     connect(assistantDeltaTimer_, &QTimer::timeout, this, &AgentController::flushPendingAssistantDelta);
     runWatchdogTimer_->setInterval(int(kAgentWatchdogIntervalMs));
     connect(runWatchdogTimer_, &QTimer::timeout, this, &AgentController::checkRunWatchdog);
@@ -5227,9 +5393,12 @@ void AgentController::ask(const QString& question)
     const quint64 runId = ++activeRunId_;
     startRunWatchdog();
 
+    const auto languagePreferences = languagePreferencesForQuestion(trimmed);
+    const QString languageInstruction = responseLanguageInstruction(trimmed);
+    const QString requestedReasoningLanguage = responseLanguageTag(trimmed);
     QString systemPrompt;
     if (taskProfile.mode == AgentTaskMode::LightweightChat) {
-        systemPrompt =
+        systemPrompt +=
             QStringLiteral("You are ReArk Agent, a concise assistant embedded in ReArk. "
                 "For greetings, thanks, or simple acknowledgements, answer the latest message naturally and briefly. "
                 "For a greeting, you may briefly introduce that ReArk Agent helps with HarmonyOS NEXT HAP/APP package analysis, ABC evidence, signing and repacking, device runtime checks, UI automation, and install verification. "
@@ -5237,7 +5406,7 @@ void AgentController::ask(const QString& question)
                 "Do not inspect or summarize the current package for lightweight chat. "
                 "Match the language of the user's latest message.");
     } else {
-        systemPrompt =
+        systemPrompt +=
             QStringLiteral("You are an expert HarmonyOS NEXT application reverse engineering assistant embedded in ReArk. "
                 "Use ReArk tools when you need package, source, disassembly, resource, signature, or entry-point data, "
                 "ReArk Agent must be sample-independent: never rely on a contest name, previous sample answer, remembered path, or hardcoded verifier value unless it is present in the currently loaded package or current tool output. "
@@ -5335,7 +5504,7 @@ void AgentController::ask(const QString& question)
         systemPrompt += QStringLiteral("\n\nCurrent Python analysis state:\n%1")
             .arg(pythonSessionText.trimmed().isEmpty() ? QStringLiteral("<empty>") : pythonSessionText);
     }
-    systemPrompt += responseLanguageInstruction(trimmed);
+    systemPrompt += languageInstruction;
 
     QPointer<AgentController> self(this);
 
@@ -5348,6 +5517,7 @@ void AgentController::ask(const QString& question)
         wuwe::llm_request request;
         request.model = toStdString(settings.model);
         request.temperature = 0.2;
+        request.language = languagePreferences;
         request.messages.push_back({
             .role = "system",
             .content = toStdString(systemPrompt)
@@ -5360,54 +5530,56 @@ void AgentController::ask(const QString& question)
         wuwe::llm_agent_run_options options;
         options.stop_token = runtime_->stopSource.get_token();
         auto sawReasoningDelta = std::make_shared<std::atomic<bool>>(false);
+        auto suppressReasoningForLanguageMismatch = std::make_shared<std::atomic<bool>>(false);
+        options.callbacks.on_stream_event =
+            [suppressReasoningForLanguageMismatch](const wuwe::llm_stream_event& event) {
+                if ((event.type == wuwe::llm_stream_event_type::reasoning_delta
+                        || event.type == wuwe::llm_stream_event_type::reasoning_done)
+                    && reasoningLanguageMismatch(event.reasoning_metadata)) {
+                    suppressReasoningForLanguageMismatch->store(true, std::memory_order_relaxed);
+                }
+            };
         options.callbacks.on_delta = [self, runId](std::string_view text) {
             if (!self) {
                 return;
             }
             const QString chunk = fromStringView(text);
-            QMetaObject::invokeMethod(self.data(), [self, chunk, runId] {
-                if (self && self->activeRunId_ == runId) {
-                    self->noteRunActivity(RunWaitPhase::Model);
-                    self->queueAssistantDelta(chunk);
-                }
-            }, Qt::QueuedConnection);
+            self->enqueueAssistantDeltaFromWorker(runId, chunk);
         };
-        options.callbacks.on_reasoning_delta = [self, sawReasoningDelta, runId](std::string_view text) {
+        options.callbacks.on_reasoning_delta =
+            [self, sawReasoningDelta, suppressReasoningForLanguageMismatch, requestedReasoningLanguage, runId](
+                std::string_view text) {
             if (!self || text.empty()) {
                 return;
             }
             sawReasoningDelta->store(true, std::memory_order_relaxed);
-            const QString chunk = fromStringView(text);
-            QMetaObject::invokeMethod(self.data(), [self, chunk, runId] {
-                if (self && self->activeRunId_ == runId) {
-                    self->noteRunActivity(RunWaitPhase::Model);
-                    self->queueAssistantReasoningDelta(chunk);
-                    self->recordActiveAssistantActivity(
-                        QStringLiteral("reasoning"),
-                        AgentController::tr("Reading reasoning summary"),
-                        AgentController::tr("The provider is streaming a visible reasoning summary."),
-                        QStringLiteral("active"));
-                    self->setStatus(AgentController::tr("Receiving model reasoning summary..."));
-                }
-            }, Qt::QueuedConnection);
+            if (suppressReasoningForLanguageMismatch->load(std::memory_order_relaxed)) {
+                return;
+            }
+            const QString chunk = visibleReasoningTextForLanguage(
+                requestedReasoningLanguage,
+                fromStringView(text));
+            if (chunk.trimmed().isEmpty()) {
+                return;
+            }
+            self->enqueueAssistantReasoningDeltaFromWorker(runId, chunk);
         };
-        options.callbacks.on_reasoning_done = [self, sawReasoningDelta, runId](std::string_view text) {
+        options.callbacks.on_reasoning_done =
+            [self, sawReasoningDelta, suppressReasoningForLanguageMismatch, requestedReasoningLanguage, runId](
+                std::string_view text) {
             if (!self || text.empty() || sawReasoningDelta->load(std::memory_order_relaxed)) {
                 return;
             }
-            const QString summary = fromStringView(text);
-            QMetaObject::invokeMethod(self.data(), [self, summary, runId] {
-                if (self && self->activeRunId_ == runId) {
-                    self->noteRunActivity(RunWaitPhase::Model);
-                    self->queueAssistantReasoningDelta(summary);
-                    self->recordActiveAssistantActivity(
-                        QStringLiteral("reasoning"),
-                        AgentController::tr("Reasoning summary received"),
-                        AgentController::tr("The visible reasoning summary is complete."),
-                        QStringLiteral("done"));
-                    self->setStatus(AgentController::tr("Model reasoning summary received."));
-                }
-            }, Qt::QueuedConnection);
+            if (suppressReasoningForLanguageMismatch->load(std::memory_order_relaxed)) {
+                return;
+            }
+            const QString summary = visibleReasoningTextForLanguage(
+                requestedReasoningLanguage,
+                fromStringView(text));
+            if (summary.trimmed().isEmpty()) {
+                return;
+            }
+            self->enqueueAssistantReasoningDeltaFromWorker(runId, summary);
         };
         options.callbacks.on_done = [self, runId](const wuwe::llm_response& response) {
             if (!self) {
@@ -5486,8 +5658,10 @@ void AgentController::ask(const QString& question)
         std::atomic<bool> answerStarted { false };
     };
     auto progress = std::make_shared<RunProgress>();
+    auto suppressReasoningForLanguageMismatch = std::make_shared<std::atomic<bool>>(false);
 
-    auto onEvent = [self, progress, runId](const reasoning::reasoning_event& event) {
+    auto onEvent = [self, progress, suppressReasoningForLanguageMismatch, runId](
+                       const reasoning::reasoning_event& event) {
         if (!self) {
             return;
         }
@@ -5504,6 +5678,11 @@ void AgentController::ask(const QString& question)
         }
         if (event.type == reasoning::reasoning_event_type::reasoning_delta) {
             progress->answerStarted.store(false, std::memory_order_relaxed);
+        }
+        if ((event.type == reasoning::reasoning_event_type::reasoning_delta
+                || event.type == reasoning::reasoning_event_type::reasoning_completed)
+            && reasoningLanguageMismatch(event.metadata)) {
+            suppressReasoningForLanguageMismatch->store(true, std::memory_order_relaxed);
         }
 
         const int modelCallCount = std::max(
@@ -5529,27 +5708,15 @@ void AgentController::ask(const QString& question)
         case reasoning::reasoning_event_type::tool_started:
             phase = RunWaitPhase::Tool;
             break;
+        case reasoning::reasoning_event_type::tool_completed:
+            phase = RunWaitPhase::Model;
+            break;
         default:
             phase = RunWaitPhase::Other;
             break;
         }
         if (!status.isEmpty() || !activity.isEmpty()) {
-            QMetaObject::invokeMethod(self.data(), [self, status, activity, phase, runId] {
-                if (!self || self->activeRunId_ != runId) {
-                    return;
-                }
-                self->noteRunActivity(phase);
-                if (!activity.isEmpty()) {
-                    self->recordActiveAssistantActivity(
-                        activity.value(QStringLiteral("type")).toString(),
-                        activity.value(QStringLiteral("title")).toString(),
-                        activity.value(QStringLiteral("detail")).toString(),
-                        activity.value(QStringLiteral("state")).toString());
-                }
-                if (!status.isEmpty()) {
-                    self->setStatus(status);
-                }
-            }, Qt::QueuedConnection);
+            self->enqueueRunUiUpdateFromWorker(runId, status, activity, phase);
         }
     };
 
@@ -5592,10 +5759,11 @@ void AgentController::ask(const QString& question)
     }
 
     reasoning::reasoning_request request;
-    request.input = toStdString(conversationInputForReasoning(messages_, taskProfile));
+    request.input = toStdString(conversationInputForReasoning(messages_, taskProfile, trimmed));
     request.system_prompt = toStdString(systemPrompt);
     request.model = toStdString(settings.model);
     request.temperature = 0.2;
+    request.language = languagePreferences;
     request.policy = rearkReasoningPolicy(request.input, taskProfile);
     request.metadata.emplace("host", "ReArk");
     request.metadata.emplace("task_mode", toStdString(agentTaskModeName(taskProfile.mode)));
@@ -5615,55 +5783,42 @@ void AgentController::ask(const QString& question)
             return;
         }
         const QString chunk = fromStringView(delta);
-        QMetaObject::invokeMethod(self.data(), [self, chunk, runId] {
-            if (self && self->activeRunId_ == runId) {
-                self->noteRunActivity(RunWaitPhase::Model);
-                self->queueAssistantDelta(chunk);
-                self->recordActiveAssistantActivity(
-                    QStringLiteral("answer"),
-                    AgentController::tr("Writing answer"),
-                    AgentController::tr("Preparing the final response."),
-                    QStringLiteral("active"));
-                self->setStatus(AgentController::tr("Writing the answer..."));
-            }
-        }, Qt::QueuedConnection);
+        self->enqueueAssistantDeltaFromWorker(runId, chunk);
     };
-    options.callbacks.on_reasoning_delta = [self, sawReasoningDelta, runId](std::string_view delta) {
+    options.callbacks.on_reasoning_delta =
+        [self, sawReasoningDelta, suppressReasoningForLanguageMismatch, requestedReasoningLanguage, runId](
+            std::string_view delta) {
         if (!self || delta.empty()) {
             return;
         }
         sawReasoningDelta->store(true, std::memory_order_relaxed);
-        const QString chunk = fromStringView(delta);
-        QMetaObject::invokeMethod(self.data(), [self, chunk, runId] {
-            if (self && self->activeRunId_ == runId) {
-                self->noteRunActivity(RunWaitPhase::Model);
-                self->queueAssistantReasoningDelta(chunk);
-                self->recordActiveAssistantActivity(
-                    QStringLiteral("reasoning"),
-                    AgentController::tr("Reading reasoning summary"),
-                    AgentController::tr("The provider is streaming a visible reasoning summary."),
-                    QStringLiteral("active"));
-                self->setStatus(AgentController::tr("Receiving model reasoning summary..."));
-            }
-        }, Qt::QueuedConnection);
+        if (suppressReasoningForLanguageMismatch->load(std::memory_order_relaxed)) {
+            return;
+        }
+        const QString chunk = visibleReasoningTextForLanguage(
+            requestedReasoningLanguage,
+            fromStringView(delta));
+        if (chunk.trimmed().isEmpty()) {
+            return;
+        }
+        self->enqueueAssistantReasoningDeltaFromWorker(runId, chunk);
     };
-    options.callbacks.on_reasoning_done = [self, sawReasoningDelta, runId](std::string_view summaryText) {
+    options.callbacks.on_reasoning_done =
+        [self, sawReasoningDelta, suppressReasoningForLanguageMismatch, requestedReasoningLanguage, runId](
+            std::string_view summaryText) {
         if (!self || summaryText.empty() || sawReasoningDelta->load(std::memory_order_relaxed)) {
             return;
         }
-        const QString summary = fromStringView(summaryText);
-        QMetaObject::invokeMethod(self.data(), [self, summary, runId] {
-            if (self && self->activeRunId_ == runId) {
-                self->noteRunActivity(RunWaitPhase::Model);
-                self->queueAssistantReasoningDelta(summary);
-                self->recordActiveAssistantActivity(
-                    QStringLiteral("reasoning"),
-                    AgentController::tr("Reasoning summary received"),
-                    AgentController::tr("The visible reasoning summary is complete."),
-                    QStringLiteral("done"));
-                self->setStatus(AgentController::tr("Model reasoning summary received."));
-            }
-        }, Qt::QueuedConnection);
+        if (suppressReasoningForLanguageMismatch->load(std::memory_order_relaxed)) {
+            return;
+        }
+        const QString summary = visibleReasoningTextForLanguage(
+            requestedReasoningLanguage,
+            fromStringView(summaryText));
+        if (summary.trimmed().isEmpty()) {
+            return;
+        }
+        self->enqueueAssistantReasoningDeltaFromWorker(runId, summary);
     };
     options.callbacks.on_done = [self, runId](const reasoning::reasoning_result& result) {
         if (!self) {
@@ -5754,6 +5909,7 @@ void AgentController::ask(const QString& question)
     wuwe::llm_request request;
     request.model = toStdString(settings.model);
     request.temperature = 0.2;
+    request.language = languagePreferences;
     request.messages.push_back({
         .role = "system",
         .content = toStdString(systemPrompt)
@@ -5775,54 +5931,56 @@ void AgentController::ask(const QString& question)
     wuwe::llm_agent_run_options options;
     options.stop_token = runtime_->stopSource.get_token();
     auto sawReasoningDelta = std::make_shared<std::atomic<bool>>(false);
+    auto suppressReasoningForLanguageMismatch = std::make_shared<std::atomic<bool>>(false);
+    options.callbacks.on_stream_event =
+        [suppressReasoningForLanguageMismatch](const wuwe::llm_stream_event& event) {
+            if ((event.type == wuwe::llm_stream_event_type::reasoning_delta
+                    || event.type == wuwe::llm_stream_event_type::reasoning_done)
+                && reasoningLanguageMismatch(event.reasoning_metadata)) {
+                suppressReasoningForLanguageMismatch->store(true, std::memory_order_relaxed);
+            }
+        };
     options.callbacks.on_delta = [self, runId](std::string_view text) {
         if (!self) {
             return;
         }
         const QString chunk = fromStringView(text);
-        QMetaObject::invokeMethod(self.data(), [self, chunk, runId] {
-            if (self && self->activeRunId_ == runId) {
-                self->noteRunActivity(RunWaitPhase::Model);
-                self->queueAssistantDelta(chunk);
-            }
-        }, Qt::QueuedConnection);
+        self->enqueueAssistantDeltaFromWorker(runId, chunk);
     };
-    options.callbacks.on_reasoning_delta = [self, sawReasoningDelta, runId](std::string_view text) {
+    options.callbacks.on_reasoning_delta =
+        [self, sawReasoningDelta, suppressReasoningForLanguageMismatch, requestedReasoningLanguage, runId](
+            std::string_view text) {
         if (!self || text.empty()) {
             return;
         }
         sawReasoningDelta->store(true, std::memory_order_relaxed);
-        const QString chunk = fromStringView(text);
-        QMetaObject::invokeMethod(self.data(), [self, chunk, runId] {
-            if (self && self->activeRunId_ == runId) {
-                self->noteRunActivity(RunWaitPhase::Model);
-                self->queueAssistantReasoningDelta(chunk);
-                self->recordActiveAssistantActivity(
-                    QStringLiteral("reasoning"),
-                    AgentController::tr("Reading reasoning summary"),
-                    AgentController::tr("The provider is streaming a visible reasoning summary."),
-                    QStringLiteral("active"));
-                self->setStatus(AgentController::tr("Receiving model reasoning summary..."));
-            }
-        }, Qt::QueuedConnection);
+        if (suppressReasoningForLanguageMismatch->load(std::memory_order_relaxed)) {
+            return;
+        }
+        const QString chunk = visibleReasoningTextForLanguage(
+            requestedReasoningLanguage,
+            fromStringView(text));
+        if (chunk.trimmed().isEmpty()) {
+            return;
+        }
+        self->enqueueAssistantReasoningDeltaFromWorker(runId, chunk);
     };
-    options.callbacks.on_reasoning_done = [self, sawReasoningDelta, runId](std::string_view text) {
+    options.callbacks.on_reasoning_done =
+        [self, sawReasoningDelta, suppressReasoningForLanguageMismatch, requestedReasoningLanguage, runId](
+            std::string_view text) {
         if (!self || text.empty() || sawReasoningDelta->load(std::memory_order_relaxed)) {
             return;
         }
-        const QString summary = fromStringView(text);
-        QMetaObject::invokeMethod(self.data(), [self, summary, runId] {
-            if (self && self->activeRunId_ == runId) {
-                self->noteRunActivity(RunWaitPhase::Model);
-                self->queueAssistantReasoningDelta(summary);
-                self->recordActiveAssistantActivity(
-                    QStringLiteral("reasoning"),
-                    AgentController::tr("Reasoning summary received"),
-                    AgentController::tr("The visible reasoning summary is complete."),
-                    QStringLiteral("done"));
-                self->setStatus(AgentController::tr("Model reasoning summary received."));
-            }
-        }, Qt::QueuedConnection);
+        if (suppressReasoningForLanguageMismatch->load(std::memory_order_relaxed)) {
+            return;
+        }
+        const QString summary = visibleReasoningTextForLanguage(
+            requestedReasoningLanguage,
+            fromStringView(text));
+        if (summary.trimmed().isEmpty()) {
+            return;
+        }
+        self->enqueueAssistantReasoningDeltaFromWorker(runId, summary);
     };
     options.callbacks.on_tool_start = [self, runId](const wuwe::llm_tool_call& call) {
         if (!self) {
@@ -5847,7 +6005,7 @@ void AgentController::ask(const QString& question)
             const bool analysisScript = call.name == "run_analysis_script";
             QMetaObject::invokeMethod(self.data(), [self, ok, analysisScript, runId] {
                 if (self && self->activeRunId_ == runId) {
-                    self->noteRunActivity(RunWaitPhase::Other);
+                    self->noteRunActivity(RunWaitPhase::Model);
                     if (analysisScript) {
                         self->setStatus(ok
                             ? AgentController::tr("Analysis script completed.")
@@ -6087,6 +6245,21 @@ void AgentController::clearMessages()
     if (assistantDeltaTimer_ != nullptr) {
         assistantDeltaTimer_->stop();
     }
+    {
+        std::lock_guard lock(workerAssistantDeltaMutex_);
+        workerAssistantDelta_.clear();
+        workerAssistantReasoningDelta_.clear();
+        workerAssistantDeltaFlushQueued_ = false;
+        workerAssistantDeltaRunId_ = activeRunId_;
+    }
+    {
+        std::lock_guard lock(workerRunUiMutex_);
+        workerRunStatus_.clear();
+        workerRunActivity_.clear();
+        workerRunPhase_ = RunWaitPhase::Other;
+        workerRunUiFlushQueued_ = false;
+        workerRunUiRunId_ = activeRunId_;
+    }
     pendingAssistantDelta_.clear();
     pendingAssistantReasoningDelta_.clear();
     messages_.clear();
@@ -6125,7 +6298,7 @@ void AgentController::queueAssistantDelta(const QString& text)
     }
 
     pendingAssistantDelta_ += text;
-    if (pendingAssistantDelta_.size() >= 512) {
+    if (pendingAssistantDelta_.size() >= kAssistantDeltaImmediateFlushChars) {
         flushPendingAssistantDelta();
         return;
     }
@@ -6140,8 +6313,19 @@ void AgentController::queueAssistantReasoningDelta(const QString& text)
         return;
     }
 
+    const bool firstVisibleReasoning =
+        pendingAssistantReasoningDelta_.isEmpty()
+        && activeAssistantMessage_ >= 0
+        && activeAssistantMessage_ < messages_.size()
+        && messages_.at(activeAssistantMessage_).toMap()
+            .value(QStringLiteral("reasoningText")).toString().trimmed().isEmpty();
+    if (firstVisibleReasoning) {
+        appendReasoningToActiveAssistantMessage(text);
+        return;
+    }
+
     pendingAssistantReasoningDelta_ += text;
-    if (pendingAssistantReasoningDelta_.size() >= 512) {
+    if (pendingAssistantReasoningDelta_.size() >= kAssistantDeltaImmediateFlushChars) {
         flushPendingAssistantDelta();
         return;
     }
@@ -6152,16 +6336,37 @@ void AgentController::queueAssistantReasoningDelta(const QString& text)
 
 void AgentController::flushPendingAssistantDelta()
 {
-    if (pendingAssistantDelta_.isEmpty() && pendingAssistantReasoningDelta_.isEmpty()) {
+    drainWorkerAssistantDeltas();
+    const std::optional<RunUiUpdate> runUiUpdate = drainWorkerRunUiUpdate();
+    if (pendingAssistantDelta_.isEmpty()
+        && pendingAssistantReasoningDelta_.isEmpty()
+        && !runUiUpdate.has_value()) {
         return;
     }
 
+    if (runUiUpdate.has_value()) {
+        noteRunActivity(runUiUpdate->phase);
+        if (!runUiUpdate->activity.isEmpty()) {
+            recordActiveAssistantActivity(
+                runUiUpdate->activity.value(QStringLiteral("type")).toString(),
+                runUiUpdate->activity.value(QStringLiteral("title")).toString(),
+                runUiUpdate->activity.value(QStringLiteral("detail")).toString(),
+                runUiUpdate->activity.value(QStringLiteral("state")).toString());
+        }
+        if (!runUiUpdate->status.isEmpty()) {
+            setStatus(runUiUpdate->status);
+        }
+    }
+    if (!pendingAssistantDelta_.isEmpty() || !pendingAssistantReasoningDelta_.isEmpty()) {
+        noteRunActivity(RunWaitPhase::Model);
+    }
     if (!pendingAssistantReasoningDelta_.isEmpty()) {
         QString reasoningDelta;
         std::swap(reasoningDelta, pendingAssistantReasoningDelta_);
         appendReasoningToActiveAssistantMessage(reasoningDelta);
     }
     if (!pendingAssistantDelta_.isEmpty()) {
+        setStatus(tr("Writing the answer..."));
         QString delta;
         std::swap(delta, pendingAssistantDelta_);
         appendToActiveAssistantMessage(delta);
@@ -6179,11 +6384,19 @@ void AgentController::appendToActiveAssistantMessage(const QString& text)
     }
 
     QVariantMap message = messages_.at(activeAssistantMessage_).toMap();
+    const bool answerStarting = message.value(QStringLiteral("text")).toString().trimmed().isEmpty()
+        && !message.value(QStringLiteral("reasoningText")).toString().trimmed().isEmpty();
+    if (answerStarting) {
+        message.insert(QStringLiteral("reasoningText"), QString());
+    }
     message.insert(
         QStringLiteral("text"),
         message.value(QStringLiteral("text")).toString() + text);
     messages_[activeAssistantMessage_] = message;
     if (messageModel_ != nullptr) {
+        if (answerStarting) {
+            messageModel_->clearReasoningText(activeAssistantMessage_);
+        }
         messageModel_->appendText(activeAssistantMessage_, text);
     }
 }
@@ -6204,12 +6417,14 @@ void AgentController::appendReasoningToActiveAssistantMessage(const QString& tex
     if (message.value(QStringLiteral("role")).toString() != QStringLiteral("assistant")) {
         return;
     }
+    const QString visibleReasoning = boundedVisibleReasoningText(
+        message.value(QStringLiteral("reasoningText")).toString() + text);
     message.insert(
         QStringLiteral("reasoningText"),
-        message.value(QStringLiteral("reasoningText")).toString() + text);
+        visibleReasoning);
     messages_[activeAssistantMessage_] = message;
     if (messageModel_ != nullptr) {
-        messageModel_->appendReasoningText(activeAssistantMessage_, text);
+        messageModel_->setReasoningText(activeAssistantMessage_, visibleReasoning);
     }
 }
 
@@ -6461,6 +6676,192 @@ void AgentController::appendTranscript(const QString& text)
     emit transcriptChanged();
 }
 
+void AgentController::enqueueAssistantDeltaFromWorker(quint64 runId, const QString& text)
+{
+    if (text.isEmpty()) {
+        return;
+    }
+
+    bool scheduleFlush = false;
+    {
+        std::lock_guard lock(workerAssistantDeltaMutex_);
+        if (workerAssistantDeltaRunId_ != 0 && runId < workerAssistantDeltaRunId_) {
+            return;
+        }
+        if (workerAssistantDeltaRunId_ != runId) {
+            workerAssistantDeltaRunId_ = runId;
+            workerAssistantDelta_.clear();
+            workerAssistantReasoningDelta_.clear();
+        }
+        workerAssistantDelta_ += text;
+        if (!workerAssistantDeltaFlushQueued_) {
+            workerAssistantDeltaFlushQueued_ = true;
+            scheduleFlush = true;
+        }
+    }
+
+    if (scheduleFlush) {
+        QMetaObject::invokeMethod(this, [this, runId] {
+            if (activeRunId_ != runId) {
+                std::lock_guard lock(workerAssistantDeltaMutex_);
+                if (workerAssistantDeltaRunId_ == runId) {
+                    workerAssistantDelta_.clear();
+                    workerAssistantReasoningDelta_.clear();
+                    workerAssistantDeltaFlushQueued_ = false;
+                }
+                return;
+            }
+            if (assistantDeltaTimer_ != nullptr && !assistantDeltaTimer_->isActive()) {
+                assistantDeltaTimer_->start();
+            }
+        }, Qt::QueuedConnection);
+    }
+}
+
+void AgentController::enqueueAssistantReasoningDeltaFromWorker(quint64 runId, const QString& text)
+{
+    if (text.isEmpty()) {
+        return;
+    }
+
+    bool scheduleFlush = false;
+    {
+        std::lock_guard lock(workerAssistantDeltaMutex_);
+        if (workerAssistantDeltaRunId_ != 0 && runId < workerAssistantDeltaRunId_) {
+            return;
+        }
+        if (workerAssistantDeltaRunId_ != runId) {
+            workerAssistantDeltaRunId_ = runId;
+            workerAssistantDelta_.clear();
+            workerAssistantReasoningDelta_.clear();
+        }
+        workerAssistantReasoningDelta_ += text;
+        if (!workerAssistantDeltaFlushQueued_) {
+            workerAssistantDeltaFlushQueued_ = true;
+            scheduleFlush = true;
+        }
+    }
+
+    if (scheduleFlush) {
+        QMetaObject::invokeMethod(this, [this, runId] {
+            if (activeRunId_ != runId) {
+                std::lock_guard lock(workerAssistantDeltaMutex_);
+                if (workerAssistantDeltaRunId_ == runId) {
+                    workerAssistantDelta_.clear();
+                    workerAssistantReasoningDelta_.clear();
+                    workerAssistantDeltaFlushQueued_ = false;
+                }
+                return;
+            }
+            if (assistantDeltaTimer_ != nullptr && !assistantDeltaTimer_->isActive()) {
+                assistantDeltaTimer_->start();
+            }
+        }, Qt::QueuedConnection);
+    }
+}
+
+void AgentController::enqueueRunUiUpdateFromWorker(
+    quint64 runId,
+    const QString& status,
+    const QVariantMap& activity,
+    RunWaitPhase phase)
+{
+    if (status.isEmpty() && activity.isEmpty()) {
+        return;
+    }
+
+    bool scheduleFlush = false;
+    {
+        std::lock_guard lock(workerRunUiMutex_);
+        if (workerRunUiRunId_ != 0 && runId < workerRunUiRunId_) {
+            return;
+        }
+        if (workerRunUiRunId_ != runId) {
+            workerRunUiRunId_ = runId;
+            workerRunStatus_.clear();
+            workerRunActivity_.clear();
+            workerRunPhase_ = RunWaitPhase::Other;
+        }
+        if (!status.isEmpty()) {
+            workerRunStatus_ = status;
+        }
+        if (!activity.isEmpty()) {
+            workerRunActivity_ = activity;
+        }
+        workerRunPhase_ = phase;
+        if (!workerRunUiFlushQueued_) {
+            workerRunUiFlushQueued_ = true;
+            scheduleFlush = true;
+        }
+    }
+
+    if (scheduleFlush) {
+        QMetaObject::invokeMethod(this, [this, runId] {
+            if (activeRunId_ != runId) {
+                std::lock_guard lock(workerRunUiMutex_);
+                if (workerRunUiRunId_ == runId) {
+                    workerRunStatus_.clear();
+                    workerRunActivity_.clear();
+                    workerRunPhase_ = RunWaitPhase::Other;
+                    workerRunUiFlushQueued_ = false;
+                }
+                return;
+            }
+            if (assistantDeltaTimer_ != nullptr && !assistantDeltaTimer_->isActive()) {
+                assistantDeltaTimer_->start();
+            }
+        }, Qt::QueuedConnection);
+    }
+}
+
+void AgentController::drainWorkerAssistantDeltas()
+{
+    QString assistantDelta;
+    QString reasoningDelta;
+    {
+        std::lock_guard lock(workerAssistantDeltaMutex_);
+        if (workerAssistantDeltaRunId_ != activeRunId_) {
+            workerAssistantDelta_.clear();
+            workerAssistantReasoningDelta_.clear();
+            workerAssistantDeltaFlushQueued_ = false;
+            workerAssistantDeltaRunId_ = activeRunId_;
+            return;
+        }
+        std::swap(assistantDelta, workerAssistantDelta_);
+        std::swap(reasoningDelta, workerAssistantReasoningDelta_);
+        workerAssistantDeltaFlushQueued_ = false;
+    }
+
+    pendingAssistantDelta_ += assistantDelta;
+    pendingAssistantReasoningDelta_ += reasoningDelta;
+}
+
+std::optional<AgentController::RunUiUpdate> AgentController::drainWorkerRunUiUpdate()
+{
+    RunUiUpdate update;
+    {
+        std::lock_guard lock(workerRunUiMutex_);
+        if (workerRunUiRunId_ != activeRunId_) {
+            workerRunStatus_.clear();
+            workerRunActivity_.clear();
+            workerRunPhase_ = RunWaitPhase::Other;
+            workerRunUiFlushQueued_ = false;
+            workerRunUiRunId_ = activeRunId_;
+            return std::nullopt;
+        }
+        if (workerRunStatus_.isEmpty() && workerRunActivity_.isEmpty()) {
+            workerRunUiFlushQueued_ = false;
+            return std::nullopt;
+        }
+        update.status = std::exchange(workerRunStatus_, {});
+        update.activity = std::exchange(workerRunActivity_, {});
+        update.phase = std::exchange(workerRunPhase_, RunWaitPhase::Other);
+        workerRunUiFlushQueued_ = false;
+    }
+
+    return update;
+}
+
 void AgentController::setErrorMessage(const QString& errorMessage)
 {
     if (errorMessage_ == errorMessage) {
@@ -6513,11 +6914,15 @@ void AgentController::checkRunWatchdog()
     }
 
     const qint64 idleMs = QDateTime::currentMSecsSinceEpoch() - lastRunActivityAtMs_;
-    if (runWaitPhase_ != RunWaitPhase::Model) {
+    if (runWaitPhase_ != RunWaitPhase::Model && runWaitPhase_ != RunWaitPhase::Tool) {
         return;
     }
 
-    if (idleMs >= kAgentModelIdleStopMs) {
+    const bool waitingForTool = runWaitPhase_ == RunWaitPhase::Tool;
+    const qint64 stopMs = waitingForTool ? kAgentToolIdleStopMs : kAgentModelIdleStopMs;
+    const qint64 warningMs = waitingForTool ? kAgentToolIdleWarningMs : kAgentModelIdleWarningMs;
+
+    if (idleMs >= stopMs) {
 #ifdef REARK_HAS_WUWE
         runtime_->stopSource.request_stop();
 #ifdef REARK_HAS_WUWE_REASONING
@@ -6532,19 +6937,28 @@ void AgentController::checkRunWatchdog()
         ++activeRunId_;
         stopRunWatchdog();
         setErrorMessage({});
-        finishInterruptedAssistantMessage(
-            tr("Model provider did not return another event for %1 seconds, so ReArk stopped this run. Partial output was preserved; ask Agent to continue from here.")
+        finishInterruptedAssistantMessage(waitingForTool
+            ? tr("The current tool call did not finish for %1 seconds, so ReArk stopped this run. Partial output was preserved; ask Agent to continue from here.")
+                .arg(idleMs / 1000)
+            : tr("Model provider did not return another event for %1 seconds, so ReArk stopped this run. Partial output was preserved; ask Agent to continue from here.")
                 .arg(idleMs / 1000));
         setRunning(false);
-        setStatus(tr("Analysis stopped after waiting %1 seconds for the model provider.")
-            .arg(idleMs / 1000));
+        setStatus(waitingForTool
+            ? tr("Analysis stopped after waiting %1 seconds for the current tool call.")
+                .arg(idleMs / 1000)
+            : tr("Analysis stopped after waiting %1 seconds for the model provider.")
+                .arg(idleMs / 1000));
         return;
     }
 
-    if (idleMs >= kAgentModelIdleWarningMs) {
-        setStatus(tr("Waiting for model response (%1s, auto-stop at %2s)...")
-            .arg(idleMs / 1000)
-            .arg(kAgentModelIdleStopMs / 1000));
+    if (idleMs >= warningMs) {
+        setStatus(waitingForTool
+            ? tr("Waiting for tool call to finish (%1s, auto-stop at %2s)...")
+                .arg(idleMs / 1000)
+                .arg(stopMs / 1000)
+            : tr("Waiting for model response (%1s, auto-stop at %2s)...")
+                .arg(idleMs / 1000)
+                .arg(stopMs / 1000));
     }
 }
 
@@ -6555,40 +6969,60 @@ void AgentController::resetRun()
         assistantDeltaTimer_->stop();
     }
     pendingAssistantDelta_.clear();
+    pendingAssistantReasoningDelta_.clear();
+    {
+        std::lock_guard lock(workerAssistantDeltaMutex_);
+        workerAssistantDelta_.clear();
+        workerAssistantReasoningDelta_.clear();
+        workerAssistantDeltaFlushQueued_ = false;
+        workerAssistantDeltaRunId_ = activeRunId_;
+    }
+    {
+        std::lock_guard lock(workerRunUiMutex_);
+        workerRunStatus_.clear();
+        workerRunActivity_.clear();
+        workerRunPhase_ = RunWaitPhase::Other;
+        workerRunUiFlushQueued_ = false;
+        workerRunUiRunId_ = activeRunId_;
+    }
 
 #ifdef REARK_HAS_WUWE
+    auto oldRuntime = std::move(runtime_);
+    runtime_ = std::make_unique<Runtime>();
+    runtime_->scratchpad = oldRuntime->scratchpad != nullptr
+        ? oldRuntime->scratchpad
+        : std::make_shared<AgentScratchpad>();
+    runtime_->pythonSession = oldRuntime->pythonSession != nullptr
+        ? oldRuntime->pythonSession
+        : std::make_shared<PythonSessionState>();
+
+    auto stopRuntime = [](Runtime& runtime) {
+        runtime.stopSource.request_stop();
 #ifdef REARK_HAS_WUWE_REASONING
-    if (runtime_->reasoningRun.has_value()) {
-        runtime_->stopSource.request_stop();
-        if (runtime_->reasoningRun->valid()) {
-            runtime_->reasoningRun->request_stop();
-            runtime_->reasoningRun->wait();
+        if (runtime.reasoningRun.has_value() && runtime.reasoningRun->valid()) {
+            runtime.reasoningRun->request_stop();
         }
-        runtime_->reasoningRun.reset();
-    }
-    runtime_->reasoningRunner.reset();
 #endif
-    if (runtime_->run.has_value()) {
-        runtime_->stopSource.request_stop();
-        if (runtime_->run->valid()) {
-            runtime_->run->request_stop();
+        if (runtime.run.has_value() && runtime.run->valid()) {
+            runtime.run->request_stop();
         }
-        runtime_->run.reset();
-    }
-    runtime_->runner.reset();
-    runtime_->provider.reset();
-    runtime_->knowledgeProvider.reset();
-#ifdef REARK_HAS_WUWE_EXECUTION
-    runtime_->guardedExecutionProvider.reset();
-    runtime_->executionProvider.reset();
-    runtime_->executionRuntime.reset();
-    runtime_->executionWorkdir.reset();
-    runtime_->executionPromptNote.clear();
-    runtime_->executionAuditSink.clear();
+    };
+
+    const bool cleanupMayJoin =
+        oldRuntime->run.has_value()
+#ifdef REARK_HAS_WUWE_REASONING
+        || oldRuntime->reasoningRun.has_value()
 #endif
-    runtime_->rearkProvider.reset();
-    runtime_->client.reset();
-    runtime_->stopSource = std::stop_source {};
+        ;
+    stopRuntime(*oldRuntime);
+    if (cleanupMayJoin) {
+        std::thread([oldRuntime = std::move(oldRuntime), stopRuntime]() mutable {
+            stopRuntime(*oldRuntime);
+            oldRuntime.reset();
+        }).detach();
+        return;
+    }
+    oldRuntime.reset();
 #endif
 }
 

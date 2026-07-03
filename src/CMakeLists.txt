@@ -199,17 +199,6 @@ if(wuwe_FOUND)
     if(REARK_WUWE_INCLUDE_DIRS)
         target_include_directories(${PROJECT_NAME} BEFORE PRIVATE ${REARK_WUWE_INCLUDE_DIRS})
     endif()
-    foreach(_reark_wuwe_header_prefix
-        "${WUWE_INSTALL_PREFIX}/.."
-        "${WUWE_INSTALL_PREFIX}")
-        get_filename_component(_reark_wuwe_header_prefix_abs
-            "${_reark_wuwe_header_prefix}" ABSOLUTE)
-        if(EXISTS "${_reark_wuwe_header_prefix_abs}/include/wuwe/agent/llm/llm_provider_factory.h")
-            target_include_directories(${PROJECT_NAME} BEFORE PRIVATE
-                "${_reark_wuwe_header_prefix_abs}/include")
-            break()
-        endif()
-    endforeach()
     get_target_property(REARK_WUWE_IMPORTED_LOCATION_DEBUG wuwe::wuwe IMPORTED_LOCATION_DEBUG)
     get_target_property(REARK_WUWE_IMPORTED_LOCATION_RELEASE wuwe::wuwe IMPORTED_LOCATION_RELEASE)
     if(NOT REARK_WUWE_IMPORTED_LOCATION_DEBUG

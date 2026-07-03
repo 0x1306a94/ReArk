@@ -17,10 +17,11 @@ Item {
 
     readonly property string displayText: markdown.length > 0 ? markdown : emptyText
     readonly property bool hasRenderer: typeof markdownRenderer !== "undefined"
-    readonly property bool richReady: markdownEnabled && renderedBlocks.length > 0
-    readonly property bool waitingForRichRender: markdownEnabled && hasRenderer && !richReady
+    readonly property bool effectiveMarkdownEnabled: markdownEnabled
+    readonly property bool richReady: effectiveMarkdownEnabled && renderedBlocks.length > 0
+    readonly property bool waitingForRichRender: effectiveMarkdownEnabled && hasRenderer && !richReady
     readonly property bool rawMarkdownSuppressed: suppressRawMarkdownFallback
-                                                 && markdownEnabled
+                                                 && effectiveMarkdownEnabled
                                                  && hasRenderer
                                                  && markdown.length > 0
                                                  && !richReady
@@ -35,19 +36,19 @@ Item {
                                           : (rawMarkdownSuppressed ? 1 : plainBody.implicitHeight))
 
     function renderNow() {
-        if (markdownEnabled && hasRenderer) {
+        if (effectiveMarkdownEnabled && hasRenderer) {
             if (renderInFlight) {
                 renderDirty = true
                 return
             }
             renderInFlight = true
             renderDirty = false
-            renderRequestId = markdownRenderer.renderBlocksAsync(displayText, darkTheme)
+            renderRequestId = markdownRenderer.renderBlocksAsync(displayText, darkTheme, !streaming)
         }
     }
 
     function scheduleRender() {
-        if (markdownEnabled && hasRenderer) {
+        if (effectiveMarkdownEnabled && hasRenderer) {
             renderTimer.restart()
         } else {
             renderTimer.stop()
@@ -61,7 +62,7 @@ Item {
     onDisplayTextChanged: scheduleRender()
     onStreamingChanged: scheduleRender()
     onMarkdownEnabledChanged: {
-        if (markdownEnabled) {
+        if (effectiveMarkdownEnabled) {
             renderTimer.stop()
             renderNow()
         } else {
@@ -69,7 +70,7 @@ Item {
         }
     }
     onDarkThemeChanged: scheduleRender()
-    Component.onCompleted: renderNow()
+    Component.onCompleted: scheduleRender()
 
     Timer {
         id: renderTimer
@@ -83,7 +84,7 @@ Item {
         target: root.hasRenderer ? markdownRenderer : null
 
         function onBlocksReady(requestId, blocks) {
-            if (requestId === root.renderRequestId && root.markdownEnabled) {
+            if (requestId === root.renderRequestId && root.effectiveMarkdownEnabled) {
                 root.renderedBlocks = blocks
                 root.renderInFlight = false
                 if (root.renderDirty) {

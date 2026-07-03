@@ -211,26 +211,31 @@ QVariantList MarkdownRenderer::renderBlocks(const QString &markdown,
 }
 
 int MarkdownRenderer::renderBlocksAsync(const QString &markdown,
-                                        bool darkTheme) {
+                                        bool darkTheme,
+                                        bool cacheResult) {
   const int requestId = ++nextRequestId_;
   const QString key = markdownCacheKey(markdown, darkTheme);
-  const auto cached = blockCache_.constFind(key);
-  if (cached != blockCache_.constEnd()) {
-    const QVariantList blocks = cached.value();
-    QMetaObject::invokeMethod(
-        this,
-        [this, requestId, blocks] { emit blocksReady(requestId, blocks); },
-        Qt::QueuedConnection);
-    return requestId;
+  if (cacheResult) {
+    const auto cached = blockCache_.constFind(key);
+    if (cached != blockCache_.constEnd()) {
+      const QVariantList blocks = cached.value();
+      QMetaObject::invokeMethod(
+          this,
+          [this, requestId, blocks] { emit blocksReady(requestId, blocks); },
+          Qt::QueuedConnection);
+      return requestId;
+    }
   }
 
   auto *watcher = new QFutureWatcher<QVariantList>(this);
   connect(watcher, &QFutureWatcher<QVariantList>::finished, this,
-          [this, watcher, requestId, key] {
+          [this, watcher, requestId, key, cacheResult] {
             const QVariantList blocks = watcher->result();
-            rememberRenderedBlocks(key, blocks);
-            while (blockCacheOrder_.size() > kMaxCacheEntries) {
-              blockCache_.remove(blockCacheOrder_.takeFirst());
+            if (cacheResult) {
+              rememberRenderedBlocks(key, blocks);
+              while (blockCacheOrder_.size() > kMaxCacheEntries) {
+                blockCache_.remove(blockCacheOrder_.takeFirst());
+              }
             }
             emit blocksReady(requestId, blocks);
             watcher->deleteLater();

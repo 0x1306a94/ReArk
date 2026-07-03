@@ -130,6 +130,17 @@ void AgentMessageModel::appendReasoningText(int row, const QString& text)
     emit dataChanged(changed, changed, { MessageReasoningTextRole });
 }
 
+void AgentMessageModel::setReasoningText(int row, const QString& text)
+{
+    if (row < 0 || row >= messages_.size() || messages_[row].reasoningText == text) {
+        return;
+    }
+
+    messages_[row].reasoningText = text;
+    const QModelIndex changed = index(row);
+    emit dataChanged(changed, changed, { MessageReasoningTextRole });
+}
+
 void AgentMessageModel::clearReasoningText(int row)
 {
     if (row < 0 || row >= messages_.size() || messages_[row].reasoningText.isEmpty()) {

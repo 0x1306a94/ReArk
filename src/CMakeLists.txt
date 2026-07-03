@@ -64,6 +64,8 @@ qt_add_executable(${PROJECT_NAME}
     controller/AgentKnowledgeController.h
     controller/AgentController.cpp
     controller/AgentController.h
+    controller/AgentRequestRouter.cpp
+    controller/AgentRequestRouter.h
     controller/DeviceRuntimeController.cpp
     controller/DeviceRuntimeController.h
     controller/PythonRuntimeResolver.cpp
@@ -74,6 +76,8 @@ qt_add_executable(${PROJECT_NAME}
     controller/SettingsController.h
     controller/UpdateController.cpp
     controller/UpdateController.h
+    controller/ReleaseNotesLocalizer.cpp
+    controller/ReleaseNotesLocalizer.h
     model/AgentMessageModel.cpp
     model/AgentMessageModel.h
     model/DocumentContent.h
@@ -531,6 +535,53 @@ if(BUILD_TESTING)
     add_test(NAME reark_command_runner_test
         COMMAND reark_command_runner_test)
 
+    qt_add_executable(reark_release_notes_localizer_test
+        tests/ReleaseNotesLocalizerTest.cpp
+        controller/ReleaseNotesLocalizer.cpp
+        controller/ReleaseNotesLocalizer.h
+    )
+    target_include_directories(reark_release_notes_localizer_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_release_notes_localizer_test PRIVATE
+        Qt6::Core
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_release_notes_localizer_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_release_notes_localizer_test>
+                $<TARGET_FILE_DIR:reark_release_notes_localizer_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    add_test(NAME reark_release_notes_localizer_test
+        COMMAND reark_release_notes_localizer_test)
+
+    qt_add_executable(reark_agent_settings_test
+        tests/AgentSettingsTest.cpp
+        controller/AgentSettings.cpp
+        controller/AgentSettings.h
+        controller/ProtectedSettingsSecret.cpp
+        controller/ProtectedSettingsSecret.h
+    )
+    target_include_directories(reark_agent_settings_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_agent_settings_test PRIVATE
+        Qt6::Core
+    )
+    if(WIN32)
+        target_link_libraries(reark_agent_settings_test PRIVATE Crypt32)
+        add_custom_command(TARGET reark_agent_settings_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_agent_settings_test>
+                $<TARGET_FILE_DIR:reark_agent_settings_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    add_test(NAME reark_agent_settings_test
+        COMMAND reark_agent_settings_test)
+
     qt_add_executable(reark_agent_prompt_contract_test
         tests/AgentPromptContractTest.cpp
     )
@@ -554,6 +605,28 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reark_agent_prompt_contract_test
         COMMAND reark_agent_prompt_contract_test)
+
+    qt_add_executable(reark_agent_request_router_test
+        tests/AgentRequestRouterTest.cpp
+        controller/AgentRequestRouter.cpp
+        controller/AgentRequestRouter.h
+    )
+    target_include_directories(reark_agent_request_router_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_agent_request_router_test PRIVATE
+        Qt6::Core
+    )
+    if(WIN32)
+        add_custom_command(TARGET reark_agent_request_router_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_agent_request_router_test>
+                $<TARGET_FILE_DIR:reark_agent_request_router_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+    add_test(NAME reark_agent_request_router_test
+        COMMAND reark_agent_request_router_test)
 
     qt_add_executable(reark_hdc_device_backend_test
         tests/HdcDeviceBackendTest.cpp

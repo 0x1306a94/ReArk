@@ -30,6 +30,7 @@ public:
     [[nodiscard]] static QString validationMessage(const AgentSettings& settings);
     [[nodiscard]] static QString knowledgeValidationMessage(const AgentSettings& settings);
     [[nodiscard]] static QString normalizedProvider(const QString& provider);
+    [[nodiscard]] static QString normalizedBaseUrl(const QString& provider, const QString& baseUrl);
     [[nodiscard]] static QVariantList availableProviders();
     [[nodiscard]] static QVariantMap providerDefaults(const QString& provider);
     [[nodiscard]] static QVariantMap providerSettings(const QString& provider);

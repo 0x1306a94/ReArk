@@ -268,6 +268,8 @@ bool SettingsController::saveAgentSettings(
         .embeddingModel = embeddingModel.trimmed(),
         .embeddingRequireApiKey = embeddingRequireApiKey
     };
+    settings.provider = AgentSettingsStore::normalizedProvider(settings.provider);
+    settings.baseUrl = AgentSettingsStore::normalizedBaseUrl(settings.provider, settings.baseUrl);
 
     const QString validationMessage = AgentSettingsStore::validationMessage(settings);
     if (!validationMessage.isEmpty()) {

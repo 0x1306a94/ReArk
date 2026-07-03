@@ -13,19 +13,26 @@ Item {
     property string emptyText: ""
     property var clipboardController: null
     property bool streaming: false
+    property bool suppressRawMarkdownFallback: false
 
     readonly property string displayText: markdown.length > 0 ? markdown : emptyText
     readonly property bool hasRenderer: typeof markdownRenderer !== "undefined"
     readonly property bool richReady: markdownEnabled && renderedBlocks.length > 0
     readonly property bool waitingForRichRender: markdownEnabled && hasRenderer && !richReady
+    readonly property bool rawMarkdownSuppressed: suppressRawMarkdownFallback
+                                                 && markdownEnabled
+                                                 && hasRenderer
+                                                 && markdown.length > 0
+                                                 && !richReady
 
     property var renderedBlocks: []
     property int renderRequestId: 0
     property bool renderInFlight: false
     property bool renderDirty: false
 
-    implicitWidth: Math.max(1, plainBody.implicitWidth)
-    implicitHeight: Math.max(1, richReady ? blockColumn.implicitHeight : plainBody.implicitHeight)
+    implicitWidth: Math.max(1, richReady ? blockColumn.implicitWidth : plainBody.implicitWidth)
+    implicitHeight: Math.max(1, richReady ? blockColumn.implicitHeight
+                                          : (rawMarkdownSuppressed ? 1 : plainBody.implicitHeight))
 
     function renderNow() {
         if (markdownEnabled && hasRenderer) {
@@ -67,7 +74,7 @@ Item {
     Timer {
         id: renderTimer
 
-        interval: root.streaming ? 180 : 45
+        interval: root.streaming ? 75 : 45
         repeat: false
         onTriggered: root.renderNow()
     }
@@ -91,7 +98,7 @@ Item {
         id: plainBody
 
         width: Math.max(1, root.width)
-        visible: !root.richReady
+        visible: !root.richReady && !root.rawMarkdownSuppressed
         readOnly: true
         selectByMouse: true
         text: root.displayText

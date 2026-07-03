@@ -31,6 +31,14 @@ Rectangle {
     readonly property string statusText: agentError.length > 0
             ? agentError
             : (!agentAvailable ? unavailableStatus : agentStatus)
+    readonly property string composerStatusText: agentError.length > 0
+            ? agentError
+            : (referenceFailureText.length > 0 ? referenceFailureText : statusText)
+    readonly property bool composerStatusVisible: composerStatusText.length > 0
+            && (agentError.length > 0
+                || referenceFailureText.length > 0
+                || !agentAvailable
+                || (agentRunning && !hasMessages))
     readonly property bool canSendPrompt: agentAvailable
             && !agentRunning
             && !referenceBusy
@@ -71,6 +79,26 @@ Rectangle {
             }
         }
         return ""
+    }
+
+    function activityList(activities) {
+        if (!activities || activities.length === undefined) {
+            return []
+        }
+        const result = []
+        const start = Math.max(0, activities.length - 3)
+        for (let i = start; i < activities.length; ++i) {
+            const item = activities[i]
+            if (item && item.title && item.title.length > 0) {
+                result.push(item)
+            }
+        }
+        return result
+    }
+
+    function currentActivity(activities) {
+        const items = activityList(activities)
+        return items.length > 0 ? items[items.length - 1] : null
     }
 
     function scheduleChatFollowTail() {
@@ -258,12 +286,22 @@ Rectangle {
             required property int index
             required property string messageRole
             required property string messageText
+            required property string messageReasoningText
             required property string messageState
             required property string messageTime
+            required property var messageActivities
 
             readonly property bool userMessage: messageRole === "user"
             readonly property bool streaming: messageState === "streaming"
             readonly property bool activeAssistantMessage: streaming && !userMessage
+            readonly property bool showStreamStatus: activeAssistantMessage
+            readonly property bool showReasoningText: activeAssistantMessage
+                                                     && messageReasoningText.trim().length > 0
+            readonly property string visibleMessageText: showReasoningText
+                                                         ? messageReasoningText
+                                                         : messageText
+            readonly property var visibleActivities: root.activityList(messageActivities)
+            readonly property var currentActivity: root.currentActivity(messageActivities)
             readonly property bool editing: root.editingMessageIndex === index
             readonly property bool copied: root.copiedMessageIndex === index
             readonly property real maxBubbleWidth: messageDelegate.userMessage
@@ -317,7 +355,7 @@ Rectangle {
                     implicitHeight: (messageDelegate.editing
                                      ? editMessageInput.implicitHeight + editActionRow.implicitHeight + 30
                                      : messageBody.implicitHeight + 22)
-                                    + (messageDelegate.activeAssistantMessage ? streamStatus.implicitHeight + 10 : 0)
+                                    + (messageDelegate.showStreamStatus ? streamStatus.implicitHeight + 10 : 0)
 
                     Rectangle {
                         anchors.fill: parent
@@ -358,7 +396,7 @@ Rectangle {
                         height: streamStatus.implicitHeight + 12
                         radius: 7
                         color: root.darkTheme ? "#161d23" : "#eef6fc"
-                        opacity: messageDelegate.activeAssistantMessage ? 1 : 0
+                        opacity: messageDelegate.showStreamStatus ? 1 : 0
                         visible: opacity > 0
 
                         Behavior on opacity { NumberAnimation { duration: 120 } }
@@ -368,8 +406,8 @@ Rectangle {
                         id: bubbleTextMeasure
 
                         visible: false
-                        text: messageDelegate.messageText.length > 0
-                              ? messageDelegate.messageText
+                        text: messageDelegate.visibleMessageText.length > 0
+                              ? messageDelegate.visibleMessageText
                               : messageBody.emptyText
                         font.pixelSize: messageBody.textPixelSize
                         wrapMode: Text.NoWrap
@@ -385,12 +423,15 @@ Rectangle {
                         anchors.leftMargin: 15
                         anchors.rightMargin: 15
                         anchors.topMargin: 11
-                        anchors.bottom: messageDelegate.activeAssistantMessage ? streamStatus.top : parent.bottom
-                        anchors.bottomMargin: messageDelegate.activeAssistantMessage ? 8 : 11
-                        markdown: messageDelegate.messageText
+                        anchors.bottom: messageDelegate.showStreamStatus ? streamStatus.top : parent.bottom
+                        anchors.bottomMargin: messageDelegate.showStreamStatus ? 8 : 11
+                        markdown: messageDelegate.visibleMessageText
                         markdownEnabled: !messageDelegate.userMessage
                         streaming: messageDelegate.streaming
-                        emptyText: messageDelegate.streaming ? qsTr("Thinking...") : ""
+                        suppressRawMarkdownFallback: !messageDelegate.userMessage
+                        emptyText: messageDelegate.activeAssistantMessage
+                                   ? (messageDelegate.visibleActivities.length > 0 ? "" : qsTr("Starting analysis..."))
+                                   : ""
                         darkTheme: root.darkTheme
                         textColor: root.primaryTextColor
                         accentColor: root.accentColor
@@ -533,7 +574,7 @@ Rectangle {
                         }
                     }
 
-                    RowLayout {
+                    ColumnLayout {
                         id: streamStatus
 
                         anchors.left: parent.left
@@ -542,55 +583,69 @@ Rectangle {
                         anchors.leftMargin: 15
                         anchors.rightMargin: 15
                         anchors.bottomMargin: 9
-                        visible: messageDelegate.activeAssistantMessage
-                        spacing: 7
+                        visible: messageDelegate.showStreamStatus
+                        spacing: 5
 
-                        Item {
-                            Layout.preferredWidth: 15
-                            Layout.preferredHeight: 15
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 7
 
-                            Rectangle {
-                                id: pulseDot
+                            Item {
+                                Layout.preferredWidth: 15
+                                Layout.preferredHeight: 15
 
-                                anchors.centerIn: parent
-                                width: 7
-                                height: 7
-                                radius: 4
-                                color: root.accentColor
-                                opacity: 0.82
-                                scale: 0.82
+                                Rectangle {
+                                    id: pulseDot
 
-                                SequentialAnimation on scale {
-                                    running: messageDelegate.activeAssistantMessage
-                                    loops: Animation.Infinite
-                                    NumberAnimation { to: 1.18; duration: 520; easing.type: Easing.OutCubic }
-                                    NumberAnimation { to: 0.82; duration: 520; easing.type: Easing.InOutCubic }
+                                    anchors.centerIn: parent
+                                    width: 7
+                                    height: 7
+                                    radius: 4
+                                    color: root.accentColor
+                                    opacity: 0.82
+                                    scale: 0.82
+
+                                    SequentialAnimation on scale {
+                                        running: messageDelegate.activeAssistantMessage
+                                        loops: Animation.Infinite
+                                        NumberAnimation { to: 1.18; duration: 520; easing.type: Easing.OutCubic }
+                                        NumberAnimation { to: 0.82; duration: 520; easing.type: Easing.InOutCubic }
+                                    }
+
+                                    SequentialAnimation on opacity {
+                                        running: messageDelegate.activeAssistantMessage
+                                        loops: Animation.Infinite
+                                        NumberAnimation { to: 1.0; duration: 520; easing.type: Easing.OutCubic }
+                                        NumberAnimation { to: 0.58; duration: 520; easing.type: Easing.InOutCubic }
+                                    }
                                 }
+                            }
 
-                                SequentialAnimation on opacity {
-                                    running: messageDelegate.activeAssistantMessage
-                                    loops: Animation.Infinite
-                                    NumberAnimation { to: 1.0; duration: 520; easing.type: Easing.OutCubic }
-                                    NumberAnimation { to: 0.58; duration: 520; easing.type: Easing.InOutCubic }
-                                }
+                            Label {
+                                Layout.fillWidth: true
+                                text: messageDelegate.showReasoningText
+                                      ? qsTr("Analyzing...")
+                                      : messageDelegate.messageText.trim().length > 0
+                                      ? qsTr("Generating answer...")
+                                      : messageDelegate.currentActivity && messageDelegate.currentActivity.title
+                                      ? messageDelegate.currentActivity.title
+                                      : (root.agentRunning && root.agentStatus.length > 0
+                                         ? root.agentStatus
+                                         : qsTr("Working..."))
+                                color: root.secondaryTextColor
+                                font.pixelSize: 11
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 2
                             }
                         }
 
-                        Label {
-                            Layout.fillWidth: true
-                            text: root.agentRunning && root.agentStatus.length > 0
-                                  ? root.agentStatus
-                                  : qsTr("Working...")
-                            color: root.secondaryTextColor
-                            font.pixelSize: 11
-                            elide: Text.ElideRight
-                        }
                     }
                 }
 
                 RowLayout {
                     Layout.alignment: messageDelegate.userMessage ? Qt.AlignRight : Qt.AlignLeft
                     spacing: 8
+                    visible: !messageDelegate.activeAssistantMessage
 
                     AbstractButton {
                         id: editButton
@@ -687,7 +742,7 @@ Rectangle {
         id: composer
 
         width: root.contentWidth
-        height: root.hasMessages ? 124 : 130
+        height: (root.hasMessages ? 124 : 130) + (root.composerStatusVisible ? 24 : 0)
         anchors.horizontalCenter: parent.horizontalCenter
         radius: 8
         color: root.composerColor
@@ -734,7 +789,7 @@ Rectangle {
             anchors.left: parent.left
             anchors.right: sendButton.left
             anchors.top: referenceFlow.visible ? referenceFlow.bottom : parent.top
-            anchors.bottom: statusLabel.visible ? statusLabel.top : toolRow.top
+            anchors.bottom: toolRow.top
             anchors.leftMargin: 18
             anchors.rightMargin: 16
             anchors.topMargin: referenceFlow.visible ? 10 : 18
@@ -912,35 +967,23 @@ Rectangle {
             visible: promptInput.text.length === 0
         }
 
-        Label {
-            id: statusLabel
-
-            anchors.left: promptViewport.left
-            anchors.right: sendButton.left
-            anchors.bottom: toolRow.visible ? toolRow.top : parent.bottom
-            anchors.bottomMargin: toolRow.visible ? 7 : 14
-            text: root.statusText
-            color: root.agentError.length > 0 ? "#ef6f75" : root.secondaryTextColor
-            font.pixelSize: 11
-            elide: Text.ElideRight
-            visible: text.length > 0
-                && (!root.agentAvailable
-                    || (root.agentRunning && !root.hasMessages))
-        }
-
-        Row {
+        Item {
             id: toolRow
 
             anchors.left: parent.left
+            anchors.right: sendButton.left
             anchors.bottom: parent.bottom
             anchors.leftMargin: 26
+            anchors.rightMargin: 14
             anchors.bottomMargin: 23
-            spacing: 12
+            height: statusLabel.visible ? Math.max(18, statusLabel.implicitHeight) : 18
             visible: root.agentAvailable
 
             AbstractButton {
                 id: referenceButton
 
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
                 width: 18
                 height: 18
                 padding: 0
@@ -973,17 +1016,24 @@ Rectangle {
             }
 
             Label {
-                width: Math.min(280, implicitWidth)
+                id: statusLabel
+
+                anchors.left: referenceButton.right
+                anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.agentError.length > 0
-                    ? root.agentError
-                    : qsTr("Reference indexing failed. Check settings.")
-                color: "#ef6f75"
+                anchors.leftMargin: 8
+                text: root.composerStatusText
+                color: root.agentError.length > 0 || root.referenceFailureText.length > 0
+                       ? "#ef6f75"
+                       : root.secondaryTextColor
                 font.pixelSize: 11
+                wrapMode: Text.WordWrap
+                maximumLineCount: root.agentError.length > 0 || root.referenceFailureText.length > 0 ? 2 : 1
                 elide: Text.ElideRight
-                visible: root.agentError.length > 0 || root.referenceFailureText.length > 0
-                ToolTip.text: root.agentError.length > 0 ? root.agentError : root.referenceFailureText
-                ToolTip.visible: statusHover.hovered && ToolTip.text.length > 0
+                lineHeight: 1.18
+                visible: root.composerStatusVisible
+                ToolTip.text: text
+                ToolTip.visible: statusHover.hovered && text.length > 0
                 ToolTip.delay: 350
 
                 HoverHandler {

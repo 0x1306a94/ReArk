@@ -26,6 +26,8 @@ QVariant AgentMessageModel::data(const QModelIndex& index, int role) const
     case MessageTextRole:
     case Qt::DisplayRole:
         return message.text;
+    case MessageReasoningTextRole:
+        return message.reasoningText;
     case MessageStateRole:
         return message.state;
     case MessageTimeRole:
@@ -42,6 +44,7 @@ QHash<int, QByteArray> AgentMessageModel::roleNames() const
     return {
         { MessageRoleRole, "messageRole" },
         { MessageTextRole, "messageText" },
+        { MessageReasoningTextRole, "messageReasoningText" },
         { MessageStateRole, "messageState" },
         { MessageTimeRole, "messageTime" },
         { MessageActivitiesRole, "messageActivities" }
@@ -59,6 +62,7 @@ int AgentMessageModel::appendMessage(
     messages_.append(Message {
         .role = role,
         .text = text,
+        .reasoningText = {},
         .state = state,
         .time = time,
         .activities = {}
@@ -115,6 +119,28 @@ void AgentMessageModel::setText(int row, const QString& text)
     emit dataChanged(changed, changed, { MessageTextRole, Qt::DisplayRole });
 }
 
+void AgentMessageModel::appendReasoningText(int row, const QString& text)
+{
+    if (text.isEmpty() || row < 0 || row >= messages_.size()) {
+        return;
+    }
+
+    messages_[row].reasoningText += text;
+    const QModelIndex changed = index(row);
+    emit dataChanged(changed, changed, { MessageReasoningTextRole });
+}
+
+void AgentMessageModel::clearReasoningText(int row)
+{
+    if (row < 0 || row >= messages_.size() || messages_[row].reasoningText.isEmpty()) {
+        return;
+    }
+
+    messages_[row].reasoningText.clear();
+    const QModelIndex changed = index(row);
+    emit dataChanged(changed, changed, { MessageReasoningTextRole });
+}
+
 void AgentMessageModel::setActivities(int row, const QVariantList& activities)
 {
     if (row < 0 || row >= messages_.size()) {
@@ -140,10 +166,14 @@ void AgentMessageModel::finishStreaming(int row, const QString& fallbackText)
     if (!fallbackText.isEmpty() && message.text.trimmed().isEmpty()) {
         message.text = fallbackText;
     }
+    message.reasoningText.clear();
     message.state = QStringLiteral("done");
 
     const QModelIndex changed = index(row);
-    emit dataChanged(changed, changed, { MessageTextRole, MessageStateRole, Qt::DisplayRole });
+    emit dataChanged(
+        changed,
+        changed,
+        { MessageTextRole, MessageReasoningTextRole, MessageStateRole, Qt::DisplayRole });
 }
 
 void AgentMessageModel::failStreaming(int row)

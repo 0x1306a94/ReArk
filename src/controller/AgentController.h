@@ -69,14 +69,16 @@ private:
     void clearMessages();
     void appendMessage(const QString& role, const QString& text, const QString& state = {});
     void queueAssistantDelta(const QString& text);
+    void queueAssistantReasoningDelta(const QString& text);
     void flushPendingAssistantDelta();
     void appendToActiveAssistantMessage(const QString& text);
+    void appendReasoningToActiveAssistantMessage(const QString& text);
     void recordActiveAssistantActivity(
         const QString& type,
         const QString& title,
         const QString& detail = {},
         const QString& state = {});
-    void finishActiveAssistantMessage(const QString& fallbackText = {});
+    void finishActiveAssistantMessage(const QString& fallbackText = {}, bool replaceExistingText = false);
     void finishInterruptedAssistantMessage(const QString& notice);
     void failActiveAssistantMessage();
     void rebuildTranscript();
@@ -101,6 +103,7 @@ private:
     QString errorMessage_;
     QString status_;
     QString pendingAssistantDelta_;
+    QString pendingAssistantReasoningDelta_;
     QTimer* assistantDeltaTimer_ = nullptr;
     QTimer* runWatchdogTimer_ = nullptr;
     qint64 runStartedAtMs_ = 0;

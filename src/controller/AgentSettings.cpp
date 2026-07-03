@@ -31,7 +31,7 @@ constexpr auto kAgentEmbeddingApiKeyKey = "Agent/EmbeddingApiKey";
 constexpr auto kAgentProtectedEmbeddingApiKeyKey = "Agent/EmbeddingApiKeyProtected";
 constexpr auto kAgentEmbeddingModelKey = "Agent/EmbeddingModel";
 constexpr auto kAgentEmbeddingRequireApiKeyKey = "Agent/EmbeddingRequireApiKey";
-constexpr auto kDefaultBaseUrl = "https://openrouter.ai/api";
+constexpr auto kDefaultBaseUrl = "https://openrouter.ai/api/v1";
 constexpr auto kDefaultProvider = "OpenRouter";
 constexpr auto kDefaultModel = "openai/gpt-4o-mini";
 constexpr auto kDefaultEmbeddingModel = "text-embedding-3-small";
@@ -88,6 +88,28 @@ QStringList fallbackProviderKeys()
         QStringLiteral("DashScope"),
         QStringLiteral("Qwen"),
     };
+}
+
+bool isOpenRouterProvider(const QString& provider)
+{
+    return provider.trimmed().compare(QStringLiteral("OpenRouter"), Qt::CaseInsensitive) == 0;
+}
+
+QString normalizedBaseUrl(const QString& provider, QString baseUrl)
+{
+    baseUrl = baseUrl.trimmed();
+    if (!isOpenRouterProvider(provider)) {
+        return baseUrl;
+    }
+
+    QString withoutTrailingSlash = baseUrl;
+    while (withoutTrailingSlash.endsWith(QLatin1Char('/'))) {
+        withoutTrailingSlash.chop(1);
+    }
+    if (withoutTrailingSlash.compare(QStringLiteral("https://openrouter.ai/api"), Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("https://openrouter.ai/api/v1");
+    }
+    return baseUrl;
 }
 
 QVector<ProviderInfo> fallbackProviders()
@@ -178,6 +200,7 @@ QVector<ProviderInfo> providerInfos()
             }
             provider.apiKeyRequired = config->require_api_key;
         }
+        provider.defaultBaseUrl = normalizedBaseUrl(provider.id, provider.defaultBaseUrl);
         providers.push_back(std::move(provider));
     }
     if (!providers.isEmpty()) {
@@ -261,7 +284,9 @@ bool saveProviderSettings(
         return false;
     }
 
-    settings.setValue(providerValueKey(provider, QStringLiteral("BaseUrl")), agentSettings.baseUrl.trimmed());
+    settings.setValue(
+        providerValueKey(provider, QStringLiteral("BaseUrl")),
+        normalizedBaseUrl(provider, agentSettings.baseUrl));
     settings.setValue(providerValueKey(provider, QStringLiteral("Model")), agentSettings.model.trimmed());
     settings.setValue(providerValueKey(provider, QStringLiteral("RequireApiKey")), agentSettings.requireApiKey);
     return ProtectedSettingsSecret::save(
@@ -294,7 +319,9 @@ AgentSettings loadProviderRuntimeSettings(QSettings& settings, const QString& pr
         provider ? provider->apiKeyRequired : AgentSettingsStore::defaultRequireApiKey(providerDefaultBaseUrl));
 
     const QString prefix = providerKeyPrefix(result.provider);
-    result.baseUrl = settings.value(prefix + QStringLiteral("BaseUrl"), providerDefaultBaseUrl).toString().trimmed();
+    result.baseUrl = normalizedBaseUrl(
+        result.provider,
+        settings.value(prefix + QStringLiteral("BaseUrl"), providerDefaultBaseUrl).toString());
     result.model = settings.value(prefix + QStringLiteral("Model"), providerDefaultModel).toString().trimmed();
     result.requireApiKey = settings.value(prefix + QStringLiteral("RequireApiKey"), fallbackRequireApiKey).toBool();
     result.apiKey = ProtectedSettingsSecret::load(
@@ -324,9 +351,11 @@ void migrateLegacyProviderSettings(QSettings& settings, const QString& providerI
     const auto providerMeta = providerInfo(provider);
     AgentSettings legacy;
     legacy.provider = provider;
-    legacy.baseUrl = settings.value(
-        QString::fromLatin1(kAgentBaseUrlKey),
-        providerMeta ? providerMeta->defaultBaseUrl : AgentSettingsStore::defaultBaseUrl()).toString().trimmed();
+    legacy.baseUrl = normalizedBaseUrl(
+        provider,
+        settings.value(
+            QString::fromLatin1(kAgentBaseUrlKey),
+            providerMeta ? providerMeta->defaultBaseUrl : AgentSettingsStore::defaultBaseUrl()).toString());
     legacy.model = settings.value(
         QString::fromLatin1(kAgentModelKey),
         providerMeta && !providerMeta->defaultModel.isEmpty()
@@ -385,7 +414,9 @@ bool AgentSettingsStore::save(const AgentSettings& settings)
             ? defaultProvider()
             : normalizedProvider(settings.provider);
     qsettings.setValue(QString::fromLatin1(kAgentProviderKey), provider);
-    qsettings.setValue(QString::fromLatin1(kAgentBaseUrlKey), settings.baseUrl.trimmed());
+    qsettings.setValue(
+        QString::fromLatin1(kAgentBaseUrlKey),
+        normalizedBaseUrl(provider, settings.baseUrl));
     qsettings.setValue(QString::fromLatin1(kAgentModelKey), settings.model.trimmed());
     qsettings.setValue(QString::fromLatin1(kAgentRequireApiKeyKey), settings.requireApiKey);
     qsettings.setValue(
@@ -441,7 +472,7 @@ void AgentSettingsStore::resetKnowledgeSettings()
 
 QString AgentSettingsStore::validationMessage(const AgentSettings& settings)
 {
-    const QString baseUrl = settings.baseUrl.trimmed();
+    const QString baseUrl = normalizedBaseUrl(settings.provider, settings.baseUrl);
     const auto provider = providerInfo(settings.provider);
     if (!provider) {
         return QCoreApplication::translate("AgentSettings", "Provider is not supported.");
@@ -499,6 +530,11 @@ QString AgentSettingsStore::normalizedProvider(const QString& provider)
     return ::normalizedProvider(provider);
 }
 
+QString AgentSettingsStore::normalizedBaseUrl(const QString& provider, const QString& baseUrl)
+{
+    return ::normalizedBaseUrl(provider, baseUrl);
+}
+
 QVariantList AgentSettingsStore::availableProviders()
 {
     QVariantList result;
@@ -506,7 +542,7 @@ QVariantList AgentSettingsStore::availableProviders()
         QVariantMap item;
         item.insert(QStringLiteral("id"), provider.id);
         item.insert(QStringLiteral("displayName"), provider.displayName.isEmpty() ? provider.id : provider.displayName);
-        item.insert(QStringLiteral("defaultBaseUrl"), provider.defaultBaseUrl);
+        item.insert(QStringLiteral("defaultBaseUrl"), normalizedBaseUrl(provider.id, provider.defaultBaseUrl));
         item.insert(QStringLiteral("defaultModel"), provider.defaultModel);
         item.insert(QStringLiteral("baseUrlRequired"), provider.baseUrlRequired);
         item.insert(QStringLiteral("apiKeyRequired"), provider.apiKeyRequired);
@@ -529,7 +565,7 @@ QVariantMap AgentSettingsStore::providerDefaults(const QString& provider)
 
     result.insert(QStringLiteral("id"), info->id);
     result.insert(QStringLiteral("displayName"), info->displayName.isEmpty() ? info->id : info->displayName);
-    result.insert(QStringLiteral("baseUrl"), info->defaultBaseUrl);
+    result.insert(QStringLiteral("baseUrl"), normalizedBaseUrl(info->id, info->defaultBaseUrl));
     result.insert(QStringLiteral("model"), info->defaultModel.isEmpty() ? defaultModel() : info->defaultModel);
     result.insert(QStringLiteral("baseUrlRequired"), info->baseUrlRequired);
     result.insert(QStringLiteral("apiKeyRequired"), info->apiKeyRequired);
@@ -578,9 +614,9 @@ QString AgentSettingsStore::defaultBaseUrl()
     }
     const auto provider = providerInfo(defaultProvider());
     if (provider && !provider->defaultBaseUrl.isEmpty()) {
-        return provider->defaultBaseUrl;
+        return normalizedBaseUrl(provider->id, provider->defaultBaseUrl);
     }
-    return QString::fromLatin1(kDefaultBaseUrl);
+    return normalizedBaseUrl(defaultProvider(), QString::fromLatin1(kDefaultBaseUrl));
 }
 
 QString AgentSettingsStore::defaultApiKey()

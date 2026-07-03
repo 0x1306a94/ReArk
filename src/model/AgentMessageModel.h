@@ -12,6 +12,7 @@ public:
     enum MessageRole {
         MessageRoleRole = Qt::UserRole + 1,
         MessageTextRole,
+        MessageReasoningTextRole,
         MessageStateRole,
         MessageTimeRole,
         MessageActivitiesRole
@@ -29,6 +30,8 @@ public:
     void removeMessage(int row);
     void appendText(int row, const QString& text);
     void setText(int row, const QString& text);
+    void appendReasoningText(int row, const QString& text);
+    void clearReasoningText(int row);
     void setActivities(int row, const QVariantList& activities);
     void finishStreaming(int row, const QString& fallbackText);
     void failStreaming(int row);
@@ -37,6 +40,7 @@ private:
     struct Message {
         QString role;
         QString text;
+        QString reasoningText;
         QString state;
         QString time;
         QVariantList activities;

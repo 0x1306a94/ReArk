@@ -35,7 +35,13 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("could not open AgentController.cpp: %1").arg(file.errorString()));
     }
 
-    const QString source = QString::fromUtf8(file.readAll());
+    QString source = QString::fromUtf8(file.readAll());
+    QFile routerFile(QStringLiteral(REARK_SOURCE_ROOT "/src/controller/AgentRequestRouter.cpp"));
+    if (!routerFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return fail(QStringLiteral("could not open AgentRequestRouter.cpp: %1").arg(routerFile.errorString()));
+    }
+    source += QStringLiteral("\n");
+    source += QString::fromUtf8(routerFile.readAll());
     QFile rootCmake(QStringLiteral(REARK_SOURCE_ROOT "/CMakeLists.txt"));
     if (!rootCmake.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return fail(QStringLiteral("could not open root CMakeLists.txt: %1").arg(rootCmake.errorString()));
@@ -47,6 +53,16 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("could not open PythonRuntimeResolver.cpp: %1").arg(pythonResolver.errorString()));
     }
     const QString pythonResolverSource = QString::fromUtf8(pythonResolver.readAll());
+    QFile smartAnalysisPage(QStringLiteral(REARK_SOURCE_ROOT "/src/ui/qml/ReArk/SmartAnalysisPage.qml"));
+    if (!smartAnalysisPage.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return fail(QStringLiteral("could not open SmartAnalysisPage.qml: %1").arg(smartAnalysisPage.errorString()));
+    }
+    const QString smartAnalysisPageSource = QString::fromUtf8(smartAnalysisPage.readAll());
+    QFile markdownMessage(QStringLiteral(REARK_SOURCE_ROOT "/src/ui/qml/ReArk/MarkdownMessage.qml"));
+    if (!markdownMessage.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return fail(QStringLiteral("could not open MarkdownMessage.qml: %1").arg(markdownMessage.errorString()));
+    }
+    const QString markdownMessageSource = QString::fromUtf8(markdownMessage.readAll());
 
     QString missing;
     const QStringList requiredContract = {
@@ -107,7 +123,7 @@ int main(int argc, char* argv[])
         QStringLiteral("finalAnswerQualityNotice"),
         QStringLiteral("deviceRuntimeContinuation"),
         QStringLiteral("finalAnswerRuntimeHandoffNotice"),
-        QStringLiteral("isAffirmativeDeviceVerificationFollowUp"),
+        QStringLiteral("agentIsAffirmativeDeviceVerificationFollowUp"),
         QStringLiteral("startIndex = index - 1"),
         QStringLiteral("继续真机"),
         QStringLiteral("install_current_hap_with_abc_string_rewrite"),
@@ -123,7 +139,42 @@ int main(int argc, char* argv[])
         QStringLiteral("是否继续连接设备检验一遍"),
         QStringLiteral("static verification only"),
         QStringLiteral("device verification pending"),
-        QStringLiteral("do not imply device validation")
+        QStringLiteral("do not imply device validation"),
+        QStringLiteral("routeAgentRequest"),
+        QStringLiteral("NoLoadedApplication"),
+        QStringLiteral("当前没有发现应用。"),
+        QStringLiteral("Do not inspect or summarize the current package for lightweight chat"),
+        QStringLiteral("HAP/APP package analysis"),
+        QStringLiteral("Device Runtime"),
+        QStringLiteral("ABC迹索"),
+        QStringLiteral("ABC evidence"),
+        QStringLiteral("UI automation"),
+        QStringLiteral("install verification"),
+        QStringLiteral("LightweightChat"),
+        QStringLiteral("PackageOverview"),
+        QStringLiteral("FocusedStaticAnalysis"),
+        QStringLiteral("focused_static_analysis"),
+        QStringLiteral("Focused static analysis is active"),
+        QStringLiteral("package_overview"),
+        QStringLiteral("agentTaskUsesPlainModelOnly"),
+        QStringLiteral("!plainModelOnly && decompilerController_ != nullptr"),
+        QStringLiteral("runtime_->provider = !plainModelOnly"),
+        QStringLiteral("当前项目"),
+        QStringLiteral("Use ReArk tools to inspect the currently loaded target"),
+        QStringLiteral("summarize_current_target and inspect_entry_points"),
+        QStringLiteral("First sentence must be a direct function-level conclusion"),
+        QStringLiteral("When the provider streams a user-visible reasoning summary"),
+        QStringLiteral("provider-visible reasoning summaries"),
+        QStringLiteral("Any provider-visible reasoning summary, thinking summary, intermediate narration, and final answer must be in Chinese"),
+        QStringLiteral("Any provider-visible reasoning summary, thinking summary, intermediate narration, and final answer must be in English"),
+        QStringLiteral("Do not fabricate progress"),
+        QStringLiteral("result.final_response.content"),
+        QStringLiteral("on_reasoning_delta"),
+        QStringLiteral("on_reasoning_done"),
+        QStringLiteral("queueAssistantReasoningDelta"),
+        QStringLiteral("replaceExistingText"),
+        QStringLiteral("setErrorMessage({})"),
+        QStringLiteral("finishInterruptedAssistantMessage({})")
     };
     if (!containsAll(source, requiredContract, &missing)) {
         return fail(QStringLiteral("Agent prompt contract is missing required generic rule: %1").arg(missing));
@@ -136,12 +187,45 @@ int main(int argc, char* argv[])
     if (source.contains(QStringLiteral("ReArkSafe123"))) {
         return fail(QStringLiteral("Agent prompt examples should not hardcode a specific probe password"));
     }
+    if (source.contains(QStringLiteral("HAP/HSP/APP"))) {
+        return fail(QStringLiteral("Agent capability copy must not claim unsupported HSP package support"));
+    }
+    if (source.contains(QStringLiteral("welcomeResponse"))
+        || source.contains(QStringLiteral("AgentLocalReplyKind::Welcome"))
+        || source.contains(QStringLiteral("localReplyKind = AgentLocalReplyKind::Welcome"))) {
+        return fail(QStringLiteral("Greetings must use lightweight model chat, not a local canned welcome reply"));
+    }
     if (source.contains(QStringLiteral("Host answer guard"))
         || source.contains(QStringLiteral("Answer Needs Verification"))) {
         return fail(QStringLiteral("User-facing answer guards must use natural wording, not internal host diagnostics"));
     }
+    if (source.contains(QStringLiteral("Package overview evidence for this request"))
+        || source.contains(QStringLiteral("buildPackageOverviewEvidence"))
+        || rootCmakeSource.contains(QStringLiteral("AgentEvidenceAssembler"))) {
+        return fail(QStringLiteral("Package overview must use Agent tools, not preassembled host evidence"));
+    }
     if (source.contains(QStringLiteral("affirmativeContinuation"))) {
         return fail(QStringLiteral("A bare affirmative continuation must not suppress static verifier quality guards"));
+    }
+    if (source.contains(QStringLiteral("reasoningEventVisibleThought"))
+        || source.contains(QStringLiteral("好的，我来分析当前应用"))
+        || source.contains(QStringLiteral("我正在进行第 %1 轮模型分析"))
+        || source.contains(QStringLiteral("稍后会用整理好的答案替换这些过程内容"))) {
+        return fail(QStringLiteral("Agent must not fake model thinking with hardcoded visible-thought narration"));
+    }
+    if (!markdownMessageSource.contains(QStringLiteral("suppressRawMarkdownFallback"))
+        || !markdownMessageSource.contains(QStringLiteral("rawMarkdownSuppressed"))
+        || !smartAnalysisPageSource.contains(QStringLiteral("suppressRawMarkdownFallback: !messageDelegate.userMessage"))
+        || !smartAnalysisPageSource.contains(QStringLiteral("messageReasoningText"))
+        || !smartAnalysisPageSource.contains(QStringLiteral("visibleMessageText"))
+        || !smartAnalysisPageSource.contains(QStringLiteral("showReasoningText"))
+        || !source.contains(QStringLiteral("reasoning_event_type::reasoning_delta"))
+        || !source.contains(QStringLiteral("reasoning_event_type::reasoning_completed"))
+        || !smartAnalysisPageSource.contains(QStringLiteral("Generating answer..."))) {
+        return fail(QStringLiteral("Streaming assistant output must not expose raw Markdown as fake thinking"));
+    }
+    if (smartAnalysisPageSource.contains(QStringLiteral("Still analyzing..."))) {
+        return fail(QStringLiteral("Streaming answer text must be labelled as answer generation, not hidden thinking"));
     }
     if (source.contains(QStringLiteral("QStringLiteral(\"problem\")"))
         || source.contains(QStringLiteral("QStringLiteral(\"issue\")"))) {

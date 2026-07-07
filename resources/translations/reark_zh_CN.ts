@@ -457,8 +457,8 @@
     </message>
     <message>
         <location filename="../../src/ui/qml/ReArk/AboutWindow.qml" line="159"/>
-        <source>A professional reverse engineering tool for HarmonyOS NEXT HAP/ABC, supporting disassembly, decompilation, agentic analysis, signature identification, package browsing, and more.</source>
-        <translation>一款用于 HarmonyOS NEXT HAP/ABC 的专业逆向工具，支持反汇编、反编译、Agent智能分析、签名识别、包体浏览等功能。</translation>
+        <source>A professional analysis toolkit for HarmonyOS NEXT HAP/APP/ABC, supporting disassembly, decompilation, intelligent analysis, signing and repackaging, package browsing, and device runtime verification.</source>
+        <translation>一款面向 HarmonyOS NEXT HAP/APP/ABC 的专业分析工具，支持反汇编、反编译、Agent 智能分析、签名与重打包、包体浏览、设备运行验证等功能。</translation>
     </message>
     <message>
         <location filename="../../src/ui/qml/ReArk/AboutWindow.qml" line="173"/>
@@ -3302,8 +3302,8 @@ Use a model that supports function/tool calling for Agent actions, or run the op
     </message>
     <message>
         <location filename="../../src/ui/qml/ReArk/SettingsPage.qml" line="412"/>
-        <source>Configure reference knowledge indexing for RAG-assisted analysis.</source>
-        <translation>配置 RAG 辅助分析使用的参考知识索引。</translation>
+        <source>Configure reference knowledge indexing for RAG-powered intelligent analysis.</source>
+        <translation>配置 RAG 智能分析使用的参考知识索引。</translation>
     </message>
     <message>
         <location filename="../../src/ui/qml/ReArk/SettingsPage.qml" line="421"/>

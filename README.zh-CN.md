@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-ReArk 是面向 HarmonyOS NEXT HAP/APP/ABC 文件的逆向分析工具，核心能力包括包结构浏览、Ark 字节码反汇编与反编译、资源预览、签名检查、搜索，以及可选的 AI 辅助分析。
+ReArk 是面向 HarmonyOS NEXT HAP/APP/ABC 文件的逆向分析工具，核心能力包括包结构浏览、Ark 字节码反汇编与反编译、资源预览、签名检查、搜索，以及可选的 AI 智能分析。
 
 ## 概览
 

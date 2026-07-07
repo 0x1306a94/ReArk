@@ -409,7 +409,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.topMargin: 8
                                 Layout.bottomMargin: 24
-                                text: qsTr("Configure reference knowledge indexing for RAG-assisted analysis.")
+                                text: qsTr("Configure reference knowledge indexing for RAG-powered intelligent analysis.")
                                 color: root.secondaryTextColor
                                 font.pixelSize: 13
                                 wrapMode: Text.WordWrap

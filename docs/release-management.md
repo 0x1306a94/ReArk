@@ -99,10 +99,23 @@ on
 - 预览数据只能用于检查窗口布局、按钮样式、滚动区域和 Markdown 渲染。
 - 提交发布前应确认正式检查更新仍然走 GitHub latest release API，而不是预览路径。
 
+## Windows 运行时依赖
+
+Qt 6.11 的 `Qt6Core.dll` 会在普通导入表中直接依赖 `icuuc.dll`。这不是延迟加载；如果目标系统缺少 ICU，进程会在进入 ReArk 自身代码前被 Windows 加载器终止，表现为双击没有任何窗口或错误提示。
+
+Windows 发布构建会把 `icu.dll`、`icuin.dll`、`icuuc.dll` 复制到应用目录，来源默认为构建机的 `%SystemRoot%\System32`。如需指定固定来源，配置 CMake 时设置：
+
+```powershell
+cmake -S . -B build -DREARK_WINDOWS_ICU_RUNTIME_DIR="C:\path\to\icu-runtime"
+```
+
+不要把这三项当成无依据的系统 DLL 污染清理掉；它们是当前 Qt 运行时的直接启动依赖。相反，Windows API Set、UCRT、Direct3D/OpenGL fallback 等仍然不应在没有明确依据时手动混入发布目录。
+
 ## 发布前检查
 
 发布前至少检查：
 
+- 对发布目录执行依赖闭包检查：确认 app-local 第三方 DLL 和 Qt 启动时直接依赖的 `icu.dll`、`icuin.dll`、`icuuc.dll` 已随包提供；Windows 系统 API Set、UCRT、Direct3D/OpenGL fallback 等系统组件不应在没有明确依据时手动混入发布目录。
 - GitHub Release body 是否使用了正确语言块。
 - 中文和英文内容是否分别位于对应语言块内。
 - 没有把中文追加到英文正文末尾，避免中文用户需要滚到底部才能看到。

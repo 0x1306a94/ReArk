@@ -5,7 +5,6 @@
 #include <wuwe/agent/llm/llm_client.h>
 #include <wuwe/agent/llm/llm_config.h>
 #include <wuwe/agent/llm/llm_provider_factory.h>
-#include <wuwe/agent/llm/llm_provider_registry.h>
 #include <wuwe/agent/tools/tool.hpp>
 #if !defined(REARK_DISABLE_WUWE_EXECUTION) && __has_include(<wuwe/agent/execution/execution.hpp>)
 #include <wuwe/agent/execution/execution.hpp>
@@ -304,12 +303,7 @@ std::shared_ptr<wuwe::llm_client> createLlmClient(const AgentSettings& settings)
         .app_title = "ReArk"
     };
 
-    auto normalized = wuwe::normalize_llm_client_config(providerId, std::move(config));
-    if (!normalized) {
-        throw std::invalid_argument("unknown Wuwe LLM provider: " + providerId);
-    }
-
-    auto client = wuwe::make_llm_client(providerId, std::move(*normalized));
+    auto client = wuwe::make_llm_client(providerId, std::move(config));
     if (!client) {
         throw std::invalid_argument("failed to create Wuwe LLM provider: " + providerId);
     }

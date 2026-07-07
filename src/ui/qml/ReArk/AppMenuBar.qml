@@ -322,6 +322,12 @@ Rectangle {
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                 }
+
+                background: Rectangle {
+                    color: recentMenuItem.highlighted
+                           ? (root.darkTheme ? "#34383d" : "#e8eef0")
+                           : "transparent"
+                }
             }
 
             Instantiator {
@@ -401,6 +407,12 @@ Rectangle {
                             verticalAlignment: Text.AlignVCenter
                         }
                     }
+
+                    background: Rectangle {
+                        color: themeItem.highlighted
+                               ? (root.darkTheme ? "#34383d" : "#e8eef0")
+                               : "transparent"
+                    }
                 }
 
                 Action {
@@ -458,6 +470,12 @@ Rectangle {
                             horizontalAlignment: Text.AlignRight
                             verticalAlignment: Text.AlignVCenter
                         }
+                    }
+
+                    background: Rectangle {
+                        color: languageItem.highlighted
+                               ? (root.darkTheme ? "#34383d" : "#e8eef0")
+                               : "transparent"
                     }
                 }
 
@@ -538,6 +556,12 @@ Rectangle {
                         horizontalAlignment: Text.AlignRight
                         verticalAlignment: Text.AlignVCenter
                     }
+                }
+
+                background: Rectangle {
+                    color: syntaxThemeItem.highlighted
+                           ? (root.darkTheme ? "#34383d" : "#e8eef0")
+                           : "transparent"
                 }
             }
 

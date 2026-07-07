@@ -48,6 +48,12 @@ int main(int argc, char* argv[])
     }
     const QString rootCmakeSource = QString::fromUtf8(rootCmake.readAll());
 
+    QFile agentSettings(QStringLiteral(REARK_SOURCE_ROOT "/src/controller/AgentSettings.cpp"));
+    if (!agentSettings.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return fail(QStringLiteral("could not open AgentSettings.cpp: %1").arg(agentSettings.errorString()));
+    }
+    const QString agentSettingsSource = QString::fromUtf8(agentSettings.readAll());
+
     QFile pythonResolver(QStringLiteral(REARK_SOURCE_ROOT "/src/controller/PythonRuntimeResolver.cpp"));
     if (!pythonResolver.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return fail(QStringLiteral("could not open PythonRuntimeResolver.cpp: %1").arg(pythonResolver.errorString()));
@@ -240,6 +246,15 @@ int main(int argc, char* argv[])
     }
     if (!source.contains(QStringLiteral("make_controlled_process_backend"))) {
         return fail(QStringLiteral("Agent execution setup must create the controlled_process backend directly"));
+    }
+    if (!agentSettingsSource.contains(QStringLiteral("llm_provider_registry"))
+        || !agentSettingsSource.contains(QStringLiteral("list_llm_providers"))
+        || !agentSettingsSource.contains(QStringLiteral("make_default_llm_config"))) {
+        return fail(QStringLiteral("Agent settings provider metadata must come from Wuwe registry when Wuwe is available"));
+    }
+    if (source.contains(QStringLiteral("llm_provider_registry"))
+        || source.contains(QStringLiteral("normalize_llm_client_config"))) {
+        return fail(QStringLiteral("Agent runtime should create Wuwe LLM providers through the provider factory only"));
     }
     if (!containsAll(pythonResolverSource, {
             QStringLiteral("installedPythonCandidates"),

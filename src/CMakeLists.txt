@@ -101,6 +101,14 @@ qt_add_executable(${PROJECT_NAME}
     presentation/SyntaxThemeProvider.h
     ${WIN32_RESOURCES}
 )
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        $<$<CONFIG:Release>:/Zi>)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        $<$<CONFIG:Release>:/DEBUG:FULL>
+        $<$<CONFIG:Release>:/PDB:$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.pdb>
+        $<$<CONFIG:Release>:/MAP:$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.map>)
+endif()
 
 set_source_files_properties(ui/qml/main.qml PROPERTIES
     QT_RESOURCE_ALIAS main.qml
@@ -351,51 +359,106 @@ if(WIN32)
         COMMENT "Deploying Qt runtime plugins"
     )
 
-    if(TARGET OpenSSL::Crypto)
-        get_target_property(_openssl_crypto_runtime
-            OpenSSL::Crypto IMPORTED_LOCATION)
-        if(NOT _openssl_crypto_runtime)
-            get_target_property(_openssl_crypto_runtime
-                OpenSSL::Crypto IMPORTED_LOCATION_RELEASE)
+    set(REARK_WINDOWS_ICU_RUNTIME_DIR "" CACHE PATH
+        "Directory containing Windows ICU runtime DLLs to bundle with the app")
+    set(_reark_windows_icu_search_dirs)
+    if(REARK_WINDOWS_ICU_RUNTIME_DIR)
+        list(APPEND _reark_windows_icu_search_dirs
+            "${REARK_WINDOWS_ICU_RUNTIME_DIR}")
+    endif()
+    if(DEFINED ENV{SystemRoot} AND NOT "$ENV{SystemRoot}" STREQUAL "")
+        list(APPEND _reark_windows_icu_search_dirs
+            "$ENV{SystemRoot}/System32")
+    endif()
+
+    set(_reark_windows_icu_runtime_files)
+    foreach(_reark_windows_icu_name IN ITEMS icu.dll icuin.dll icuuc.dll)
+        unset(_reark_windows_icu_runtime_file)
+        foreach(_reark_windows_icu_dir IN LISTS _reark_windows_icu_search_dirs)
+            if(EXISTS "${_reark_windows_icu_dir}/${_reark_windows_icu_name}")
+                set(_reark_windows_icu_runtime_file
+                    "${_reark_windows_icu_dir}/${_reark_windows_icu_name}")
+                break()
+            endif()
+        endforeach()
+        if(NOT _reark_windows_icu_runtime_file)
+            message(FATAL_ERROR
+                "Qt6Core imports ${_reark_windows_icu_name}, but it was not found. "
+                "Set REARK_WINDOWS_ICU_RUNTIME_DIR to a directory containing "
+                "icu.dll, icuin.dll, and icuuc.dll.")
         endif()
-        if(_openssl_crypto_runtime)
-            get_filename_component(_openssl_crypto_runtime_ext
-                "${_openssl_crypto_runtime}" EXT)
-            if(NOT _openssl_crypto_runtime_ext STREQUAL ".dll")
-                set(_openssl_crypto_implib "${_openssl_crypto_runtime}")
-                unset(_openssl_crypto_runtime)
+        list(APPEND _reark_windows_icu_runtime_files
+            "${_reark_windows_icu_runtime_file}")
+    endforeach()
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${_reark_windows_icu_runtime_files}
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMENT "Copying Windows ICU runtime required by Qt6Core"
+    )
+
+    function(reark_copy_openssl_runtime openssl_target)
+        if(NOT TARGET "${openssl_target}")
+            return()
+        endif()
+
+        get_target_property(_openssl_runtime
+            "${openssl_target}" IMPORTED_LOCATION)
+        if(NOT _openssl_runtime)
+            get_target_property(_openssl_runtime
+                "${openssl_target}" IMPORTED_LOCATION_RELEASE)
+        endif()
+        if(_openssl_runtime)
+            get_filename_component(_openssl_runtime_ext
+                "${_openssl_runtime}" EXT)
+            if(NOT _openssl_runtime_ext STREQUAL ".dll")
+                set(_openssl_implib "${_openssl_runtime}")
+                unset(_openssl_runtime)
             endif()
         endif()
-        if(NOT _openssl_crypto_runtime)
-            if(NOT _openssl_crypto_implib)
-                get_target_property(_openssl_crypto_implib
-                    OpenSSL::Crypto IMPORTED_IMPLIB)
+        if(NOT _openssl_runtime)
+            if(NOT _openssl_implib)
+                get_target_property(_openssl_implib
+                    "${openssl_target}" IMPORTED_IMPLIB)
             endif()
-            if(NOT _openssl_crypto_implib)
-                get_target_property(_openssl_crypto_implib
-                    OpenSSL::Crypto IMPORTED_IMPLIB_RELEASE)
+            if(NOT _openssl_implib)
+                get_target_property(_openssl_implib
+                    "${openssl_target}" IMPORTED_IMPLIB_RELEASE)
             endif()
-            if(_openssl_crypto_implib)
+            if(_openssl_implib)
                 get_filename_component(_openssl_root
-                    "${_openssl_crypto_implib}/../.." ABSOLUTE)
-                file(GLOB _openssl_crypto_candidates
-                    "${_openssl_root}/bin/libcrypto-*.dll"
-                    "${_openssl_root}/bin/libeay32.dll")
-                if(_openssl_crypto_candidates)
-                    list(GET _openssl_crypto_candidates 0
-                        _openssl_crypto_runtime)
+                    "${_openssl_implib}/../.." ABSOLUTE)
+                set(_openssl_candidates)
+                foreach(_openssl_runtime_glob IN LISTS ARGN)
+                    file(GLOB _openssl_glob_matches
+                        "${_openssl_root}/bin/${_openssl_runtime_glob}")
+                    list(APPEND _openssl_candidates
+                        ${_openssl_glob_matches})
+                endforeach()
+                if(_openssl_candidates)
+                    list(GET _openssl_candidates 0
+                        _openssl_runtime)
                 endif()
             endif()
         endif()
 
-        if(_openssl_crypto_runtime)
+        if(_openssl_runtime)
             add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_openssl_crypto_runtime}"
+                    "${_openssl_runtime}"
                     $<TARGET_FILE_DIR:${PROJECT_NAME}>
+                COMMENT "Copying ${openssl_target} runtime"
             )
         endif()
-    endif()
+    endfunction()
+
+    reark_copy_openssl_runtime(OpenSSL::Crypto
+        "libcrypto-*.dll"
+        "libeay32.dll")
+    reark_copy_openssl_runtime(OpenSSL::SSL
+        "libssl-*.dll"
+        "ssleay32.dll")
 endif()
 
 set(REARK_BUNDLED_HDC_FILES

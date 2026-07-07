@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-ReArk is a reverse engineering tool for HarmonyOS NEXT HAP/APP/ABC files. It focuses on package browsing, Ark bytecode disassembly and decompilation, resource preview, signature inspection, search, and optional AI-assisted analysis.
+ReArk is a reverse engineering tool for HarmonyOS NEXT HAP/APP/ABC files. It focuses on package browsing, Ark bytecode disassembly and decompilation, resource preview, signature inspection, search, and optional AI-powered intelligent analysis.
 
 ## Overview
 

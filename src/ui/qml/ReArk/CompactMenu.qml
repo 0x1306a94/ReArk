@@ -7,6 +7,9 @@ Menu {
 
     readonly property bool darkTheme: Material.theme === Material.Dark
     property int minimumItemWidth: 168
+    modal: false
+    dim: false
+    popupType: Popup.Item
 
     function shortcutText(action) {
         if (!action || action.shortcut === undefined || action.shortcut === null) {
@@ -36,6 +39,7 @@ Menu {
         verticalPadding: 4
         spacing: 12
         font.pixelSize: 13
+        hoverEnabled: true
 
         contentItem: Row {
             spacing: 24
@@ -60,6 +64,12 @@ Menu {
                 visible: text.length > 0
                 verticalAlignment: Text.AlignVCenter
             }
+        }
+
+        background: Rectangle {
+            color: menuItem.highlighted
+                   ? (root.darkTheme ? "#34383d" : "#e8eef0")
+                   : "transparent"
         }
     }
 

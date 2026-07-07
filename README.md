@@ -23,10 +23,18 @@ Download and run:
 
 **Static Analysis**
 
-- View Ark bytecode disassembly and decompiled source in package context
+- Parse ABC files
+- Disassemble and decompile ABC bytecode
+- Reconstruct source structure and view disassembly or decompiled output for the corresponding source files
 - Inspect ABC strings, hex content, formatted JSON, text, images, and media resources
-- Use ABC evidence views to trace bytecode references, constants, and related code paths
+- Use ABC trace tools for strings, literals, xrefs, call argument flows, ABC tree inspection, source reading, and disassembly reading
 - Keep analysis grounded in real package clues with less note juggling and context switching
+
+**Signing And Packaging**
+
+- Configure signing materials and inspect signing validity
+- Re-sign applications
+- Package and install applications
 
 **ReArk Agent**
 
@@ -34,13 +42,13 @@ Download and run:
 - Let the Agent inspect package metadata, files, strings, disassembly, and decompiled output when needed
 - Use provider presets for OpenRouter, OpenAI, OpenAI-compatible endpoints, Anthropic, Gemini, Ollama, DeepSeek, DashScope, and Qwen
 - Attach reference documents to enrich AI-assisted analysis with your own notes and materials
-- Drive a full analysis flow across static review, device installation, launch verification, and log tracing
+- Drive a full analysis flow across static review, signing and packaging, application installation, launch verification, and log tracing
 
 **Device Connection**
 
 - Discover connected HarmonyOS devices
 - Install the current application to a device
-- Capture screenshots, inspect UI nodes, and connect UI evidence to the real device state
+- Capture screenshots, inspect UI nodes, and connect UI clues to the real device state
 - Read Hilog output and perform basic UI actions such as tap, text input, Back, Home, and swipe
 
 ## Screenshots
@@ -57,9 +65,9 @@ Download and run:
 | --- | --- |
 | <img src="assets/screenshots/05-ReArk-agent.png" alt="ReArk Agent workspace" width="420"> | <img src="assets/screenshots/06-ReArk-agent-analysis.png" alt="ReArk Agent analysis result" width="420"> |
 
-| Device runtime | ABC evidence |
+| Device runtime | ABC trace view |
 | --- | --- |
-| <img src="assets/screenshots/07-device-runtime.png" alt="HarmonyOS device runtime workspace" width="420"> | <img src="assets/screenshots/08-abc-evidance.png" alt="ABC evidence workspace" width="420"> |
+| <img src="assets/screenshots/07-device-runtime.png" alt="HarmonyOS device runtime workspace" width="420"> | <img src="assets/screenshots/08-abc-evidance.png" alt="ABC trace view" width="420"> |
 
 ## Safety and Privacy
 

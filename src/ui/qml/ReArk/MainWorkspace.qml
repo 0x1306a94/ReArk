@@ -162,7 +162,7 @@ Rectangle {
                         font.weight: hasPackage ? Font.DemiBold : Font.Normal
                         elide: Text.ElideMiddle
                         verticalAlignment: Text.AlignVCenter
-                        ToolTip.text: root.appIconPath.length > 0 ? root.appIconPath : root.filePath
+                        ToolTip.text: root.fileName
                         ToolTip.visible: appHeaderHover.hovered && ToolTip.text.length > 0
                         ToolTip.delay: 500
                     }

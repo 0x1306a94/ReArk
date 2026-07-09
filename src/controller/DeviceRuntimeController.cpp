@@ -144,6 +144,17 @@ bool isMissingSignatureInstallFailure(const CommandResult& result)
         || text.contains(QStringLiteral("signature verify"));
 }
 
+bool isSigningProfileUnauthorizedInstallFailure(const CommandResult& result)
+{
+    const QString text = QStringLiteral("%1\n%2\n%3")
+        .arg(result.standardOutput, result.standardError, result.errorMessage)
+        .toCaseFolded();
+    return text.contains(QStringLiteral("device is unauthorized"))
+        || text.contains(QStringLiteral("udid of your device is configured in the signing profile"))
+        || (text.contains(QStringLiteral("udid")) && text.contains(QStringLiteral("signing profile")))
+        || text.contains(QStringLiteral("code:9568423"));
+}
+
 QString signedHapFileName(const QString& sourcePath)
 {
     QString baseName = QFileInfo(sourcePath).completeBaseName().trimmed();
@@ -502,7 +513,9 @@ DeviceInstallResult installPackageWithAutoSigning(
         result.launchMetadata = readLaunchMetadata(signInputHapPath);
     } else {
         signedDir.setAutoRemove(false);
-        result.error = DeviceInstallError::SignedInstallFailed;
+        result.error = isSigningProfileUnauthorizedInstallFailure(signedInstall)
+            ? DeviceInstallError::SigningProfileUnauthorized
+            : DeviceInstallError::SignedInstallFailed;
     }
 
     QString extra = QStringLiteral("# re_sign: approved_by_user\n# auto_sign: used\n# bundle_rewrite: %1\n%2")
@@ -553,6 +566,10 @@ DeviceInstallProbeResult probeInstallPackage(
     if (isMissingSignatureInstallFailure(result.initialInstall)) {
         result.needsSigningApproval = true;
         result.status = DeviceInstallStatus::RequiresSigning;
+        return result;
+    }
+    if (isSigningProfileUnauthorizedInstallFailure(result.initialInstall)) {
+        result.error = DeviceInstallError::SigningProfileUnauthorized;
         return result;
     }
 
@@ -802,6 +819,7 @@ void DeviceRuntimeController::installPackage(const QString& packagePath)
     const quint64 runId = ++asyncInstallRunId_;
     setBusy(true, tr("Install package"));
     setErrorMessage({});
+    setStatus(tr("Installing package on device..."));
     auto* probeWatcher = new QFutureWatcher<DeviceInstallProbeResult>(this);
     const QString targetId = currentTargetId();
     connect(probeWatcher, &QFutureWatcher<DeviceInstallProbeResult>::finished, this, [this, probeWatcher, trimmed, targetId, runId]() {
@@ -887,6 +905,7 @@ void DeviceRuntimeController::approveResignInstall()
 
     setBusy(true, tr("Re-sign and install package"));
     setErrorMessage({});
+    setStatus(tr("Re-signing and installing package..."));
     auto* watcher = new QFutureWatcher<DeviceInstallResult>(this);
     connect(watcher, &QFutureWatcher<DeviceInstallResult>::finished, this, [this, watcher, packagePath, targetId, runId]() {
         const DeviceInstallResult result = watcher->result();
@@ -1614,7 +1633,7 @@ QString DeviceRuntimeController::translatedInstallError(DeviceInstallError error
 {
     switch (error) {
     case DeviceInstallError::InstallFailed:
-        return tr("Install package failed.");
+        return tr("Install failed. Check the command log for the HDC error code and device message.");
     case DeviceInstallError::UnsignedWithoutSigning:
         return tr("Install failed because the package is unsigned. Configure Harmony signing in Settings.");
     case DeviceInstallError::TemporaryDirectoryFailed:
@@ -1625,6 +1644,8 @@ QString DeviceRuntimeController::translatedInstallError(DeviceInstallError error
         return tr("Install failed because signing failed.");
     case DeviceInstallError::SignedInstallFailed:
         return tr("Signed package install failed.");
+    case DeviceInstallError::SigningProfileUnauthorized:
+        return tr("Install failed because the signing profile does not authorize this device UDID. Re-sign with a debug profile that includes the connected device, then retry.");
     case DeviceInstallError::Cancelled:
         return tr("Install cancelled.");
     case DeviceInstallError::UnexpectedFailure:

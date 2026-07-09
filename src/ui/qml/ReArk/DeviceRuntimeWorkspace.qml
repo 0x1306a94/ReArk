@@ -14,6 +14,7 @@ Rectangle {
     property string resignInstallDialogMessage: ""
     property string lastAppliedBundleName: ""
     property string lastAppliedAbilityName: ""
+    property bool launchFieldsReady: false
     property int selectedUiNodeIndex: -1
     property var activeRuntimeOutput: null
     property string pendingInstallPackagePath: ""
@@ -57,8 +58,7 @@ Rectangle {
     }
 
     onPackagePathChanged: {
-        root.lastAppliedBundleName = ""
-        root.lastAppliedAbilityName = ""
+        root.resetLaunchFieldsForPackageChange()
         root.refreshActiveLaunchMetadata()
     }
 
@@ -71,6 +71,7 @@ Rectangle {
     }
 
     Component.onCompleted: {
+        root.launchFieldsReady = true
         root.refreshActiveLaunchMetadata()
     }
 
@@ -1342,6 +1343,16 @@ Rectangle {
             abilityField.text = ability
             root.lastAppliedAbilityName = ability
         }
+    }
+
+    function resetLaunchFieldsForPackageChange() {
+        root.lastAppliedBundleName = ""
+        root.lastAppliedAbilityName = ""
+        if (!root.launchFieldsReady) {
+            return
+        }
+        bundleField.text = ""
+        abilityField.text = ""
     }
 
     function refreshActiveLaunchMetadata() {

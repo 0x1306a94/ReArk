@@ -30,6 +30,7 @@ enum class DeviceInstallError {
     BundleRewriteFailed,
     SigningFailed,
     SignedInstallFailed,
+    SigningProfileUnauthorized,
     Cancelled,
     UnexpectedFailure
 };

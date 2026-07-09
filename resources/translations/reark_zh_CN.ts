@@ -1931,6 +1931,11 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <translation>安装包</translation>
     </message>
     <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="822"/>
+        <source>Installing package on device...</source>
+        <translation>正在安装包到设备...</translation>
+    </message>
+    <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="778"/>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="856"/>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1494"/>
@@ -1960,6 +1965,11 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <translation>安装包失败。</translation>
     </message>
     <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1636"/>
+        <source>Install failed. Check the command log for the HDC error code and device message.</source>
+        <translation>安装失败。请查看命令日志中的 HDC 错误码和设备返回消息。</translation>
+    </message>
+    <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1513"/>
         <source>Install failed because the package is unsigned. Configure Harmony signing in Settings.</source>
         <translation>安装失败：包未签名。请先在设置中配置 Harmony 签名。</translation>
@@ -1983,6 +1993,11 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1521"/>
         <source>Signed package install failed.</source>
         <translation>已签名包安装失败。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1648"/>
+        <source>Install failed because the signing profile does not authorize this device UDID. Re-sign with a debug profile that includes the connected device, then retry.</source>
+        <translation>安装失败：签名 profile 未授权当前设备 UDID。请使用包含该设备的调试 profile 重新签名后再试。</translation>
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="797"/>
@@ -2009,6 +2024,11 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1316"/>
         <source>Re-sign and install package</source>
         <translation>重签名并安装包</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="908"/>
+        <source>Re-signing and installing package...</source>
+        <translation>正在重签名并安装包...</translation>
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="886"/>
@@ -2070,7 +2090,7 @@ Use a model that supports function/tool calling for Agent actions, or run the op
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="743"/>
         <source>Waiting for screen refresh to finish before installing.</source>
-        <translation type="unfinished"></translation>
+        <translation>正在等待屏幕刷新完成后再安装。</translation>
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="977"/>

@@ -11,6 +11,8 @@
 #include <QTextStream>
 #include <QTimer>
 
+#include <exception>
+
 namespace {
 
 int fail(const QString& message)
@@ -56,68 +58,74 @@ bool waitForLaunchMetadata(DeviceRuntimeController& controller, const QString& p
 
 int main(int argc, char* argv[])
 {
-    QCoreApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("ReArkTests"));
-    QCoreApplication::setApplicationName(QStringLiteral("DeviceRuntimeControllerTest"));
+    try {
+        QCoreApplication app(argc, argv);
+        QCoreApplication::setOrganizationName(QStringLiteral("ReArkTests"));
+        QCoreApplication::setApplicationName(QStringLiteral("DeviceRuntimeControllerTest"));
 
-    if (argc != 3) {
-        return fail(QStringLiteral("usage: reark_device_runtime_controller_test <sample.hap> <app_packing_tool.jar>"));
-    }
+        if (argc != 3) {
+            return fail(QStringLiteral("usage: reark_device_runtime_controller_test <sample.hap> <app_packing_tool.jar>"));
+        }
 
-    const QString samplePath = QString::fromLocal8Bit(argv[1]);
-    const QString packingToolPath = QString::fromLocal8Bit(argv[2]);
-    if (!QFileInfo::exists(samplePath)) {
-        return fail(QStringLiteral("sample HAP does not exist: %1").arg(samplePath));
-    }
-    if (!QFileInfo::exists(packingToolPath)) {
-        return fail(QStringLiteral("packing tool does not exist: %1").arg(packingToolPath));
-    }
+        const QString samplePath = QString::fromLocal8Bit(argv[1]);
+        const QString packingToolPath = QString::fromLocal8Bit(argv[2]);
+        if (!QFileInfo::exists(samplePath)) {
+            return fail(QStringLiteral("sample HAP does not exist: %1").arg(samplePath));
+        }
+        if (!QFileInfo::exists(packingToolPath)) {
+            return fail(QStringLiteral("packing tool does not exist: %1").arg(packingToolPath));
+        }
 
-    const QString originalBundle = packageBundleName(samplePath);
-    if (originalBundle.isEmpty()) {
-        return fail(QStringLiteral("sample bundle name should be readable"));
-    }
+        const QString originalBundle = packageBundleName(samplePath);
+        if (originalBundle.isEmpty()) {
+            return fail(QStringLiteral("sample bundle name should be readable"));
+        }
 
-    DeviceRuntimeController controller;
-    if (!waitForLaunchMetadata(controller, samplePath)) {
-        return fail(QStringLiteral("launch metadata refresh timed out for original HAP"));
-    }
-    if (controller.launchBundleName() != originalBundle) {
-        return fail(QStringLiteral("loading an uninstalled package should use package bundle %1, got %2")
-            .arg(originalBundle, controller.launchBundleName()));
-    }
+        DeviceRuntimeController controller;
+        if (!waitForLaunchMetadata(controller, samplePath)) {
+            return fail(QStringLiteral("launch metadata refresh timed out for original HAP"));
+        }
+        if (controller.launchBundleName() != originalBundle) {
+            return fail(QStringLiteral("loading an uninstalled package should use package bundle %1, got %2")
+                .arg(originalBundle, controller.launchBundleName()));
+        }
 
-    QTemporaryDir outputDir;
-    if (!outputDir.isValid()) {
-        return fail(QStringLiteral("temporary output dir should be available"));
-    }
+        QTemporaryDir outputDir;
+        if (!outputDir.isValid()) {
+            return fail(QStringLiteral("temporary output dir should be available"));
+        }
 
-    const QString newBundle = originalBundle == QStringLiteral("com.example.rearktest")
-        ? QStringLiteral("com.example.rearktest2")
-        : QStringLiteral("com.example.rearktest");
-    const QString rewrittenPath = outputDir.filePath(QStringLiteral("rewritten.hap"));
-    const HarmonyBundleRewriteResult rewriteResult =
-        HarmonyPackageRewriter::rewriteBundleIdentity({
-            .inputHapPath = samplePath,
-            .outputHapPath = rewrittenPath,
-            .oldBundleName = originalBundle,
-            .newBundleName = newBundle,
-            .javaProgram = QStringLiteral("java"),
-            .packingToolPath = packingToolPath
-        });
-    if (!rewriteResult.ok) {
-        return fail(QStringLiteral("bundle rewrite should succeed: %1\n%2")
-            .arg(rewriteResult.error, rewriteResult.report));
-    }
+        const QString newBundle = originalBundle == QStringLiteral("com.example.rearktest")
+            ? QStringLiteral("com.example.rearktest2")
+            : QStringLiteral("com.example.rearktest");
+        const QString rewrittenPath = outputDir.filePath(QStringLiteral("rewritten.hap"));
+        const HarmonyBundleRewriteResult rewriteResult =
+            HarmonyPackageRewriter::rewriteBundleIdentity({
+                .inputHapPath = samplePath,
+                .outputHapPath = rewrittenPath,
+                .oldBundleName = originalBundle,
+                .newBundleName = newBundle,
+                .javaProgram = QStringLiteral("java"),
+                .packingToolPath = packingToolPath
+            });
+        if (!rewriteResult.ok) {
+            return fail(QStringLiteral("bundle rewrite should succeed: %1\n%2")
+                .arg(rewriteResult.error, rewriteResult.report));
+        }
 
-    if (!waitForLaunchMetadata(controller, rewrittenPath)) {
-        return fail(QStringLiteral("launch metadata refresh timed out for rewritten HAP"));
-    }
-    if (controller.launchBundleName() != newBundle) {
-        return fail(QStringLiteral("launch metadata should follow the rewritten installable package identity %1, got %2")
-            .arg(newBundle, controller.launchBundleName()));
-    }
+        if (!waitForLaunchMetadata(controller, rewrittenPath)) {
+            return fail(QStringLiteral("launch metadata refresh timed out for rewritten HAP"));
+        }
+        if (controller.launchBundleName() != newBundle) {
+            return fail(QStringLiteral("launch metadata should follow the rewritten installable package identity %1, got %2")
+                .arg(newBundle, controller.launchBundleName()));
+        }
 
-    QTextStream(stdout) << "Device runtime controller tests passed\n";
-    return 0;
+        QTextStream(stdout) << "Device runtime controller tests passed\n";
+        return 0;
+    } catch (const std::exception& ex) {
+        return fail(QStringLiteral("unexpected exception: %1").arg(QString::fromUtf8(ex.what())));
+    } catch (...) {
+        return fail(QStringLiteral("unexpected unknown exception"));
+    }
 }

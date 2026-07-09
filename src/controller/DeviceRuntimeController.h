@@ -30,7 +30,8 @@ enum class DeviceInstallError {
     BundleRewriteFailed,
     SigningFailed,
     SignedInstallFailed,
-    Cancelled
+    Cancelled,
+    UnexpectedFailure
 };
 
 class DeviceRuntimeController : public QObject {

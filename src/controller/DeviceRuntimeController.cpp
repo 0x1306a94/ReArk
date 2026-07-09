@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <exception>
 #include <utility>
 
 namespace {
@@ -164,13 +165,20 @@ QString rewrittenHapFileName(const QString& sourcePath)
 DevicePackageIdentity readPackageIdentity(const QString& hapPath)
 {
     DevicePackageIdentity identity;
-    auto summary = hyle::hap::summarize_decompiled_package(toStdString(hapPath));
-    if (!summary) {
-        identity.summaryError = QStringLiteral("Package summary failed: %1")
-            .arg(fromStdString(summary.error().message()));
-        return identity;
+    try {
+        auto summary = hyle::hap::summarize_decompiled_package(toStdString(hapPath));
+        if (!summary) {
+            identity.summaryError = QStringLiteral("Package summary failed: %1")
+                .arg(fromStdString(summary.error().message()));
+            return identity;
+        }
+        identity.bundleName = fromStdString(summary->bundle_name).trimmed();
+    } catch (const std::exception& ex) {
+        identity.summaryError = QStringLiteral("Package summary threw exception: %1")
+            .arg(QString::fromUtf8(ex.what()));
+    } catch (...) {
+        identity.summaryError = QStringLiteral("Package summary threw unknown exception.");
     }
-    identity.bundleName = fromStdString(summary->bundle_name).trimmed();
     return identity;
 }
 
@@ -239,50 +247,57 @@ DeviceLaunchMetadata readLaunchMetadata(const QString& hapPath)
         return metadata;
     }
 
-    auto session = hyle::hap::open_decompiled_package(toStdString(hapPath));
-    if (!session) {
-        metadata.error = QStringLiteral("Open package failed: %1").arg(fromStdString(session.error().message()));
-        return metadata;
-    }
-
-    auto summary = session->summary();
-    if (summary) {
-        metadata.bundleName = fromStdString(summary->bundle_name).trimmed();
-        metadata.moduleName = fromStdString(summary->module_name).trimmed();
-    }
-
-    auto moduleJson = session->read_resource(std::string("module.json"), 1024 * 1024);
-    if (!moduleJson) {
-        if (metadata.bundleName.isEmpty()) {
-            metadata.error = QStringLiteral("Read module.json failed: %1")
-                .arg(fromStdString(moduleJson.error().message()));
+    try {
+        auto session = hyle::hap::open_decompiled_package(toStdString(hapPath));
+        if (!session) {
+            metadata.error = QStringLiteral("Open package failed: %1").arg(fromStdString(session.error().message()));
+            return metadata;
         }
-        return metadata;
-    }
 
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(bytesToByteArray(moduleJson->bytes), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        if (metadata.bundleName.isEmpty()) {
-            metadata.error = QStringLiteral("Parse module.json failed.");
+        auto summary = session->summary();
+        if (summary) {
+            metadata.bundleName = fromStdString(summary->bundle_name).trimmed();
+            metadata.moduleName = fromStdString(summary->module_name).trimmed();
         }
-        return metadata;
-    }
 
-    const QJsonObject root = document.object();
-    const QJsonObject app = root.value(QStringLiteral("app")).toObject();
-    const QJsonObject module = root.value(QStringLiteral("module")).toObject();
-    const QString bundleName = app.value(QStringLiteral("bundleName")).toString().trimmed();
-    const QString moduleName = module.value(QStringLiteral("name")).toString().trimmed();
-    const QString abilityName = launcherAbilityName(module.value(QStringLiteral("abilities")).toArray()).trimmed();
+        auto moduleJson = session->read_resource(std::string("module.json"), 1024 * 1024);
+        if (!moduleJson) {
+            if (metadata.bundleName.isEmpty()) {
+                metadata.error = QStringLiteral("Read module.json failed: %1")
+                    .arg(fromStdString(moduleJson.error().message()));
+            }
+            return metadata;
+        }
 
-    if (!bundleName.isEmpty()) {
-        metadata.bundleName = bundleName;
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(bytesToByteArray(moduleJson->bytes), &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+            if (metadata.bundleName.isEmpty()) {
+                metadata.error = QStringLiteral("Parse module.json failed.");
+            }
+            return metadata;
+        }
+
+        const QJsonObject root = document.object();
+        const QJsonObject app = root.value(QStringLiteral("app")).toObject();
+        const QJsonObject module = root.value(QStringLiteral("module")).toObject();
+        const QString bundleName = app.value(QStringLiteral("bundleName")).toString().trimmed();
+        const QString moduleName = module.value(QStringLiteral("name")).toString().trimmed();
+        const QString abilityName = launcherAbilityName(module.value(QStringLiteral("abilities")).toArray()).trimmed();
+
+        if (!bundleName.isEmpty()) {
+            metadata.bundleName = bundleName;
+        }
+        if (!moduleName.isEmpty()) {
+            metadata.moduleName = moduleName;
+        }
+        metadata.abilityName = abilityName;
+    } catch (const std::exception& ex) {
+        metadata.error = QStringLiteral("Read launch metadata threw exception: %1")
+            .arg(QString::fromUtf8(ex.what()));
+    } catch (...) {
+        metadata.error = QStringLiteral("Read launch metadata threw unknown exception.");
     }
-    if (!moduleName.isEmpty()) {
-        metadata.moduleName = moduleName;
-    }
-    metadata.abilityName = abilityName;
 
     return metadata;
 }
@@ -332,6 +347,21 @@ QString installAttemptSummary(
         text += QStringLiteral("\n[signed install]\n%1").arg(HdcDeviceBackend::resultSummary(signedInstall));
     }
     return text.trimmed();
+}
+
+DeviceInstallResult unexpectedInstallFailureResult(
+    const CommandResult& initialInstall,
+    const QString& exceptionText)
+{
+    DeviceInstallResult result;
+    result.error = DeviceInstallError::UnexpectedFailure;
+    result.commandLog = QStringLiteral("# status: error\n# operation: install_package\n# re_sign: approved_by_user\n# auto_sign: aborted\n# exception: %1\n\n[initial install]\n%2")
+        .arg(exceptionText.trimmed().isEmpty()
+                ? QStringLiteral("unknown")
+                : exceptionText.trimmed(),
+            HdcDeviceBackend::resultSummary(initialInstall))
+        .trimmed();
+    return result;
 }
 
 DeviceInstallResult installPackageWithAutoSigning(
@@ -721,11 +751,22 @@ void DeviceRuntimeController::refreshLaunchMetadata(const QString& packagePath)
     });
     const QString targetId = currentTargetId();
     watcher->setFuture(QtConcurrent::run([trimmed, targetId]() {
-        DeviceLaunchMetadata metadata = loadInstalledLaunchMetadata(trimmed, targetId);
-        if (hasLaunchMetadata(metadata)) {
+        try {
+            DeviceLaunchMetadata metadata = loadInstalledLaunchMetadata(trimmed, targetId);
+            if (hasLaunchMetadata(metadata)) {
+                return metadata;
+            }
+            return readLaunchMetadata(trimmed);
+        } catch (const std::exception& ex) {
+            DeviceLaunchMetadata metadata;
+            metadata.error = QStringLiteral("Refresh launch metadata threw exception: %1")
+                .arg(QString::fromUtf8(ex.what()));
+            return metadata;
+        } catch (...) {
+            DeviceLaunchMetadata metadata;
+            metadata.error = QStringLiteral("Refresh launch metadata threw unknown exception.");
             return metadata;
         }
-        return readLaunchMetadata(trimmed);
     }));
 }
 
@@ -806,7 +847,20 @@ void DeviceRuntimeController::installPackage(const QString& packagePath)
             tr("The device rejected this package because its signature is missing or invalid. ReArk can use your configured Harmony signing material to re-sign the package and install the signed copy."));
     });
     probeWatcher->setFuture(QtConcurrent::run([trimmed, targetId, stopToken]() {
-        return probeInstallPackage(trimmed, targetId, stopToken);
+        try {
+            return probeInstallPackage(trimmed, targetId, stopToken);
+        } catch (const std::exception& ex) {
+            DeviceInstallProbeResult result;
+            result.error = DeviceInstallError::UnexpectedFailure;
+            result.initialInstall.errorMessage = QStringLiteral("Install probe threw exception: %1")
+                .arg(QString::fromUtf8(ex.what()));
+            return result;
+        } catch (...) {
+            DeviceInstallProbeResult result;
+            result.error = DeviceInstallError::UnexpectedFailure;
+            result.initialInstall.errorMessage = QStringLiteral("Install probe threw unknown exception.");
+            return result;
+        }
     }));
 }
 
@@ -868,7 +922,17 @@ void DeviceRuntimeController::approveResignInstall()
         setBusy(false);
     });
     watcher->setFuture(QtConcurrent::run([packagePath, targetId, initialInstall, stopToken]() {
-        return installPackageWithAutoSigning(packagePath, targetId, initialInstall, stopToken);
+        try {
+            return installPackageWithAutoSigning(packagePath, targetId, initialInstall, stopToken);
+        } catch (const std::exception& ex) {
+            return unexpectedInstallFailureResult(
+                initialInstall,
+                QStringLiteral("Re-sign install worker threw exception: %1").arg(QString::fromUtf8(ex.what())));
+        } catch (...) {
+            return unexpectedInstallFailureResult(
+                initialInstall,
+                QStringLiteral("Re-sign install worker threw unknown exception."));
+        }
     }));
 }
 
@@ -1563,6 +1627,8 @@ QString DeviceRuntimeController::translatedInstallError(DeviceInstallError error
         return tr("Signed package install failed.");
     case DeviceInstallError::Cancelled:
         return tr("Install cancelled.");
+    case DeviceInstallError::UnexpectedFailure:
+        return tr("Install failed because an unexpected internal error occurred. See command log for details.");
     case DeviceInstallError::None:
         break;
     }

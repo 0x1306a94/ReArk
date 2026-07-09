@@ -14,6 +14,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QTemporaryDir>
+#include <QTextStream>
 
 #include <algorithm>
 #include <cstddef>
@@ -244,6 +245,14 @@ QString formatInPlaceStringRewriteReport(
     return text.trimmed();
 }
 
+void tracePackageRewrite(const QString& message)
+{
+    if (!qEnvironmentVariableIsSet("REARK_TRACE_PACKAGE_REWRITE")) {
+        return;
+    }
+    QTextStream(stderr) << "[package rewrite] " << message << '\n';
+}
+
 QJsonValue rewriteJsonStrings(
     const QJsonValue& value,
     const QString& oldBundleName,
@@ -357,6 +366,8 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
     HarmonyBundleRewriteResult result;
     result.inputHapPath = request.inputHapPath;
     result.outputHapPath = request.outputHapPath;
+    tracePackageRewrite(QStringLiteral("rewriteBundleIdentity start input=%1 output=%2 old=%3 new=%4")
+        .arg(request.inputHapPath, request.outputHapPath, request.oldBundleName, request.newBundleName));
 
     const QFileInfo inputInfo(request.inputHapPath);
     if (!inputInfo.exists() || !inputInfo.isFile()) {
@@ -388,6 +399,7 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
         result.error = QStringLiteral("Open HAP failed: %1").arg(fromStdString(session.error().message()));
         return result;
     }
+    tracePackageRewrite(QStringLiteral("opened HAP resources=%1").arg(session->resources().size()));
 
     QStringList reports;
     int abcCount = 0;
@@ -401,6 +413,7 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
         }
 
         const QString resourcePath = cleanResourcePath(resource.path);
+        tracePackageRewrite(QStringLiteral("resource %1").arg(resourcePath));
         const QString outputPath = safeOutputPath(unpacked.path(), resourcePath);
         if (outputPath.isEmpty()) {
             result.error = QStringLiteral("Unsafe HAP resource path: %1").arg(fromStdString(resource.path));
@@ -442,6 +455,7 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
 
         if (resource.is_abc || resource.kind == hyle::hap::hap_resource_kind::abc || hasAbcSuffix(resourcePath)) {
             ++abcCount;
+            tracePackageRewrite(QStringLiteral("parse ABC %1 bytes=%2").arg(resourcePath).arg(bytes.size()));
             hyle::hap::abc_parser parser(bytes);
             auto parsed = parser.parse();
             if (!parsed) {
@@ -449,8 +463,10 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
                     .arg(resourcePath, fromStdString(parsed.error().message()));
                 return result;
             }
+            tracePackageRewrite(QStringLiteral("parsed ABC %1").arg(resourcePath));
 
             hyle::hap::abc_modifier modifier(parser);
+            tracePackageRewrite(QStringLiteral("replace bundle identity %1").arg(resourcePath));
             auto replaced = modifier.replace_bundle_identity(
                 toStdString(request.oldBundleName),
                 toStdString(request.newBundleName));
@@ -459,20 +475,25 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
                     .arg(resourcePath, fromStdString(replaced.error().message()));
                 return result;
             }
+            tracePackageRewrite(QStringLiteral("replaced bundle identity %1").arg(resourcePath));
 
+            tracePackageRewrite(QStringLiteral("build rewritten ABC %1").arg(resourcePath));
             auto patched = modifier.build({ true });
             if (!patched) {
                 result.error = QStringLiteral("Build rewritten ABC failed: %1: %2")
                     .arg(resourcePath, fromStdString(patched.error().message()));
                 return result;
             }
+            tracePackageRewrite(QStringLiteral("built rewritten ABC %1 bytes=%2").arg(resourcePath).arg(patched->size()));
 
+            tracePackageRewrite(QStringLiteral("verify rewritten ABC %1").arg(resourcePath));
             const auto verify = hyle::hap::verify_abc(*patched);
             if (!verify.valid) {
                 result.error = QStringLiteral("Verify rewritten ABC failed: %1: %2")
                     .arg(resourcePath, fromStdString(verify.message));
                 return result;
             }
+            tracePackageRewrite(QStringLiteral("verified rewritten ABC %1").arg(resourcePath));
 
             if (!modifier.patch_report().items.empty()) {
                 ++rewrittenAbcCount;
@@ -530,6 +551,7 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
         .outputHapPath = request.outputHapPath,
         .timeoutMs = request.timeoutMs
     }), request.stopToken);
+    tracePackageRewrite(QStringLiteral("pack finished success=%1").arg(result.packingResult.succeeded()));
     if (!result.packingResult.succeeded()) {
         unpacked.setAutoRemove(false);
         result.unpackedDirectory = unpacked.path();

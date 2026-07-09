@@ -488,7 +488,9 @@ HdcInstallFailureKind HdcDeviceBackend::classifyInstallFailure(const CommandResu
         || folded.contains(QStringLiteral("verify signature"))
         || folded.contains(QStringLiteral("signature verify"))
         || folded.contains(QStringLiteral("signature verification failed"))
+        || folded.contains(QStringLiteral("fail to verify pkcs7 file"))
         || folded.contains(QStringLiteral("not trusted app source"))
+        || folded.contains(QStringLiteral("code:9568257"))
         || folded.contains(QStringLiteral("code:9568322"))) {
         return HdcInstallFailureKind::SignatureRejected;
     }

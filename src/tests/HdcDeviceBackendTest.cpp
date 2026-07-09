@@ -284,6 +284,12 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("not trusted app source failures should be classified as signature rejection"));
     }
 
+    result.standardOutput = QStringLiteral("[Info]App install path:D:\\sample.hap msg:error: failed to install bundle. code:9568257 error: fail to verify pkcs7 file.\nAppMod finish\n");
+    if (HdcDeviceBackend::installSucceeded(result)
+        || HdcDeviceBackend::classifyInstallFailure(result) != HdcInstallFailureKind::SignatureRejected) {
+        return fail(QStringLiteral("pkcs7 verification failures should be classified as signature rejection"));
+    }
+
     result.standardOutput = QStringLiteral("[Info]App install path:D:\\sample.hap msg:error: failed to install bundle. code:9568263 error: install version downgrade.\nAppMod finish\n");
     if (HdcDeviceBackend::classifyInstallFailure(result) != HdcInstallFailureKind::VersionDowngrade) {
         return fail(QStringLiteral("version downgrade failures should be classified separately"));

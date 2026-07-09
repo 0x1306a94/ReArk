@@ -19,18 +19,22 @@ enum class DeviceInstallStatus {
     Installed,
     SignedInstalled,
     SignedRewrittenInstalled,
-    RequiresSigning
+    RequiresSignatureApproval,
+    RequiresAuthorizedSigningProfile,
+    RequiresDowngradeRecovery
 };
 
 enum class DeviceInstallError {
     None,
     InstallFailed,
-    UnsignedWithoutSigning,
+    SignatureRejectedWithoutSigning,
     TemporaryDirectoryFailed,
     BundleRewriteFailed,
     SigningFailed,
     SignedInstallFailed,
     SigningProfileUnauthorized,
+    InstallVersionDowngrade,
+    UninstallFailed,
     Cancelled,
     UnexpectedFailure
 };
@@ -93,6 +97,8 @@ public:
     Q_INVOKABLE void installPackage(const QString& packagePath);
     Q_INVOKABLE void approveResignInstall();
     Q_INVOKABLE void rejectResignInstall();
+    Q_INVOKABLE void approveDowngradeRecovery();
+    Q_INVOKABLE void rejectDowngradeRecovery();
     Q_INVOKABLE void startAbility(const QString& bundleName, const QString& abilityName);
     Q_INVOKABLE void readHilog(const QString& filter = QString(), const QString& level = QString(), int maxLines = 500);
     Q_INVOKABLE void captureScreenshot();
@@ -107,6 +113,7 @@ public:
     Q_INVOKABLE void startScreenRefresh(int intervalMs = 1500);
     Q_INVOKABLE void stopScreenRefresh();
     Q_INVOKABLE void cancel();
+    Q_INVOKABLE void resetForPackageChange();
     Q_INVOKABLE void clearOutput();
 
 signals:
@@ -125,6 +132,7 @@ signals:
     void screenRefreshStatusChanged();
     void screenRefreshFrameChanged();
     void resignInstallConfirmationRequested(const QString& title, const QString& message);
+    void installDowngradeRecoveryConfirmationRequested(const QString& title, const QString& message);
 
 private:
     enum class ScreenshotRequestKind {
@@ -149,6 +157,7 @@ private:
     void setUiNodes(const QList<UiAutomationNode>& nodes);
     void refreshFilteredUiNodes();
     void clearDeviceSessionState();
+    void clearPendingInstallState(bool cleanupRetainedSignedHap);
     [[nodiscard]] bool ensureDeviceAvailable();
     [[nodiscard]] QString translatedInstallStatus(DeviceInstallStatus status) const;
     [[nodiscard]] QString translatedInstallError(DeviceInstallError error) const;
@@ -186,18 +195,27 @@ private:
     QString pendingSigningPackagePath_;
     QString pendingSigningTargetId_;
     CommandResult pendingSigningInitialInstall_;
+    QString pendingDowngradePackagePath_;
+    QString pendingDowngradeTargetId_;
+    QString pendingDowngradeSignedHapPath_;
+    QString pendingDowngradeRetainedDirectory_;
+    QString pendingDowngradeUninstallBundleName_;
+    QString pendingDowngradeLaunchMetadataSourcePath_;
+    DeviceInstallStatus pendingDowngradeSuccessStatus_ = DeviceInstallStatus::None;
     QString initialUiSnapshotDeviceId_;
     QString uiNodeSummary_;
     QString uiNodeFilter_;
     QString screenRefreshStatus_;
     std::stop_source installStopSource_;
     quint64 asyncInstallRunId_ = 0;
+    quint64 runtimeSessionId_ = 0;
     int screenRefreshFrameCount_ = 0;
     double screenRefreshFps_ = 0.0;
     int activeCommandId_ = 0;
     int launchMetadataRequestId_ = 0;
     bool busy_ = false;
     bool hasPendingSigningInstall_ = false;
+    bool hasPendingDowngradeRecovery_ = false;
 };
 
 #endif // REARK_DEVICE_RUNTIME_CONTROLLER_H

@@ -108,6 +108,15 @@ bool missionBlockContainsBundle(const QString& block, const QString& foldedBundl
         || block.contains(QStringLiteral("#%1:").arg(foldedBundle));
 }
 
+bool startOutputReportsDeviceSecurityControl(const CommandResult& result)
+{
+    const QString folded = commandOutputText(result).toCaseFolded();
+    return folded.contains(QStringLiteral("the target application is under control"))
+        || folded.contains(QStringLiteral("restricted from launching by the appstore"))
+        || (folded.contains(QStringLiteral("suspected of malicious behavior"))
+            && folded.contains(QStringLiteral("restricted from launching")));
+}
+
 } // namespace
 
 QVariantMap HdcDeviceTarget::toVariantMap() const
@@ -143,6 +152,21 @@ CommandRequest HdcDeviceBackend::installRequest(
     arguments << QStringLiteral("install")
               << QStringLiteral("-r")
               << hostFileArgument(packagePath);
+    return {
+        .program = resolvedProgram(),
+        .arguments = arguments,
+        .timeoutMs = timeoutMs
+    };
+}
+
+CommandRequest HdcDeviceBackend::uninstallRequest(
+    const QString& bundleName,
+    const QString& targetId,
+    int timeoutMs) const
+{
+    QStringList arguments = targetArguments(targetId);
+    arguments << QStringLiteral("uninstall")
+              << bundleName.trimmed();
     return {
         .program = resolvedProgram(),
         .arguments = arguments,
@@ -440,6 +464,40 @@ bool HdcDeviceBackend::installOutputReportsFailure(const CommandResult& result)
         || folded.contains(QStringLiteral("signature verify failed"));
 }
 
+HdcInstallFailureKind HdcDeviceBackend::classifyInstallFailure(const CommandResult& result)
+{
+    if (installSucceeded(result)) {
+        return HdcInstallFailureKind::None;
+    }
+
+    const QString folded = commandOutputText(result).toCaseFolded();
+    if (folded.contains(QStringLiteral("install version downgrade"))
+        || folded.contains(QStringLiteral("code:9568263"))) {
+        return HdcInstallFailureKind::VersionDowngrade;
+    }
+    if (folded.contains(QStringLiteral("device is unauthorized"))
+        || folded.contains(QStringLiteral("udid of your device is configured in the signing profile"))
+        || (folded.contains(QStringLiteral("udid")) && folded.contains(QStringLiteral("signing profile")))
+        || folded.contains(QStringLiteral("code:9568423"))) {
+        return HdcInstallFailureKind::SigningProfileUnauthorized;
+    }
+    if (folded.contains(QStringLiteral("no signature file"))
+        || folded.contains(QStringLiteral("missing signature"))
+        || folded.contains(QStringLiteral("signature file not found"))
+        || folded.contains(QStringLiteral("not signed"))
+        || folded.contains(QStringLiteral("verify signature"))
+        || folded.contains(QStringLiteral("signature verify"))
+        || folded.contains(QStringLiteral("signature verification failed"))
+        || folded.contains(QStringLiteral("not trusted app source"))
+        || folded.contains(QStringLiteral("code:9568322"))) {
+        return HdcInstallFailureKind::SignatureRejected;
+    }
+    if (!result.succeeded() || installOutputReportsFailure(result)) {
+        return HdcInstallFailureKind::Other;
+    }
+    return HdcInstallFailureKind::None;
+}
+
 bool HdcDeviceBackend::startSucceeded(const CommandResult& result)
 {
     return result.succeeded() && !startOutputReportsFailure(result);
@@ -452,6 +510,7 @@ bool HdcDeviceBackend::startOutputReportsFailure(const CommandResult& result)
         || folded.contains(QStringLiteral("error code:"))
         || folded.contains(QStringLiteral("ability does not exist"))
         || folded.contains(QStringLiteral("ability is not installed"))
+        || startOutputReportsDeviceSecurityControl(result)
         || (folded.contains(QStringLiteral("bundle name"))
             && folded.contains(QStringLiteral("not found")));
 }
@@ -464,6 +523,9 @@ QString HdcDeviceBackend::resultSummary(const CommandResult& result)
     text += QStringLiteral("# elapsed_ms: %1\n").arg(result.elapsedMs);
     if (installOutputReportsFailure(result) || startOutputReportsFailure(result)) {
         text += QStringLiteral("# hdc_reported_failure: true\n");
+    }
+    if (startOutputReportsDeviceSecurityControl(result)) {
+        text += QStringLiteral("# device_security_control: true\n");
     }
     if (result.timedOut) {
         text += QStringLiteral("# timed_out: true\n");

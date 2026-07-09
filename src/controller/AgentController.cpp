@@ -1361,19 +1361,6 @@ QString uiTextInputEvidenceNote(const QString& value)
     return lines.join(QLatin1Char('\n'));
 }
 
-bool isMissingSignatureInstallFailure(const CommandResult& result)
-{
-    const QString text = QStringLiteral("%1\n%2\n%3")
-        .arg(result.standardOutput, result.standardError, result.errorMessage)
-        .toCaseFolded();
-    return text.contains(QStringLiteral("no signature file"))
-        || text.contains(QStringLiteral("missing signature"))
-        || text.contains(QStringLiteral("signature file not found"))
-        || text.contains(QStringLiteral("not signed"))
-        || text.contains(QStringLiteral("verify signature"))
-        || text.contains(QStringLiteral("signature verify"));
-}
-
 bool signatureSummaryLooksUnsigned(const QString& summary)
 {
     const QString folded = summary.toCaseFolded();
@@ -1697,7 +1684,7 @@ QString agentTaskModeInstruction(const AgentTaskProfile& profile)
             "\n\nTask mode:\n"
             "- Device runtime tools are enabled because the latest request mentions installation, launch, signing, device, HDC, UI, logs, screenshots, or runtime verification.\n"
             "- ReArk's install_current_hap tool installs the resolved HAP module from the current package.\n"
-            "- If installation is rejected because the HAP is unsigned or signature verification fails, and Harmony signing is configured in Settings, install_current_hap automatically signs and retries.\n"
+        "- If installation is rejected because the HAP signature is missing, invalid, or from an untrusted source, and Harmony signing is configured in Settings, install_current_hap automatically signs and retries.\n"
             "- If the package bundle identity differs from the configured signing profile bundle, install_current_hap can rewrite the HAP bundle identity, repack, sign, and retry installation.\n"
             "- Do not use run_analysis_script for HDC installation, launch, screenshots, UI input, or other device I/O; it is only for short local Python analysis.\n"
             "- Runtime verification is a closed loop: list/select device, install/sign, launch, dump layout, identify controls from node evidence, clear_hilog before decisive interactions when possible, input or tap, then collect success evidence from UI, success Toast text, fresh read_hilog output, generated files, or app state.\n"
@@ -2780,7 +2767,7 @@ struct list_harmony_devices {
 
 struct install_current_hap {
     static constexpr std::string_view description =
-        "Install the currently loaded ReArk package to a HarmonyOS target through hdc. If the active package is an APP container, ReArk installs the resolved inner HAP module. If hdc rejects the HAP because it is unsigned or signature verification fails and Harmony signing is configured in Settings, ReArk signs the HAP with the configured local signing material and retries installation automatically. If the package bundle identity does not match the configured signing profile bundle, ReArk can rewrite the HAP bundle identity, repack, sign, and retry installation. For multi-HAP APP packages, pass module to choose a module from the tool's candidate list.";
+        "Install the currently loaded ReArk package to a HarmonyOS target through hdc. If the active package is an APP container, ReArk installs the resolved inner HAP module. If hdc rejects the HAP because its signature is missing, invalid, or from an untrusted source and Harmony signing is configured in Settings, ReArk signs the HAP with the configured local signing material and retries installation automatically. If the package bundle identity does not match the configured signing profile bundle, ReArk can rewrite the HAP bundle identity, repack, sign, and retry installation. For multi-HAP APP packages, pass module to choose a module from the tool's candidate list.";
 
     wuwe::field<std::string> target_id {
         .default_value = std::string {},
@@ -2825,9 +2812,10 @@ struct install_current_hap {
             selection.path,
             selection.displayName,
             backend.resolvedProgram());
-        const bool missingSignatureFailure = isMissingSignatureInstallFailure(result);
+        const bool signatureRejected =
+            HdcDeviceBackend::classifyInstallFailure(result) == HdcInstallFailureKind::SignatureRejected;
         const bool packageAppearsUnsigned = signatureSummaryLooksUnsigned(context.snapshot->signatureSummary);
-        if (!installOk && (missingSignatureFailure || packageAppearsUnsigned)) {
+        if (!installOk && (signatureRejected || packageAppearsUnsigned)) {
             const HarmonySigningSettings signingSettings = SigningSettingsStore::loadHarmony();
             const QString validationMessage = SigningSettingsStore::harmonyValidationMessage(signingSettings);
             if (!validationMessage.isEmpty()) {
@@ -2838,7 +2826,7 @@ struct install_current_hap {
                 text += QStringLiteral("# auto_sign: unavailable\n");
                 text += signingSettingsStatusLine(validationMessage) + QStringLiteral("\n\n");
                 text += HdcDeviceBackend::resultSummary(result);
-                text += QStringLiteral("\n\nInstallation failed because the HAP is unsigned. Configure Harmony signing in Settings, then retry install_current_hap.");
+                text += QStringLiteral("\n\nInstallation failed because the device rejected the HAP signature. Configure Harmony signing in Settings, then retry install_current_hap.");
                 return {
                     .content = toStdString(boundedSnapshotText(text, 26000)),
                     .error_code = std::make_error_code(std::errc::io_error)

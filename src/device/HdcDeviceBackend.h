@@ -13,6 +13,14 @@ struct HdcDeviceTarget {
     [[nodiscard]] QVariantMap toVariantMap() const;
 };
 
+enum class HdcInstallFailureKind {
+    None,
+    SignatureRejected,
+    SigningProfileUnauthorized,
+    VersionDowngrade,
+    Other
+};
+
 class HdcDeviceBackend {
 public:
     HdcDeviceBackend() = default;
@@ -23,6 +31,10 @@ public:
         const QString& packagePath,
         const QString& targetId,
         int timeoutMs = 60000) const;
+    [[nodiscard]] CommandRequest uninstallRequest(
+        const QString& bundleName,
+        const QString& targetId,
+        int timeoutMs = 30000) const;
     [[nodiscard]] CommandRequest startAbilityRequest(
         const QString& bundleName,
         const QString& abilityName,
@@ -74,6 +86,7 @@ public:
     [[nodiscard]] static bool missionDumpShowsVisibleBundle(const QString& output, const QString& bundleName);
     [[nodiscard]] static bool installSucceeded(const CommandResult& result);
     [[nodiscard]] static bool installOutputReportsFailure(const CommandResult& result);
+    [[nodiscard]] static HdcInstallFailureKind classifyInstallFailure(const CommandResult& result);
     [[nodiscard]] static bool startSucceeded(const CommandResult& result);
     [[nodiscard]] static bool startOutputReportsFailure(const CommandResult& result);
     [[nodiscard]] static QString resultSummary(const CommandResult& result);

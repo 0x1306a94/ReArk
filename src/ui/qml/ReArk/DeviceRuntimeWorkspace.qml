@@ -12,6 +12,8 @@ Rectangle {
     property var installablePackages: []
     property string resignInstallDialogTitle: ""
     property string resignInstallDialogMessage: ""
+    property string downgradeRecoveryDialogTitle: ""
+    property string downgradeRecoveryDialogMessage: ""
     property string lastAppliedBundleName: ""
     property string lastAppliedAbilityName: ""
     property bool launchFieldsReady: false
@@ -58,6 +60,19 @@ Rectangle {
     }
 
     onPackagePathChanged: {
+        if (resignInstallDialog.opened) {
+            resignInstallDialog.resolved = true
+            resignInstallDialog.close()
+        }
+        if (downgradeRecoveryDialog.opened) {
+            downgradeRecoveryDialog.resolved = true
+            downgradeRecoveryDialog.close()
+        }
+        deferredInstallTimer.stop()
+        root.pendingInstallPackagePath = ""
+        if (root.controller !== null) {
+            root.controller.resetForPackageChange()
+        }
         root.resetLaunchFieldsForPackageChange()
         root.refreshActiveLaunchMetadata()
     }
@@ -771,6 +786,13 @@ Rectangle {
             resignInstallDialog.resolved = false
             resignInstallDialog.open()
         }
+
+        function onInstallDowngradeRecoveryConfirmationRequested(title, message) {
+            root.downgradeRecoveryDialogTitle = title
+            root.downgradeRecoveryDialogMessage = message
+            downgradeRecoveryDialog.resolved = false
+            downgradeRecoveryDialog.open()
+        }
     }
 
     Dialog {
@@ -865,6 +887,105 @@ Rectangle {
                         resignInstallDialog.close()
                         if (root.controller !== null) {
                             root.controller.approveResignInstall()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: downgradeRecoveryDialog
+
+        property bool resolved: false
+
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        width: Math.min(root.width - 48, 500)
+        x: Math.round((root.width - width) / 2)
+        y: Math.round((root.height - height) / 2)
+        padding: 0
+        title: ""
+
+        onClosed: {
+            if (!resolved && root.controller !== null) {
+                root.controller.rejectDowngradeRecovery()
+            }
+            resolved = true
+        }
+
+        background: Rectangle {
+            radius: 6
+            color: root.panelColor
+            border.width: 1
+            border.color: root.dividerColor
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 0
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.margins: 18
+                spacing: 10
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.downgradeRecoveryDialogTitle
+                    color: Material.foreground
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
+                    wrapMode: Text.WordWrap
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.downgradeRecoveryDialogMessage
+                    color: root.secondaryTextColor
+                    font.pixelSize: 12
+                    lineHeight: 1.25
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: root.dividerColor
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.margins: 12
+                spacing: 8
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                RuntimeButton {
+                    text: qsTr("Cancel")
+                    tone: "quiet"
+                    Layout.preferredWidth: 92
+                    onClicked: {
+                        downgradeRecoveryDialog.resolved = true
+                        downgradeRecoveryDialog.close()
+                        if (root.controller !== null) {
+                            root.controller.rejectDowngradeRecovery()
+                        }
+                    }
+                }
+
+                RuntimeButton {
+                    text: qsTr("Overwrite Install")
+                    tone: "primary"
+                    Layout.preferredWidth: 160
+                    onClicked: {
+                        downgradeRecoveryDialog.resolved = true
+                        downgradeRecoveryDialog.close()
+                        if (root.controller !== null) {
+                            root.controller.approveDowngradeRecovery()
                         }
                     }
                 }

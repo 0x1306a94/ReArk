@@ -73,6 +73,17 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("install argv should pass hdc a native absolute host path"));
     }
 
+    const CommandRequest uninstallRequest = backend.uninstallRequest(
+        QStringLiteral(" com.example.app "),
+        QStringLiteral("target-1"));
+    if (uninstallRequest.arguments != QStringList({
+            QStringLiteral("-t"),
+            QStringLiteral("target-1"),
+            QStringLiteral("uninstall"),
+            QStringLiteral("com.example.app") })) {
+        return fail(QStringLiteral("uninstall argv should preserve target and trim bundle name"));
+    }
+
     const CommandRequest startRequest = backend.startAbilityRequest(
         QStringLiteral("com.example.app"),
         QStringLiteral("EntryAbility"),
@@ -256,13 +267,26 @@ int main(int argc, char* argv[])
     result.standardOutput = QStringLiteral("[Info]App install path:D:\\sample.hap msg:error: failed to install bundle. code:9568320 error: no signature file.\nAppMod finish\n");
     if (HdcDeviceBackend::installSucceeded(result)
         || !HdcDeviceBackend::installOutputReportsFailure(result)
+        || HdcDeviceBackend::classifyInstallFailure(result) != HdcInstallFailureKind::SignatureRejected
         || !HdcDeviceBackend::resultSummary(result).contains(QStringLiteral("hdc_reported_failure"))) {
         return fail(QStringLiteral("hdc install failures reported on stdout must not be treated as success"));
     }
 
     result.standardOutput = QStringLiteral("[Info]App install path:D:\\sample.hap msg:error: failed to install bundle. code:9568329 error: verify signature failed.\nAppMod finish\n");
-    if (HdcDeviceBackend::installSucceeded(result)) {
+    if (HdcDeviceBackend::installSucceeded(result)
+        || HdcDeviceBackend::classifyInstallFailure(result) != HdcInstallFailureKind::SignatureRejected) {
         return fail(QStringLiteral("signature verification failures must not be treated as successful installs"));
+    }
+
+    result.standardOutput = QStringLiteral("[Info]App install path:D:\\sample.hap msg:error: failed to install bundle. code:9568322 error: signature verification failed due to not trusted app source.\nAppMod finish\n");
+    if (HdcDeviceBackend::installSucceeded(result)
+        || HdcDeviceBackend::classifyInstallFailure(result) != HdcInstallFailureKind::SignatureRejected) {
+        return fail(QStringLiteral("not trusted app source failures should be classified as signature rejection"));
+    }
+
+    result.standardOutput = QStringLiteral("[Info]App install path:D:\\sample.hap msg:error: failed to install bundle. code:9568263 error: install version downgrade.\nAppMod finish\n");
+    if (HdcDeviceBackend::classifyInstallFailure(result) != HdcInstallFailureKind::VersionDowngrade) {
+        return fail(QStringLiteral("version downgrade failures should be classified separately"));
     }
 
     result.standardOutput = QStringLiteral(
@@ -273,6 +297,16 @@ int main(int argc, char* argv[])
         || !HdcDeviceBackend::startOutputReportsFailure(result)
         || !HdcDeviceBackend::resultSummary(result).contains(QStringLiteral("hdc_reported_failure"))) {
         return fail(QStringLiteral("aa start failures reported on stdout must not be treated as success"));
+    }
+
+    result.standardOutput = QStringLiteral(
+        "error: failed to start ability.\n"
+        "Error Code:10106105  Error Message:The target application is under control.\n"
+        "Error cause: The application is suspected of malicious behavior and is restricted from launching by the appStore\n");
+    if (HdcDeviceBackend::startSucceeded(result)
+        || !HdcDeviceBackend::startOutputReportsFailure(result)
+        || !HdcDeviceBackend::resultSummary(result).contains(QStringLiteral("device_security_control"))) {
+        return fail(QStringLiteral("device security controlled launches should be reported distinctly"));
     }
 
     result.standardOutput = QStringLiteral(

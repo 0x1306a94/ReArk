@@ -49,10 +49,16 @@ struct DeviceLaunchMetadata {
 
 struct DeviceInstallResult {
     bool installed = false;
+    bool needsDowngradeRecovery = false;
     DeviceInstallStatus status = DeviceInstallStatus::None;
     DeviceInstallError error = DeviceInstallError::None;
     QString commandLog;
     DeviceLaunchMetadata launchMetadata;
+    QString signedHapPath;
+    QString retainedDirectory;
+    QString uninstallBundleName;
+    QString launchMetadataSourcePath;
+    DeviceInstallStatus downgradeRecoverySuccessStatus = DeviceInstallStatus::None;
 };
 
 struct DeviceInstallProbeResult {
@@ -61,6 +67,14 @@ struct DeviceInstallProbeResult {
     DeviceInstallStatus status = DeviceInstallStatus::None;
     DeviceInstallError error = DeviceInstallError::None;
     CommandResult initialInstall;
+    DeviceLaunchMetadata launchMetadata;
+};
+
+struct DeviceDowngradeRecoveryResult {
+    bool installed = false;
+    DeviceInstallStatus status = DeviceInstallStatus::None;
+    DeviceInstallError error = DeviceInstallError::None;
+    QString commandLog;
     DeviceLaunchMetadata launchMetadata;
 };
 
@@ -129,30 +143,6 @@ bool isDeviceRuntimeTemporaryFile(const QString& fileName)
 {
     return (fileName.startsWith(QStringLiteral("reark-device-")) && fileName.endsWith(QStringLiteral(".jpeg")))
         || (fileName.startsWith(QStringLiteral("reark-ui-layout-")) && fileName.endsWith(QStringLiteral(".json")));
-}
-
-bool isMissingSignatureInstallFailure(const CommandResult& result)
-{
-    const QString text = QStringLiteral("%1\n%2\n%3")
-        .arg(result.standardOutput, result.standardError, result.errorMessage)
-        .toCaseFolded();
-    return text.contains(QStringLiteral("no signature file"))
-        || text.contains(QStringLiteral("missing signature"))
-        || text.contains(QStringLiteral("signature file not found"))
-        || text.contains(QStringLiteral("not signed"))
-        || text.contains(QStringLiteral("verify signature"))
-        || text.contains(QStringLiteral("signature verify"));
-}
-
-bool isSigningProfileUnauthorizedInstallFailure(const CommandResult& result)
-{
-    const QString text = QStringLiteral("%1\n%2\n%3")
-        .arg(result.standardOutput, result.standardError, result.errorMessage)
-        .toCaseFolded();
-    return text.contains(QStringLiteral("device is unauthorized"))
-        || text.contains(QStringLiteral("udid of your device is configured in the signing profile"))
-        || (text.contains(QStringLiteral("udid")) && text.contains(QStringLiteral("signing profile")))
-        || text.contains(QStringLiteral("code:9568423"));
 }
 
 QString signedHapFileName(const QString& sourcePath)
@@ -320,6 +310,31 @@ QString signingSettingsStatusLine(const QString& validationMessage)
         : QStringLiteral("# signing_settings: invalid\n# signing_settings_error: %1").arg(validationMessage);
 }
 
+bool hdcUninstallSucceeded(const CommandResult& result)
+{
+    const QString text = QStringLiteral("%1\n%2\n%3")
+        .arg(result.standardOutput, result.standardError, result.errorMessage)
+        .toCaseFolded();
+    return result.succeeded()
+        && !text.contains(QStringLiteral("error:"))
+        && !text.contains(QStringLiteral("failed to uninstall"))
+        && !text.contains(QStringLiteral("fail to uninstall"));
+}
+
+void cleanupRetainedSignedHapDirectory(const QString& path)
+{
+    const QFileInfo info(path);
+    const QString absolutePath = QDir::cleanPath(info.absoluteFilePath());
+    const QString tempRoot = QDir::cleanPath(QFileInfo(QDir::tempPath()).absoluteFilePath());
+    if (!info.exists()
+        || !info.isDir()
+        || !absolutePath.startsWith(tempRoot + QLatin1Char('/'))
+        || !info.fileName().startsWith(QStringLiteral("ReArk-device-signed-hap-"))) {
+        return;
+    }
+    QDir(absolutePath).removeRecursively();
+}
+
 QString installAttemptSummary(
     const CommandResult& initialInstall,
     const CommandResult& signResult,
@@ -360,6 +375,30 @@ QString installAttemptSummary(
     return text.trimmed();
 }
 
+QString downgradeRecoverySummary(
+    const CommandResult& uninstallResult,
+    const CommandResult& retryInstallResult,
+    const QString& bundleName,
+    const QString& signedHapPath,
+    const QString& extra)
+{
+    QString text;
+    text += QStringLiteral("# status: %1\n").arg(
+        HdcDeviceBackend::installSucceeded(retryInstallResult) ? QStringLiteral("ok") : QStringLiteral("error"));
+    text += QStringLiteral("# operation: install_package\n");
+    text += QStringLiteral("# downgrade_recovery: uninstall_and_retry\n");
+    text += QStringLiteral("# uninstall_bundle: %1\n").arg(bundleName);
+    text += QStringLiteral("# signed_hap: %1\n").arg(signedHapPath);
+    if (!extra.trimmed().isEmpty()) {
+        text += extra.trimmed() + QStringLiteral("\n");
+    }
+    text += QStringLiteral("\n[uninstall]\n%1\n").arg(HdcDeviceBackend::resultSummary(uninstallResult));
+    if (retryInstallResult.started || !retryInstallResult.program.isEmpty()) {
+        text += QStringLiteral("\n[retry signed install]\n%1").arg(HdcDeviceBackend::resultSummary(retryInstallResult));
+    }
+    return text.trimmed();
+}
+
 DeviceInstallResult unexpectedInstallFailureResult(
     const CommandResult& initialInstall,
     const QString& exceptionText)
@@ -372,6 +411,87 @@ DeviceInstallResult unexpectedInstallFailureResult(
                 : exceptionText.trimmed(),
             HdcDeviceBackend::resultSummary(initialInstall))
         .trimmed();
+    return result;
+}
+
+DeviceDowngradeRecoveryResult unexpectedDowngradeRecoveryFailureResult(const QString& exceptionText)
+{
+    DeviceDowngradeRecoveryResult result;
+    result.error = DeviceInstallError::UnexpectedFailure;
+    result.commandLog = QStringLiteral("# status: error\n# operation: install_package\n# downgrade_recovery: failed\n# exception: %1")
+        .arg(exceptionText.trimmed().isEmpty()
+                ? QStringLiteral("unknown")
+                : exceptionText.trimmed())
+        .trimmed();
+    return result;
+}
+
+DeviceDowngradeRecoveryResult recoverInstallVersionDowngrade(
+    const QString& signedHapPath,
+    const QString& targetId,
+    const QString& uninstallBundleName,
+    const QString& launchMetadataSourcePath,
+    DeviceInstallStatus successStatus,
+    std::stop_token stopToken)
+{
+    DeviceDowngradeRecoveryResult result;
+    HdcDeviceBackend backend;
+
+    const CommandResult uninstallResult = CommandRunner::runBlocking(
+        backend.uninstallRequest(uninstallBundleName, targetId),
+        stopToken);
+    if (stopToken.stop_requested()) {
+        result.error = DeviceInstallError::Cancelled;
+        result.commandLog = downgradeRecoverySummary(
+            uninstallResult,
+            {},
+            uninstallBundleName,
+            signedHapPath,
+            QStringLiteral("# cancelled: true"));
+        return result;
+    }
+    if (!hdcUninstallSucceeded(uninstallResult)) {
+        result.error = DeviceInstallError::UninstallFailed;
+        result.commandLog = downgradeRecoverySummary(
+            uninstallResult,
+            {},
+            uninstallBundleName,
+            signedHapPath,
+            {});
+        return result;
+    }
+
+    const CommandResult retryInstallResult = CommandRunner::runBlocking(
+        backend.installRequest(signedHapPath, targetId),
+        stopToken);
+    if (stopToken.stop_requested()) {
+        result.error = DeviceInstallError::Cancelled;
+        result.commandLog = downgradeRecoverySummary(
+            uninstallResult,
+            retryInstallResult,
+            uninstallBundleName,
+            signedHapPath,
+            QStringLiteral("# cancelled: true"));
+        return result;
+    }
+
+    result.installed = HdcDeviceBackend::installSucceeded(retryInstallResult);
+    if (result.installed) {
+        result.status = successStatus == DeviceInstallStatus::None
+            ? DeviceInstallStatus::SignedInstalled
+            : successStatus;
+        result.launchMetadata = readLaunchMetadata(launchMetadataSourcePath);
+    } else {
+        result.error = HdcDeviceBackend::classifyInstallFailure(retryInstallResult) == HdcInstallFailureKind::SigningProfileUnauthorized
+            ? DeviceInstallError::SigningProfileUnauthorized
+            : DeviceInstallError::SignedInstallFailed;
+    }
+    result.commandLog = downgradeRecoverySummary(
+        uninstallResult,
+        retryInstallResult,
+        uninstallBundleName,
+        signedHapPath,
+        {});
     return result;
 }
 
@@ -394,7 +514,7 @@ DeviceInstallResult installPackageWithAutoSigning(
     const HarmonySigningSettings signingSettings = SigningSettingsStore::loadHarmony();
     const QString validationMessage = SigningSettingsStore::harmonyValidationMessage(signingSettings);
     if (!validationMessage.isEmpty()) {
-        result.error = DeviceInstallError::UnsignedWithoutSigning;
+        result.error = DeviceInstallError::SignatureRejectedWithoutSigning;
         result.commandLog = QStringLiteral("# status: error\n# operation: install_package\n# re_sign: approved_by_user\n# auto_sign: unavailable\n%1\n\n%2")
             .arg(signingSettingsStatusLine(validationMessage), HdcDeviceBackend::resultSummary(initialInstall));
         return result;
@@ -513,9 +633,34 @@ DeviceInstallResult installPackageWithAutoSigning(
         result.launchMetadata = readLaunchMetadata(signInputHapPath);
     } else {
         signedDir.setAutoRemove(false);
-        result.error = isSigningProfileUnauthorizedInstallFailure(signedInstall)
-            ? DeviceInstallError::SigningProfileUnauthorized
-            : DeviceInstallError::SignedInstallFailed;
+        const HdcInstallFailureKind signedInstallFailure = HdcDeviceBackend::classifyInstallFailure(signedInstall);
+        if (signedInstallFailure == HdcInstallFailureKind::VersionDowngrade) {
+            DeviceLaunchMetadata launchMetadata = readLaunchMetadata(signInputHapPath);
+            QString uninstallBundleName = rewriteUsed
+                ? materialStatus.profileBundleName.trimmed()
+                : packageIdentity.bundleName.trimmed();
+            if (uninstallBundleName.isEmpty()) {
+                uninstallBundleName = launchMetadata.bundleName.trimmed();
+            }
+            if (!uninstallBundleName.isEmpty()) {
+                result.needsDowngradeRecovery = true;
+                result.status = DeviceInstallStatus::RequiresDowngradeRecovery;
+                result.error = DeviceInstallError::InstallVersionDowngrade;
+                result.signedHapPath = signedHapPath;
+                result.retainedDirectory = signedDir.path();
+                result.uninstallBundleName = uninstallBundleName;
+                result.launchMetadataSourcePath = signInputHapPath;
+                result.downgradeRecoverySuccessStatus = rewriteUsed
+                    ? DeviceInstallStatus::SignedRewrittenInstalled
+                    : DeviceInstallStatus::SignedInstalled;
+            } else {
+                result.error = DeviceInstallError::InstallVersionDowngrade;
+            }
+        } else {
+            result.error = signedInstallFailure == HdcInstallFailureKind::SigningProfileUnauthorized
+                ? DeviceInstallError::SigningProfileUnauthorized
+                : DeviceInstallError::SignedInstallFailed;
+        }
     }
 
     QString extra = QStringLiteral("# re_sign: approved_by_user\n# auto_sign: used\n# bundle_rewrite: %1\n%2")
@@ -529,6 +674,10 @@ DeviceInstallResult installPackageWithAutoSigning(
     }
     if (!result.installed) {
         extra += QStringLiteral("\n# signed_hap: %1\n# retained_dir: %2").arg(signedHapPath, signedDir.path());
+    }
+    if (result.needsDowngradeRecovery) {
+        extra += QStringLiteral("\n# downgrade_recovery: requires_user_confirmation\n# uninstall_bundle: %1")
+            .arg(result.uninstallBundleName);
     }
     if (!packageIdentity.summaryError.isEmpty()) {
         extra += QStringLiteral("\n# package_summary_warning: %1").arg(packageIdentity.summaryError);
@@ -563,13 +712,15 @@ DeviceInstallProbeResult probeInstallPackage(
         return result;
     }
 
-    if (isMissingSignatureInstallFailure(result.initialInstall)) {
+    const HdcInstallFailureKind initialFailure = HdcDeviceBackend::classifyInstallFailure(result.initialInstall);
+    if (initialFailure == HdcInstallFailureKind::SignatureRejected) {
         result.needsSigningApproval = true;
-        result.status = DeviceInstallStatus::RequiresSigning;
+        result.status = DeviceInstallStatus::RequiresSignatureApproval;
         return result;
     }
-    if (isSigningProfileUnauthorizedInstallFailure(result.initialInstall)) {
-        result.error = DeviceInstallError::SigningProfileUnauthorized;
+    if (initialFailure == HdcInstallFailureKind::SigningProfileUnauthorized) {
+        result.needsSigningApproval = true;
+        result.status = DeviceInstallStatus::RequiresAuthorizedSigningProfile;
         return result;
     }
 
@@ -811,9 +962,7 @@ void DeviceRuntimeController::installPackage(const QString& packagePath)
         return;
     }
 
-    hasPendingSigningInstall_ = false;
-    pendingSigningPackagePath_.clear();
-    pendingSigningTargetId_.clear();
+    clearPendingInstallState(true);
     installStopSource_ = std::stop_source {};
     const std::stop_token stopToken = installStopSource_.get_token();
     const quint64 runId = ++asyncInstallRunId_;
@@ -858,11 +1007,19 @@ void DeviceRuntimeController::installPackage(const QString& packagePath)
         pendingSigningTargetId_ = targetId;
         pendingSigningInitialInstall_ = result.initialInstall;
         hasPendingSigningInstall_ = true;
-        setStatus(tr("Install requires signing confirmation."));
+        setStatus(result.status == DeviceInstallStatus::None
+                ? tr("Install requires signing confirmation.")
+                : translatedInstallStatus(result.status));
         setBusy(false);
-        emit resignInstallConfirmationRequested(
-            tr("Re-sign and install package?"),
-            tr("The device rejected this package because its signature is missing or invalid. ReArk can use your configured Harmony signing material to re-sign the package and install the signed copy."));
+        if (result.status == DeviceInstallStatus::RequiresAuthorizedSigningProfile) {
+            emit resignInstallConfirmationRequested(
+                tr("Re-sign for this device and install package?"),
+                tr("The device rejected this package because its signing profile does not authorize the connected device UDID. Use the configured Harmony signing files to re-sign and install?"));
+        } else {
+            emit resignInstallConfirmationRequested(
+                tr("Re-sign and install package?"),
+                tr("The device rejected this package because its signature is missing, invalid, or from an untrusted source. Use the configured Harmony signing files to re-sign and install?"));
+        }
     });
     probeWatcher->setFuture(QtConcurrent::run([trimmed, targetId, stopToken]() {
         try {
@@ -922,6 +1079,27 @@ void DeviceRuntimeController::approveResignInstall()
             emit commandLogChanged();
         }
 
+        if (result.needsDowngradeRecovery) {
+            pendingDowngradePackagePath_ = packagePath;
+            pendingDowngradeTargetId_ = targetId;
+            pendingDowngradeSignedHapPath_ = result.signedHapPath;
+            pendingDowngradeRetainedDirectory_ = result.retainedDirectory;
+            pendingDowngradeUninstallBundleName_ = result.uninstallBundleName;
+            pendingDowngradeLaunchMetadataSourcePath_ = result.launchMetadataSourcePath;
+            pendingDowngradeSuccessStatus_ = result.downgradeRecoverySuccessStatus;
+            hasPendingDowngradeRecovery_ = true;
+            setStatus(tr("Package re-signing succeeded. A newer version of the app package (%1) already exists on the device. Choose whether to overwrite install.")
+                    .arg(result.uninstallBundleName));
+            setBusy(false);
+            emit installDowngradeRecoveryConfirmationRequested(
+                tr("Overwrite install"),
+                tr("Package re-signing succeeded. A newer version of the app package (%1) already exists on the device. Overwrite install?")
+                    .arg(result.uninstallBundleName)
+                    + QStringLiteral("\n\n")
+                    + tr("Overwrite install will uninstall the existing app package, then install the re-signed package."));
+            return;
+        }
+
         if (result.installed) {
             if (hasLaunchMetadata(result.launchMetadata)) {
                 saveInstalledLaunchMetadata(packagePath, targetId, result.launchMetadata);
@@ -972,6 +1150,118 @@ void DeviceRuntimeController::rejectResignInstall()
     pendingSigningPackagePath_.clear();
     pendingSigningTargetId_.clear();
     setErrorMessage(tr("Install cancelled. Package signing was not approved."));
+}
+
+void DeviceRuntimeController::approveDowngradeRecovery()
+{
+    if (!hasPendingDowngradeRecovery_) {
+        setErrorMessage(tr("No install downgrade recovery is waiting for approval."));
+        return;
+    }
+    if (busy_) {
+        setErrorMessage(tr("Another device operation is still running."));
+        return;
+    }
+
+    const QString packagePath = pendingDowngradePackagePath_;
+    const QString targetId = pendingDowngradeTargetId_;
+    const QString signedHapPath = pendingDowngradeSignedHapPath_;
+    const QString retainedDirectory = pendingDowngradeRetainedDirectory_;
+    const QString uninstallBundleName = pendingDowngradeUninstallBundleName_;
+    const QString launchMetadataSourcePath = pendingDowngradeLaunchMetadataSourcePath_;
+    const DeviceInstallStatus successStatus = pendingDowngradeSuccessStatus_;
+    hasPendingDowngradeRecovery_ = false;
+    pendingDowngradePackagePath_.clear();
+    pendingDowngradeTargetId_.clear();
+    pendingDowngradeSignedHapPath_.clear();
+    pendingDowngradeRetainedDirectory_.clear();
+    pendingDowngradeUninstallBundleName_.clear();
+    pendingDowngradeLaunchMetadataSourcePath_.clear();
+    pendingDowngradeSuccessStatus_ = DeviceInstallStatus::None;
+    installStopSource_ = std::stop_source {};
+    const std::stop_token stopToken = installStopSource_.get_token();
+    const quint64 runId = ++asyncInstallRunId_;
+
+    setBusy(true, tr("Overwrite install"));
+    setErrorMessage({});
+    setStatus(tr("Overwrite installing package..."));
+    auto* watcher = new QFutureWatcher<DeviceDowngradeRecoveryResult>(this);
+    connect(watcher, &QFutureWatcher<DeviceDowngradeRecoveryResult>::finished, this, [this, watcher, packagePath, targetId, retainedDirectory, runId]() {
+        const DeviceDowngradeRecoveryResult result = watcher->result();
+        watcher->deleteLater();
+        if (runId != asyncInstallRunId_) {
+            return;
+        }
+
+        if (!result.commandLog.trimmed().isEmpty()) {
+            if (!commandLog_.isEmpty()) {
+                commandLog_ += QStringLiteral("\n\n");
+            }
+            commandLog_ += result.commandLog.trimmed();
+            emit commandLogChanged();
+        }
+
+        if (result.installed) {
+            cleanupRetainedSignedHapDirectory(retainedDirectory);
+            if (hasLaunchMetadata(result.launchMetadata)) {
+                saveInstalledLaunchMetadata(packagePath, targetId, result.launchMetadata);
+                setLaunchMetadata(
+                    result.launchMetadata.bundleName,
+                    result.launchMetadata.moduleName,
+                    result.launchMetadata.abilityName);
+            }
+            setStatus(result.status == DeviceInstallStatus::None
+                    ? tr("Package installed.")
+                    : translatedInstallStatus(result.status));
+        } else {
+            setErrorMessage(result.error == DeviceInstallError::None
+                    ? tr("Install package failed.")
+                    : translatedInstallError(result.error));
+        }
+        setBusy(false);
+    });
+    watcher->setFuture(QtConcurrent::run([signedHapPath, targetId, uninstallBundleName, launchMetadataSourcePath, successStatus, stopToken]() {
+        try {
+            return recoverInstallVersionDowngrade(
+                signedHapPath,
+                targetId,
+                uninstallBundleName,
+                launchMetadataSourcePath,
+                successStatus,
+                stopToken);
+        } catch (const std::exception& ex) {
+            return unexpectedDowngradeRecoveryFailureResult(
+                QStringLiteral("Downgrade recovery worker threw exception: %1").arg(QString::fromUtf8(ex.what())));
+        } catch (...) {
+            return unexpectedDowngradeRecoveryFailureResult(
+                QStringLiteral("Downgrade recovery worker threw unknown exception."));
+        }
+    }));
+}
+
+void DeviceRuntimeController::rejectDowngradeRecovery()
+{
+    if (!hasPendingDowngradeRecovery_) {
+        return;
+    }
+
+    if (!commandLog_.isEmpty()) {
+        commandLog_ += QStringLiteral("\n\n");
+    }
+    commandLog_ += QStringLiteral("# status: error\n# operation: install_package\n# downgrade_recovery: rejected_by_user\n# uninstall_bundle: %1")
+        .arg(pendingDowngradeUninstallBundleName_);
+    emit commandLogChanged();
+
+    cleanupRetainedSignedHapDirectory(pendingDowngradeRetainedDirectory_);
+    hasPendingDowngradeRecovery_ = false;
+    pendingDowngradePackagePath_.clear();
+    pendingDowngradeTargetId_.clear();
+    pendingDowngradeSignedHapPath_.clear();
+    pendingDowngradeRetainedDirectory_.clear();
+    pendingDowngradeUninstallBundleName_.clear();
+    pendingDowngradeLaunchMetadataSourcePath_.clear();
+    pendingDowngradeSuccessStatus_ = DeviceInstallStatus::None;
+    setErrorMessage(tr("Install cancelled. Overwrite install was not approved."));
 }
 
 void DeviceRuntimeController::startAbility(const QString& bundleName, const QString& abilityName)
@@ -1097,12 +1387,16 @@ void DeviceRuntimeController::captureScreenshot(ScreenshotRequestKind kind)
     const QString remotePath = QStringLiteral("/data/local/tmp/reark-screenshot.jpeg");
     const QString localPath = makeLocalScreenshotPath();
     const bool autoRefresh = kind == ScreenshotRequestKind::AutoRefresh;
+    const quint64 runtimeSessionId = runtimeSessionId_;
     setBusy(true, autoRefresh ? tr("Refresh screen") : tr("Capture screenshot"));
     setErrorMessage({});
 
     activeCommandId_ = runner_.run(
         backend_.screenshotCaptureRequest(remotePath, currentTargetId()),
-        [this, remotePath, localPath, autoRefresh](const CommandResult& captureResult) {
+        [this, remotePath, localPath, autoRefresh, runtimeSessionId](const CommandResult& captureResult) {
+            if (runtimeSessionId != runtimeSessionId_) {
+                return;
+            }
             appendCommandLog(captureResult);
             if (!captureResult.succeeded()) {
                 activeCommandId_ = 0;
@@ -1117,7 +1411,11 @@ void DeviceRuntimeController::captureScreenshot(ScreenshotRequestKind kind)
 
             activeCommandId_ = runner_.run(
                 backend_.receiveFileRequest(remotePath, localPath, currentTargetId()),
-                [this, remotePath, localPath, autoRefresh](const CommandResult& receiveResult) {
+                [this, remotePath, localPath, autoRefresh, runtimeSessionId](const CommandResult& receiveResult) {
+                    if (runtimeSessionId != runtimeSessionId_) {
+                        QFile::remove(localPath);
+                        return;
+                    }
                     appendCommandLog(receiveResult);
                     runner_.run(backend_.removeRemoteFileRequest(remotePath, currentTargetId()), [](const CommandResult&) {});
                     activeCommandId_ = 0;
@@ -1169,12 +1467,18 @@ void DeviceRuntimeController::captureUiSnapshot(const QString& bundleName)
     const QString screenshotLocalPath = makeLocalScreenshotPath();
     const QString layoutLocalPath = makeLocalLayoutPath();
     const QString targetId = currentTargetId();
+    const quint64 runtimeSessionId = runtimeSessionId_;
     setBusy(true, tr("Capture UI snapshot"));
     setErrorMessage({});
 
     activeCommandId_ = runner_.run(
         backend_.screenshotCaptureRequest(screenshotRemotePath, targetId),
-        [this, screenshotRemotePath, layoutRemotePath, screenshotLocalPath, layoutLocalPath, targetId, bundleName](const CommandResult& captureResult) {
+        [this, screenshotRemotePath, layoutRemotePath, screenshotLocalPath, layoutLocalPath, targetId, bundleName, runtimeSessionId](const CommandResult& captureResult) {
+            if (runtimeSessionId != runtimeSessionId_) {
+                QFile::remove(screenshotLocalPath);
+                QFile::remove(layoutLocalPath);
+                return;
+            }
             appendCommandLog(captureResult);
             if (!captureResult.succeeded()) {
                 activeCommandId_ = 0;
@@ -1185,7 +1489,12 @@ void DeviceRuntimeController::captureUiSnapshot(const QString& bundleName)
 
             activeCommandId_ = runner_.run(
                 backend_.receiveFileRequest(screenshotRemotePath, screenshotLocalPath, targetId),
-                [this, screenshotRemotePath, layoutRemotePath, screenshotLocalPath, layoutLocalPath, targetId, bundleName](const CommandResult& screenshotReceiveResult) {
+                [this, screenshotRemotePath, layoutRemotePath, screenshotLocalPath, layoutLocalPath, targetId, bundleName, runtimeSessionId](const CommandResult& screenshotReceiveResult) {
+                    if (runtimeSessionId != runtimeSessionId_) {
+                        QFile::remove(screenshotLocalPath);
+                        QFile::remove(layoutLocalPath);
+                        return;
+                    }
                     appendCommandLog(screenshotReceiveResult);
                     runner_.run(backend_.removeRemoteFileRequest(screenshotRemotePath, targetId), [](const CommandResult&) {});
                     if (!screenshotReceiveResult.succeeded() || !QFileInfo::exists(screenshotLocalPath)) {
@@ -1203,7 +1512,11 @@ void DeviceRuntimeController::captureUiSnapshot(const QString& bundleName)
 
                     activeCommandId_ = runner_.run(
                         uiBackend_.dumpLayoutRequest(layoutRemotePath, targetId, bundleName),
-                        [this, layoutRemotePath, layoutLocalPath, targetId](const CommandResult& dumpResult) {
+                        [this, layoutRemotePath, layoutLocalPath, targetId, runtimeSessionId](const CommandResult& dumpResult) {
+                            if (runtimeSessionId != runtimeSessionId_) {
+                                QFile::remove(layoutLocalPath);
+                                return;
+                            }
                             appendCommandLog(dumpResult);
                             if (!dumpResult.succeeded()) {
                                 activeCommandId_ = 0;
@@ -1214,7 +1527,11 @@ void DeviceRuntimeController::captureUiSnapshot(const QString& bundleName)
 
                             activeCommandId_ = runner_.run(
                                 backend_.receiveFileRequest(layoutRemotePath, layoutLocalPath, targetId),
-                                [this, layoutRemotePath, layoutLocalPath, targetId](const CommandResult& layoutReceiveResult) {
+                                [this, layoutRemotePath, layoutLocalPath, targetId, runtimeSessionId](const CommandResult& layoutReceiveResult) {
+                                    if (runtimeSessionId != runtimeSessionId_) {
+                                        QFile::remove(layoutLocalPath);
+                                        return;
+                                    }
                                     appendCommandLog(layoutReceiveResult);
                                     runner_.run(backend_.removeRemoteFileRequest(layoutRemotePath, targetId), [](const CommandResult&) {});
                                     activeCommandId_ = 0;
@@ -1256,12 +1573,18 @@ void DeviceRuntimeController::refreshUiLayout(const QString& bundleName)
 
     const QString remotePath = QStringLiteral("/data/local/tmp/reark-ui-layout.json");
     const QString localPath = makeLocalLayoutPath();
+    const QString targetId = currentTargetId();
+    const quint64 runtimeSessionId = runtimeSessionId_;
     setBusy(true, tr("Refresh UI layout"));
     setErrorMessage({});
 
     activeCommandId_ = runner_.run(
-        uiBackend_.dumpLayoutRequest(remotePath, currentTargetId(), bundleName),
-        [this, remotePath, localPath](const CommandResult& dumpResult) {
+        uiBackend_.dumpLayoutRequest(remotePath, targetId, bundleName),
+        [this, remotePath, localPath, targetId, runtimeSessionId](const CommandResult& dumpResult) {
+            if (runtimeSessionId != runtimeSessionId_) {
+                QFile::remove(localPath);
+                return;
+            }
             appendCommandLog(dumpResult);
             if (!dumpResult.succeeded()) {
                 activeCommandId_ = 0;
@@ -1271,10 +1594,14 @@ void DeviceRuntimeController::refreshUiLayout(const QString& bundleName)
             }
 
             activeCommandId_ = runner_.run(
-                backend_.receiveFileRequest(remotePath, localPath, currentTargetId()),
-                [this, remotePath, localPath](const CommandResult& receiveResult) {
+                backend_.receiveFileRequest(remotePath, localPath, targetId),
+                [this, remotePath, localPath, targetId, runtimeSessionId](const CommandResult& receiveResult) {
+                    if (runtimeSessionId != runtimeSessionId_) {
+                        QFile::remove(localPath);
+                        return;
+                    }
                     appendCommandLog(receiveResult);
-                    runner_.run(backend_.removeRemoteFileRequest(remotePath, currentTargetId()), [](const CommandResult&) {});
+                    runner_.run(backend_.removeRemoteFileRequest(remotePath, targetId), [](const CommandResult&) {});
                     activeCommandId_ = 0;
                     if (!receiveResult.succeeded() || !QFileInfo::exists(localPath)) {
                         QFile::remove(localPath);
@@ -1427,21 +1754,47 @@ void DeviceRuntimeController::cancel()
 {
     installStopSource_.request_stop();
     if (hasPendingSigningInstall_) {
-        hasPendingSigningInstall_ = false;
-        pendingSigningPackagePath_.clear();
-        pendingSigningTargetId_.clear();
+        clearPendingInstallState(false);
+        setStatus(tr("Install cancelled."));
+    }
+    if (hasPendingDowngradeRecovery_) {
+        clearPendingInstallState(true);
         setStatus(tr("Install cancelled."));
     }
     if (activeCommandId_ != 0) {
         runner_.cancel(activeCommandId_);
     }
     if (busy_ && (activeOperation_ == tr("Install package")
-            || activeOperation_ == tr("Re-sign and install package"))) {
+            || activeOperation_ == tr("Re-sign and install package")
+            || activeOperation_ == tr("Overwrite install"))) {
         ++asyncInstallRunId_;
         setErrorMessage({});
         setStatus(tr("Install cancelled."));
         setBusy(false);
     }
+}
+
+void DeviceRuntimeController::resetForPackageChange()
+{
+    ++runtimeSessionId_;
+    ++asyncInstallRunId_;
+    installStopSource_.request_stop();
+    clearPendingInstallState(true);
+    if (activeCommandId_ != 0) {
+        runner_.cancel(activeCommandId_);
+        activeCommandId_ = 0;
+    }
+    if (busy_) {
+        setBusy(false);
+    }
+    clearDeviceSessionState();
+    setLaunchMetadata({}, {}, {});
+    if (!commandLog_.isEmpty()) {
+        commandLog_.clear();
+        emit commandLogChanged();
+    }
+    setErrorMessage({});
+    setStatus(tr("Ready"));
 }
 
 void DeviceRuntimeController::clearOutput()
@@ -1476,7 +1829,11 @@ void DeviceRuntimeController::runOperation(
 
     setBusy(true, operation);
     setErrorMessage({});
-    activeCommandId_ = runner_.run(request, [this, operation, onFinished = std::move(onFinished)](const CommandResult& result) {
+    const quint64 runtimeSessionId = runtimeSessionId_;
+    activeCommandId_ = runner_.run(request, [this, operation, runtimeSessionId, onFinished = std::move(onFinished)](const CommandResult& result) {
+        if (runtimeSessionId != runtimeSessionId_) {
+            return;
+        }
         activeCommandId_ = 0;
         appendCommandLog(result);
         if (result.succeeded()) {
@@ -1603,6 +1960,25 @@ void DeviceRuntimeController::clearDeviceSessionState()
     }
 }
 
+void DeviceRuntimeController::clearPendingInstallState(bool cleanupRetainedSignedHap)
+{
+    if (cleanupRetainedSignedHap) {
+        cleanupRetainedSignedHapDirectory(pendingDowngradeRetainedDirectory_);
+    }
+    hasPendingSigningInstall_ = false;
+    pendingSigningPackagePath_.clear();
+    pendingSigningTargetId_.clear();
+    pendingSigningInitialInstall_ = {};
+    hasPendingDowngradeRecovery_ = false;
+    pendingDowngradePackagePath_.clear();
+    pendingDowngradeTargetId_.clear();
+    pendingDowngradeSignedHapPath_.clear();
+    pendingDowngradeRetainedDirectory_.clear();
+    pendingDowngradeUninstallBundleName_.clear();
+    pendingDowngradeLaunchMetadataSourcePath_.clear();
+    pendingDowngradeSuccessStatus_ = DeviceInstallStatus::None;
+}
+
 bool DeviceRuntimeController::ensureDeviceAvailable()
 {
     if (!currentTargetId().isEmpty()) {
@@ -1621,8 +1997,12 @@ QString DeviceRuntimeController::translatedInstallStatus(DeviceInstallStatus sta
         return tr("Package signed and installed.");
     case DeviceInstallStatus::SignedRewrittenInstalled:
         return tr("Package signed, rewritten, and installed.");
-    case DeviceInstallStatus::RequiresSigning:
-        return tr("Install requires package signing.");
+    case DeviceInstallStatus::RequiresSignatureApproval:
+        return tr("Install requires a trusted package signature.");
+    case DeviceInstallStatus::RequiresAuthorizedSigningProfile:
+        return tr("Install requires re-signing with a profile authorized for this device.");
+    case DeviceInstallStatus::RequiresDowngradeRecovery:
+        return tr("Package re-signing succeeded. A newer version already exists on the device. Choose whether to overwrite install.");
     case DeviceInstallStatus::None:
         break;
     }
@@ -1634,8 +2014,8 @@ QString DeviceRuntimeController::translatedInstallError(DeviceInstallError error
     switch (error) {
     case DeviceInstallError::InstallFailed:
         return tr("Install failed. Check the command log for the HDC error code and device message.");
-    case DeviceInstallError::UnsignedWithoutSigning:
-        return tr("Install failed because the package is unsigned. Configure Harmony signing in Settings.");
+    case DeviceInstallError::SignatureRejectedWithoutSigning:
+        return tr("Install failed because the device rejected the package signature. Configure Harmony signing in Settings.");
     case DeviceInstallError::TemporaryDirectoryFailed:
         return tr("Could not create temporary signed HAP directory.");
     case DeviceInstallError::BundleRewriteFailed:
@@ -1646,6 +2026,10 @@ QString DeviceRuntimeController::translatedInstallError(DeviceInstallError error
         return tr("Signed package install failed.");
     case DeviceInstallError::SigningProfileUnauthorized:
         return tr("Install failed because the signing profile does not authorize this device UDID. Re-sign with a debug profile that includes the connected device, then retry.");
+    case DeviceInstallError::InstallVersionDowngrade:
+        return tr("Signed package install failed because a newer version is already installed on the device.");
+    case DeviceInstallError::UninstallFailed:
+        return tr("Could not uninstall the existing bundle. Check the command log for the HDC error code and device message.");
     case DeviceInstallError::Cancelled:
         return tr("Install cancelled.");
     case DeviceInstallError::UnexpectedFailure:

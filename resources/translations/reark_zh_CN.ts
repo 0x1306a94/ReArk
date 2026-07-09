@@ -1954,8 +1954,18 @@ Use a model that supports function/tool calling for Agent actions, or run the op
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1500"/>
-        <source>Install requires package signing.</source>
-        <translation>安装需要包签名。</translation>
+        <source>Install requires a trusted package signature.</source>
+        <translation>安装需要可信的应用包签名。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1635"/>
+        <source>Install requires re-signing with a profile authorized for this device.</source>
+        <translation>安装需要使用已授权当前设备的 profile 重新签名。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1975"/>
+        <source>Package re-signing succeeded. A newer version already exists on the device. Choose whether to overwrite install.</source>
+        <translation>应用包重签名成功，设备上已存在版本更新的应用包，请选择是否覆盖安装。</translation>
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="787"/>
@@ -1971,8 +1981,8 @@ Use a model that supports function/tool calling for Agent actions, or run the op
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1513"/>
-        <source>Install failed because the package is unsigned. Configure Harmony signing in Settings.</source>
-        <translation>安装失败：包未签名。请先在设置中配置 Harmony 签名。</translation>
+        <source>Install failed because the device rejected the package signature. Configure Harmony signing in Settings.</source>
+        <translation>安装失败：设备拒绝了应用包签名。请先在设置中配置 Harmony 签名。</translation>
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1515"/>
@@ -2000,6 +2010,16 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <translation>安装失败：签名 profile 未授权当前设备 UDID。请使用包含该设备的调试 profile 重新签名后再试。</translation>
     </message>
     <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="2000"/>
+        <source>Signed package install failed because a newer version is already installed on the device.</source>
+        <translation>已签名包安装失败，因为设备上已安装更新版本。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="2002"/>
+        <source>Could not uninstall the existing bundle. Check the command log for the HDC error code and device message.</source>
+        <translation>无法卸载现有应用包。请查看命令日志中的 HDC 错误码和设备消息。</translation>
+    </message>
+    <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="797"/>
         <source>Install requires signing confirmation.</source>
         <translation>安装需要确认重签名。</translation>
@@ -2010,14 +2030,44 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <translation>要重签名并安装包吗？</translation>
     </message>
     <message>
-        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="801"/>
-        <source>The device rejected this package because its signature is missing or invalid. ReArk can use your configured Harmony signing material to re-sign the package and install the signed copy.</source>
-        <translation>设备拒绝了此包，因为签名缺失或无效。ReArk 可以使用已配置的 Harmony 签名材料重签名该包，并安装签名后的副本。</translation>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="866"/>
+        <source>Re-sign for this device and install package?</source>
+        <translation>要为当前设备重签名并安装包吗？</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="868"/>
+        <source>The device rejected this package because its signing profile does not authorize the connected device UDID. Use the configured Harmony signing files to re-sign and install?</source>
+        <translation>设备拒绝了此包，因为签名 profile 未授权当前连接设备的 UDID。是否使用已配置的Harmony签名文件重签名并安装？</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="872"/>
+        <source>The device rejected this package because its signature is missing, invalid, or from an untrusted source. Use the configured Harmony signing files to re-sign and install?</source>
+        <translation>设备拒绝了此包，因为签名缺失、无效或来源不受信任。是否使用已配置的Harmony签名文件重签名并安装？</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1137"/>
+        <source>Package re-signing succeeded. A newer version of the app package (%1) already exists on the device. Overwrite install?</source>
+        <translation>应用包重签名成功，设备上已存在版本更新的应用包（%1），是否覆盖安装？</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1132"/>
+        <source>Package re-signing succeeded. A newer version of the app package (%1) already exists on the device. Choose whether to overwrite install.</source>
+        <translation>应用包重签名成功，设备上已存在版本更新的应用包（%1），请选择是否覆盖安装。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1138"/>
+        <source>Overwrite install will uninstall the existing app package, then install the re-signed package.</source>
+        <translation>覆盖安装会先卸载设备上的现有应用包，然后安装已重签名的应用包。</translation>
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="811"/>
         <source>No package is waiting for signing approval.</source>
         <translation>没有等待签名确认的包。</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1198"/>
+        <source>No install downgrade recovery is waiting for approval.</source>
+        <translation>没有等待确认的降级安装恢复操作。</translation>
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="829"/>
@@ -2029,6 +2079,21 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="908"/>
         <source>Re-signing and installing package...</source>
         <translation>正在重签名并安装包...</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1226"/>
+        <source>Overwrite install</source>
+        <translation>覆盖安装</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1228"/>
+        <source>Overwrite installing package...</source>
+        <translation>正在覆盖安装应用包...</translation>
+    </message>
+    <message>
+        <location filename="../../src/controller/DeviceRuntimeController.cpp" line="1306"/>
+        <source>Install cancelled. Overwrite install was not approved.</source>
+        <translation>安装已取消。未批准覆盖安装。</translation>
     </message>
     <message>
         <location filename="../../src/controller/DeviceRuntimeController.cpp" line="886"/>
@@ -2502,6 +2567,11 @@ Use a model that supports function/tool calling for Agent actions, or run the op
         <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="859"/>
         <source>Re-sign and Install</source>
         <translation>重签并安装</translation>
+    </message>
+    <message>
+        <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="968"/>
+        <source>Overwrite Install</source>
+        <translation>覆盖安装</translation>
     </message>
     <message>
         <location filename="../../src/ui/qml/ReArk/DeviceRuntimeWorkspace.qml" line="1030"/>

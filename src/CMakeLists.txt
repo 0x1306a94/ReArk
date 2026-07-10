@@ -750,6 +750,9 @@ if(BUILD_TESTING)
         reark_core
         Qt6::Concurrent
     )
+    target_compile_definitions(reark_device_runtime_controller_test PRIVATE
+        REARK_DEVICE_RUNTIME_TESTING
+    )
     if(WIN32)
         target_link_libraries(reark_device_runtime_controller_test PRIVATE Crypt32)
     endif()

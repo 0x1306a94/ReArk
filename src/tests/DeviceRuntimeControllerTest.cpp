@@ -54,6 +54,48 @@ bool waitForLaunchMetadata(DeviceRuntimeController& controller, const QString& p
     return timeout.isActive();
 }
 
+int verifyScreenResolutionParser()
+{
+#ifndef REARK_DEVICE_RUNTIME_TESTING
+    return fail(QStringLiteral("screen resolution parser test hook is disabled"));
+#else
+    const auto expectResolution = [](const QString& output, const QString& expected) -> int {
+        const QString actual = rearkTestScreenResolutionFromOutput(output);
+        if (actual != expected) {
+            return fail(QStringLiteral("screen resolution parser expected %1, got %2 for output: %3")
+                .arg(expected, actual, output));
+        }
+        return 0;
+    };
+
+    if (const int result = expectResolution(
+            QStringLiteral("activeMode: 1260x2720\nrender resolution: 1260x2720\n"),
+            QStringLiteral("2720 x 1260"));
+        result != 0) {
+        return result;
+    }
+    if (const int result = expectResolution(
+            QStringLiteral("screenWidth: 1080\nscreenHeight: 2340\n"),
+            QStringLiteral("2340 x 1080"));
+        result != 0) {
+        return result;
+    }
+    if (const int result = expectResolution(
+            QStringLiteral("Physical size: 1440x3120\nOverride size: 1080x2340\n"),
+            QStringLiteral("3120 x 1440"));
+        result != 0) {
+        return result;
+    }
+    if (const int result = expectResolution(
+            QStringLiteral("noise\nsmall 120x80\n"),
+            QString());
+        result != 0) {
+        return result;
+    }
+    return 0;
+#endif
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -62,6 +104,10 @@ int main(int argc, char* argv[])
         QCoreApplication app(argc, argv);
         QCoreApplication::setOrganizationName(QStringLiteral("ReArkTests"));
         QCoreApplication::setApplicationName(QStringLiteral("DeviceRuntimeControllerTest"));
+
+        if (const int result = verifyScreenResolutionParser(); result != 0) {
+            return result;
+        }
 
         if (argc != 3) {
             return fail(QStringLiteral("usage: reark_device_runtime_controller_test <sample.hap> <app_packing_tool.jar>"));

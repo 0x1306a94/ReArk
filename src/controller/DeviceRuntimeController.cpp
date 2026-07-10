@@ -137,20 +137,6 @@ QString readDeviceShellOutput(
     return result.succeeded() ? result.standardOutput.trimmed() : QString();
 }
 
-QString firstNonEmptyParam(
-    const HdcDeviceBackend& backend,
-    const QString& targetId,
-    const QStringList& names)
-{
-    for (const QString& name : names) {
-        const QString value = readDeviceParam(backend, targetId, name);
-        if (!value.isEmpty()) {
-            return value;
-        }
-    }
-    return {};
-}
-
 QString versionPrefix(const QString& value, int components)
 {
     const QRegularExpression re(QStringLiteral("(\\d+(?:\\.\\d+){%1,})").arg(qMax(0, components - 1)));
@@ -217,38 +203,8 @@ QString probeStorage(const HdcDeviceBackend& backend, const QString& targetId)
     if (!totalOk || !availableOk) {
         return {};
     }
-    return QStringLiteral("%1: %2\n%3: %4")
-        .arg(
-            QStringLiteral("Available"),
-            formattedDecimalGb(availableGb, 2),
-            QStringLiteral("Total"),
-            formattedDecimalGb(totalGb, 0));
-}
-
-QString probeImei(const HdcDeviceBackend& backend, const QString& targetId)
-{
-    QString imei = firstNonEmptyParam(
-        backend,
-        targetId,
-        {
-            QStringLiteral("persist.radio.imei"),
-            QStringLiteral("ril.gsm.imei"),
-            QStringLiteral("gsm.imei"),
-            QStringLiteral("const.product.imei")
-        });
-    imei.replace(QLatin1Char(','), QLatin1Char('\n'));
-    imei.replace(QLatin1Char(';'), QLatin1Char('\n'));
-    const QStringList values = imei.split(QRegularExpression(QStringLiteral("[\\r\\n\\s]+")), Qt::SkipEmptyParts);
-    QStringList cleaned;
-    for (const QString& value : values) {
-        if (value.size() >= 14 && value.size() <= 18 && std::all_of(value.cbegin(), value.cend(), [](const QChar ch) {
-                return ch.isDigit();
-            })) {
-            cleaned.append(value);
-        }
-    }
-    cleaned.removeDuplicates();
-    return cleaned.join(QLatin1Char('\n'));
+    return QStringLiteral("可用 %1 / 总量 %2")
+        .arg(formattedDecimalGb(availableGb, 2), formattedDecimalGb(totalGb, 0));
 }
 
 QString formatResolution(int first, int second)
@@ -261,11 +217,25 @@ QString formatResolution(int first, int second)
 
 QString screenResolutionFromOutput(const QString& output)
 {
-    const QRegularExpression namedPair(
+    const QRegularExpression labelledCompactPair(
+        QStringLiteral("(?:activeMode|physical size|physical resolution|render resolution|override size)\\D{0,32}(\\d{3,5})\\s*[xX]\\s*(\\d{3,5})"),
+        QRegularExpression::CaseInsensitiveOption);
+    QRegularExpressionMatchIterator matches = labelledCompactPair.globalMatch(output);
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        const int first = match.captured(1).toInt();
+        const int second = match.captured(2).toInt();
+        if (first >= 320 && second >= 320) {
+            return formatResolution(first, second);
+        }
+    }
+
+    const QRegularExpression namedWidthHeightPair(
         QStringLiteral("(?:width|screenWidth|physicalWidth)\\D{0,32}(\\d{3,5}).{0,120}(?:height|screenHeight|physicalHeight)\\D{0,32}(\\d{3,5})"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
-    QRegularExpressionMatch match = namedPair.match(output);
-    if (match.hasMatch()) {
+    matches = namedWidthHeightPair.globalMatch(output);
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
         const int width = match.captured(1).toInt();
         const int height = match.captured(2).toInt();
         if (width >= 320 && height >= 320) {
@@ -274,15 +244,16 @@ QString screenResolutionFromOutput(const QString& output)
     }
 
     const QRegularExpression compactPair(QStringLiteral("(\\d{3,5})\\s*[xX]\\s*(\\d{3,5})"));
-    QRegularExpressionMatchIterator matches = compactPair.globalMatch(output);
+    matches = compactPair.globalMatch(output);
     while (matches.hasNext()) {
-        match = matches.next();
+        const QRegularExpressionMatch match = matches.next();
         const int first = match.captured(1).toInt();
         const int second = match.captured(2).toInt();
         if (first >= 320 && second >= 320) {
             return formatResolution(first, second);
         }
     }
+
     return {};
 }
 
@@ -304,24 +275,12 @@ QVariantMap probeDeviceInfo(const HdcDeviceBackend& backend, const QString& targ
     const QString model = readDeviceParam(backend, targetId, QStringLiteral("const.product.model"));
     const QString productName = readDeviceParam(backend, targetId, QStringLiteral("const.product.name"));
     const QString softwareVersion = readDeviceParam(backend, targetId, QStringLiteral("const.product.software.version"));
-    const QString harmonyVersion = firstNonEmptyParam(
-        backend,
-        targetId,
-        {
-            QStringLiteral("const.ohos.version"),
-            QStringLiteral("const.ohos.release"),
-            QStringLiteral("const.ohos.apiversion.release")
-        });
     const QString ohosFullName = readDeviceParam(backend, targetId, QStringLiteral("const.ohos.fullname"));
     const QString apiVersion = readDeviceParam(backend, targetId, QStringLiteral("const.ohos.apiversion"));
     const QString abiList = readDeviceParam(backend, targetId, QStringLiteral("const.product.cpu.abilist"));
     const QString abiSingle = readDeviceParam(backend, targetId, QStringLiteral("const.product.cpu.abi"));
-    const QString windowDensity = readDeviceParam(backend, targetId, QStringLiteral("const.window.density"));
-    const QString persistDpi = readDeviceParam(backend, targetId, QStringLiteral("persist.sys.dpi"));
-    const QString kernel = readDeviceShellValue(backend, targetId, { QStringLiteral("uname"), QStringLiteral("-r") });
     const QString runningMemory = probeRunningMemory(backend, targetId);
     const QString storage = probeStorage(backend, targetId);
-    const QString imei = probeImei(backend, targetId);
     const QString screenResolution = probeScreenResolution(backend, targetId);
 
     if (!model.isEmpty()) {
@@ -334,14 +293,12 @@ QVariantMap probeDeviceInfo(const HdcDeviceBackend& backend, const QString& targ
     }
     if (!softwareVersion.isEmpty()) {
         info.insert(QStringLiteral("softwareVersion"), softwareVersion);
-        info.insert(QStringLiteral("system"), softwareVersion);
     } else if (!ohosFullName.isEmpty()) {
         info.insert(QStringLiteral("ohosFullName"), ohosFullName);
-        info.insert(QStringLiteral("system"), ohosFullName);
     }
-    const QString resolvedHarmonyVersion = !harmonyVersion.isEmpty()
-        ? harmonyVersion
-        : versionPrefix(softwareVersion.isEmpty() ? ohosFullName : softwareVersion, 3);
+    const QString resolvedHarmonyVersion = versionPrefix(
+        softwareVersion.isEmpty() ? ohosFullName : softwareVersion,
+        3);
     if (!resolvedHarmonyVersion.isEmpty()) {
         info.insert(QStringLiteral("harmonyVersion"), resolvedHarmonyVersion);
     }
@@ -353,22 +310,11 @@ QVariantMap probeDeviceInfo(const HdcDeviceBackend& backend, const QString& targ
     } else if (!abiSingle.isEmpty()) {
         info.insert(QStringLiteral("abi"), abiSingle);
     }
-    if (!windowDensity.isEmpty()) {
-        info.insert(QStringLiteral("dpi"), windowDensity);
-    } else if (!persistDpi.isEmpty()) {
-        info.insert(QStringLiteral("dpi"), persistDpi);
-    }
-    if (!kernel.isEmpty()) {
-        info.insert(QStringLiteral("kernel"), kernel);
-    }
     if (!runningMemory.isEmpty()) {
         info.insert(QStringLiteral("runningMemory"), runningMemory);
     }
     if (!storage.isEmpty()) {
         info.insert(QStringLiteral("storage"), storage);
-    }
-    if (!imei.isEmpty()) {
-        info.insert(QStringLiteral("imei"), imei);
     }
     if (!screenResolution.isEmpty()) {
         info.insert(QStringLiteral("screenResolution"), screenResolution);
@@ -1027,6 +973,13 @@ DeviceInstallProbeResult probeInstallPackage(
 }
 
 } // namespace
+
+#ifdef REARK_DEVICE_RUNTIME_TESTING
+QString rearkTestScreenResolutionFromOutput(const QString& output)
+{
+    return screenResolutionFromOutput(output);
+}
+#endif
 
 DeviceRuntimeController::DeviceRuntimeController(QObject* parent)
     : QObject(parent)

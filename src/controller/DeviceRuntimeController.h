@@ -227,4 +227,8 @@ private:
     bool hasPendingDowngradeRecovery_ = false;
 };
 
+#ifdef REARK_DEVICE_RUNTIME_TESTING
+[[nodiscard]] QString rearkTestScreenResolutionFromOutput(const QString& output);
+#endif
+
 #endif // REARK_DEVICE_RUNTIME_CONTROLLER_H

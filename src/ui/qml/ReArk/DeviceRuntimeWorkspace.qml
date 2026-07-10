@@ -18,6 +18,7 @@ Rectangle {
     property string lastAppliedAbilityName: ""
     property bool launchFieldsReady: false
     property int selectedUiNodeIndex: -1
+    property int consoleTabIndex: 0
     property var activeRuntimeOutput: null
     property string pendingInstallPackagePath: ""
     readonly property bool hasUiEvidence: controller !== null && controller.filteredUiNodes.length > 0
@@ -32,6 +33,10 @@ Rectangle {
     readonly property color headerColor: darkTheme ? "#1b1d20" : "#eef2f4"
     readonly property color inputColor: darkTheme ? "#171819" : "#ffffff"
     readonly property color dividerColor: darkTheme ? "#34383d" : "#d5dcdf"
+    readonly property color runtimeSurfaceColor: darkTheme ? "#0f1821" : "#edf3f6"
+    readonly property color runtimePanelColor: darkTheme ? "#13202b" : "#f7fafb"
+    readonly property color runtimeStageColor: darkTheme ? "#091118" : "#dfe8ed"
+    readonly property color runtimeLineColor: darkTheme ? "#243240" : "#ccd7dc"
     readonly property color focusColor: darkTheme ? "#3f8fd2" : "#2f80c1"
     readonly property color secondaryTextColor: darkTheme ? "#a6a6a6" : "#5f6872"
     readonly property color dangerColor: darkTheme ? "#f48771" : "#a1260d"
@@ -114,214 +119,323 @@ Rectangle {
         anchors.fill: parent
         spacing: 0
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 42
-            color: headerColor
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 8
-
-                RuntimeIconButton {
-                    iconName: "arrow-left"
-                    toolTip: qsTr("Back")
-                    onClicked: root.backRequested()
-                }
-
-                Item {
-                    Layout.fillWidth: true
-                }
-
-                RuntimeComboBox {
-                    id: deviceCombo
-
-                    Layout.preferredWidth: 260
-                    model: root.controller !== null ? root.controller.devices : []
-                    textRole: "display"
-                    valueRole: "id"
-                    enabled: root.controller !== null && !root.controller.busy
-                    onActivated: {
-                        if (root.controller !== null) {
-                            root.controller.selectedDeviceId = currentValue
-                        }
-                    }
-                }
-
-                RuntimeButton {
-                    text: qsTr("Refresh")
-                    Layout.preferredWidth: 86
-                    implicitHeight: 30
-                    enabled: root.controller !== null && !root.controller.busy
-                    onClicked: root.controller.refreshDevices()
-                }
-            }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            color: dividerColor
-        }
-
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
 
             Rectangle {
-                Layout.fillWidth: false
+                Layout.preferredWidth: 320
+                Layout.minimumWidth: 300
+                Layout.maximumWidth: 340
                 Layout.fillHeight: true
-                Layout.minimumWidth: 360
-                Layout.preferredWidth: Math.min(560, root.width * 0.44)
-                Layout.maximumWidth: 620
-                color: pageColor
+                color: darkTheme ? "#181b20" : "#eef3f6"
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 14
+                    anchors.margins: 10
                     spacing: 10
 
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 8
-                        visible: root.controller !== null
-                                 && root.controller.uiNodes.length > 0
-                                 && root.screenImageSource().length > 0
+                        spacing: 6
 
-                        CheckBox {
-                            id: overlayCheck
-                            text: qsTr("Overlay")
-                            checked: true
-                            enabled: root.controller !== null
-                                     && root.controller.uiNodes.length > 0
-                                     && root.screenImageSource().length > 0
-                            font.pixelSize: 12
-                        }
-
-                        Label {
-                            text: root.controller !== null
-                                  ? qsTr("%1 node(s)").arg(root.controller.uiNodes.length)
-                                  : qsTr("0 node(s)")
-                            color: secondaryTextColor
-                            font.pixelSize: 12
+                        RuntimeIconButton {
+                            iconName: "arrow-left"
+                            toolTip: qsTr("Back")
+                            onClicked: root.backRequested()
                         }
 
                         Label {
                             Layout.fillWidth: true
-                            text: root.selectedUiNodeIndex >= 0
-                                  ? qsTr("selected node #%1").arg(root.selectedUiNodeIndex)
-                                  : qsTr("no node selected")
-                            color: secondaryTextColor
-                            font.pixelSize: 12
-                            horizontalAlignment: Text.AlignRight
+                            text: qsTr("Devices")
+                            color: Material.foreground
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
                             elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        RuntimeComboBox {
+                            id: deviceCombo
+
+                            Layout.fillWidth: true
+                            model: root.controller !== null ? root.controller.devices : []
+                            textRole: "display"
+                            valueRole: "id"
+                            enabled: root.controller !== null && !root.controller.busy
+                            onActivated: {
+                                if (root.controller !== null) {
+                                    root.controller.selectedDeviceId = currentValue
+                                }
+                            }
+                        }
+
+                        RuntimeIconButton {
+                            iconName: "refresh-cw"
+                            toolTip: qsTr("Refresh devices")
+                            enabled: root.controller !== null && !root.controller.busy
+                            onClicked: root.controller.refreshDevices()
                         }
                     }
 
                     Rectangle {
-                        id: screenStage
-
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        color: pageColor
+                        Layout.preferredHeight: 352
+                        radius: 4
+                        color: panelColor
+                        border.width: 0
                         clip: true
 
-                        Rectangle {
-                            id: screenSurface
+                        ColumnLayout {
+                            id: deviceInfoBody
 
-                            readonly property real deviceAspect: screenshotImage.sourceSize.width > 0
-                                                              && screenshotImage.sourceSize.height > 0
-                                                              ? screenshotImage.sourceSize.width / screenshotImage.sourceSize.height
-                                                              : 1260 / 2720
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            anchors.topMargin: 12
+                            anchors.bottomMargin: 10
+                            spacing: 6
 
-                            anchors.centerIn: parent
-                            width: Math.min(parent.width, parent.height * deviceAspect + 24)
-                            height: Math.min(parent.height, (width - 24) / deviceAspect + 24)
-                            color: inputColor
-                            border.width: 1
-                            border.color: dividerColor
-                            clip: true
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
 
-                            Image {
-                                id: screenshotImage
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
 
-                                anchors.fill: parent
-                                anchors.margins: 12
-                                fillMode: Image.PreserveAspectFit
-                                source: root.screenImageSource()
-                                asynchronous: true
-                                cache: false
-                            }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: root.deviceNameText()
+                                        color: Material.foreground
+                                        font.pixelSize: 17
+                                        font.weight: Font.DemiBold
+                                        elide: Text.ElideRight
+                                    }
 
-                            Repeater {
-                                model: root.controller !== null && overlayCheck.checked
-                                       ? root.controller.filteredUiNodes
-                                       : []
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: root.modelNameText()
+                                        color: secondaryTextColor
+                                        font.pixelSize: 11
+                                        elide: Text.ElideMiddle
+                                    }
+                                }
 
-                                delegate: Rectangle {
-                                    required property var modelData
-                                    required property int index
+                                Rectangle {
+                                    Layout.preferredWidth: Math.max(64, sidebarStateLabel.implicitWidth + 16)
+                                    Layout.preferredHeight: 22
+                                    radius: 3
+                                    color: darkTheme ? "#12314a" : "#dceef9"
+                                    border.width: 1
+                                    border.color: darkTheme ? "#2d5f86" : "#b8d9eb"
+                                    visible: root.hasSelectedDevice
 
-                                    readonly property bool selected: root.selectedUiNodeIndex === modelData.index
+                                    Label {
+                                        id: sidebarStateLabel
 
-                                    visible: modelData.visible
-                                             && modelData.width > 0
-                                             && modelData.height > 0
-                                             && screenshotImage.status === Image.Ready
-                                    x: root.overlayX(modelData.left)
-                                    y: root.overlayY(modelData.top)
-                                    width: Math.max(2, modelData.width * root.overlayScale())
-                                    height: Math.max(2, modelData.height * root.overlayScale())
-                                    color: selected
-                                           ? (root.darkTheme ? "#2f80c166" : "#2f80c144")
-                                           : "transparent"
-                                    border.width: selected ? 2 : 1
-                                    border.color: selected
-                                                  ? root.focusColor
-                                                  : (modelData.clickable ? "#d18f28" : (root.darkTheme ? "#7f8a92" : "#7b8790"))
-                                    radius: 1
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        acceptedButtons: Qt.LeftButton
-                                        hoverEnabled: true
-                                        onClicked: root.selectedUiNodeIndex = modelData.index
-                                        onDoubleClicked: {
-                                            root.selectedUiNodeIndex = modelData.index
-                                            if (root.controller !== null && !root.controller.busy) {
-                                                root.controller.tapUiNode(modelData.index)
-                                            }
-                                        }
+                                        anchors.centerIn: parent
+                                        text: root.deviceInfoValue("stateDisplay", root.deviceInfoValue("state", qsTr("online")))
+                                        color: darkTheme ? "#cbe8ff" : "#225f86"
+                                        font.pixelSize: 10
+                                        font.weight: Font.DemiBold
+                                        elide: Text.ElideRight
                                     }
                                 }
                             }
 
-                            Label {
-                                anchors.centerIn: parent
-                                width: Math.min(parent.width - 40, 320)
-                                visible: root.screenImageSource().length === 0
-                                text: qsTr("Capture a snapshot or start auto refresh to inspect the device screen")
-                                color: secondaryTextColor
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignHCenter
-                                wrapMode: Text.WordWrap
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 1
+                                Layout.topMargin: 3
+                                Layout.bottomMargin: 2
+                                color: root.darkTheme ? "#26303a" : "#dfe7eb"
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("型号代码")
+                                value: root.deviceInfoValue("modelCode", root.deviceInfoValue("model", "-"))
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("HarmonyOS 版本")
+                                value: root.deviceInfoValue("harmonyVersion", root.harmonyVersionFallbackText())
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("软件版本")
+                                value: root.softwareVersionText()
+                                maximumLines: 2
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("序列号")
+                                value: root.deviceInfoValue("id", root.controller !== null ? root.controller.selectedDeviceId : "-")
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("IMEI")
+                                value: root.deviceInfoValue("imei", "-")
+                                maximumLines: 2
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("运行内存")
+                                value: root.deviceInfoValue("runningMemory", "-")
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("存储")
+                                value: root.deviceInfoValue("storage", "-")
+                                maximumLines: 2
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("屏幕")
+                                value: root.screenResolutionText()
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("API")
+                                value: root.deviceInfoValue("apiVersion", "-")
+                            }
+
+                            SidebarInfoRow {
+                                label: qsTr("ABI")
+                                value: root.deviceInfoValue("abi", "-")
+                                maximumLines: 2
                             }
                         }
                     }
 
                     Label {
                         Layout.fillWidth: true
-                        text: root.controller !== null && root.controller.screenRefreshRunning
-                              ? root.controller.screenRefreshStatus
-                              : root.screenImageSource().length > 0
-                                ? qsTr("Screenshot updated")
-                                : ""
-                        color: secondaryTextColor
-                        font.pixelSize: 11
+                        text: qsTr("Capture / Screen")
+                        color: Material.foreground
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
                         elide: Text.ElideRight
+                    }
+
+                    RuntimeButton {
+                        Layout.fillWidth: true
+                        text: qsTr("Screenshot")
+                        tone: "primary"
+                        enabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                        onClicked: root.controller.captureScreenshot()
+                    }
+
+                    RuntimeButton {
+                        Layout.fillWidth: true
+                        text: qsTr("Inspect UI")
+                        enabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                        onClicked: root.controller.captureUiSnapshot(bundleField.text)
+                    }
+
+                    RuntimeButton {
+                        Layout.fillWidth: true
+                        text: root.controller !== null && root.controller.screenRefreshRunning
+                              ? qsTr("Stop Auto Refresh")
+                              : qsTr("Auto Refresh")
+                        enabled: root.hasSelectedDevice
+                                 && root.controller !== null
+                                 && (!root.controller.busy || root.controller.screenRefreshRunning)
+                        onClicked: {
+                            if (root.controller.screenRefreshRunning) {
+                                root.controller.stopScreenRefresh()
+                            } else {
+                                root.controller.startScreenRefresh()
+                            }
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        text: qsTr("Quick Tools")
+                        color: Material.foreground
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        elide: Text.ElideRight
+                    }
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 4
+                        columnSpacing: 8
+                        rowSpacing: 8
+
+                        QuickToolTile {
+                            text: qsTr("检查 UI")
+                            iconName: "runtime-search"
+                            actionEnabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                            onClicked: root.controller.captureUiSnapshot(bundleField.text)
+                        }
+
+                        QuickToolTile {
+                            text: qsTr("自动刷新")
+                            iconName: "runtime-refresh-cw"
+                            active: root.controller !== null && root.controller.screenRefreshRunning
+                            actionEnabled: root.hasSelectedDevice
+                                           && root.controller !== null
+                                           && (!root.controller.busy || root.controller.screenRefreshRunning)
+                            onClicked: {
+                                if (root.controller.screenRefreshRunning) {
+                                    root.controller.stopScreenRefresh()
+                                } else {
+                                    root.controller.startScreenRefresh()
+                                }
+                            }
+                        }
+
+                        QuickToolTile {
+                            text: qsTr("返回")
+                            iconName: "runtime-arrow-left"
+                            actionEnabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                            onClicked: root.controller.pressDeviceKey("Back")
+                        }
+
+                        QuickToolTile {
+                            text: qsTr("主页")
+                            iconName: "runtime-home"
+                            actionEnabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                            onClicked: root.controller.pressDeviceKey("Home")
+                        }
+
+                        QuickToolTile {
+                            text: qsTr("旋转")
+                            iconName: "runtime-rotate-ccw"
+                            available: false
+                        }
+
+                        QuickToolTile {
+                            text: qsTr("ADB Shell")
+                            iconName: "runtime-terminal"
+                            available: false
+                        }
+
+                        QuickToolTile {
+                            text: qsTr("安装应用")
+                            iconName: "runtime-package"
+                            actionEnabled: root.canInstallActivePackage()
+                            onClicked: root.installActivePackage()
+                        }
+
+                        QuickToolTile {
+                            text: qsTr("更多工具")
+                            iconName: "runtime-more"
+                            available: false
+                        }
+                    }
+
+                    Item {
+                        Layout.fillHeight: true
                     }
                 }
             }
@@ -333,369 +447,80 @@ Rectangle {
             }
 
             Rectangle {
-                Layout.preferredWidth: 480
-                Layout.minimumWidth: 420
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: panelColor
+                color: runtimeSurfaceColor
 
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 0
 
-                    Flickable {
+                    Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: root.hasEvidenceDetails
-                                                ? Math.min(contentHeight + 18, parent.height * 0.56)
-                                                : parent.height
-                        clip: true
-                        contentWidth: width
-                        contentHeight: controlsColumn.implicitHeight + 18
-                        boundsBehavior: Flickable.StopAtBounds
-                        boundsMovement: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AsNeeded
-                        }
+                        Layout.preferredHeight: 38
+                        color: headerColor
 
-                        ColumnLayout {
-                            id: controlsColumn
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            spacing: 0
 
-                            width: parent.width - 28
-                            x: 14
-                            y: 12
-                            spacing: 12
+                            Rectangle {
+                                Layout.preferredWidth: Math.min(190, Math.max(120, currentDeviceTabTitle.implicitWidth + 52))
+                                Layout.preferredHeight: 30
+                                Layout.alignment: Qt.AlignBottom
+                                radius: 3
+                                color: panelColor
+                                border.width: 1
+                                border.color: dividerColor
+                                visible: root.hasSelectedDevice
 
-                            RuntimeGroup {
-                                title: qsTr("Status")
-
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: root.controller !== null && root.controller.errorMessage.length > 0
-                                          ? root.controller.errorMessage
-                                          : root.controller !== null ? root.controller.status : ""
-                                    color: root.controller !== null && root.controller.errorMessage.length > 0
-                                           ? dangerColor
-                                           : secondaryTextColor
-                                    font.pixelSize: 12
-                                    wrapMode: Text.WordWrap
-                                }
-
-                                ProgressBar {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 3
-                                    indeterminate: root.controller !== null && root.controller.busy
-                                    visible: root.controller !== null && root.controller.busy
-                                }
-                            }
-
-                            RuntimeGroup {
-                                title: qsTr("Screen")
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
-
-                                    FormRowLabel {
-                                        text: qsTr("Capture")
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredWidth: 1
-                                        text: qsTr("Screenshot")
-                                        enabled: root.hasSelectedDevice && !root.controller.busy
-                                        onClicked: root.controller.captureScreenshot()
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredWidth: 1
-                                        text: qsTr("Inspect UI")
-                                        enabled: root.hasSelectedDevice && !root.controller.busy
-                                        onClicked: root.controller.captureUiSnapshot(bundleField.text)
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredWidth: 1
-                                        text: root.controller !== null && root.controller.screenRefreshRunning
-                                              ? qsTr("Refreshing")
-                                              : qsTr("Auto Refresh")
-                                        tone: "primary"
-                                        enabled: root.hasSelectedDevice
-                                                 && !root.controller.busy
-                                                 && !root.controller.screenRefreshRunning
-                                        onClicked: root.controller.startScreenRefresh()
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredWidth: 1
-                                        text: qsTr("Stop")
-                                        enabled: root.controller !== null
-                                                 && root.controller.screenRefreshRunning
-                                        onClicked: root.controller.stopScreenRefresh()
-                                    }
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 2
+                                    color: focusColor
                                 }
 
                                 RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 8
+                                    spacing: 6
 
-                                    FormRowLabel {
-                                        text: qsTr("Keys")
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredWidth: 1
-                                        text: qsTr("Back")
-                                        enabled: root.hasSelectedDevice && !root.controller.busy
-                                        onClicked: root.controller.pressDeviceKey("Back")
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredWidth: 1
-                                        text: qsTr("Home")
-                                        enabled: root.hasSelectedDevice && !root.controller.busy
-                                        onClicked: root.controller.pressDeviceKey("Home")
-                                    }
-                                }
-
-                                Label {
-                                    Layout.fillWidth: true
-                                    Layout.leftMargin: 72
-                                    text: root.controller !== null
-                                          ? root.controller.screenRefreshStatus
-                                          : qsTr("Screen refresh stopped.")
-                                    visible: root.controller !== null && root.controller.screenRefreshRunning
-                                    color: secondaryTextColor
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            RuntimeGroup {
-                                title: qsTr("Application")
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
-
-                                    FormRowLabel {
-                                        text: qsTr("Package")
+                                    Rectangle {
+                                        Layout.preferredWidth: 6
+                                        Layout.preferredHeight: 6
+                                        radius: 3
+                                        color: "#4aa36b"
                                     }
 
                                     Label {
+                                        id: currentDeviceTabTitle
+
                                         Layout.fillWidth: true
-                                        text: root.packageName.length > 0
-                                              ? root.packageName
-                                              : qsTr("No package loaded")
-                                        color: root.packageName.length > 0 ? Material.foreground : secondaryTextColor
-                                        font.pixelSize: 12
-                                        font.weight: root.packageName.length > 0 ? Font.DemiBold : Font.Normal
-                                        elide: Text.ElideMiddle
+                                        text: root.selectedDeviceTitle()
+                                        color: Material.foreground
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        elide: Text.ElideRight
                                         verticalAlignment: Text.AlignVCenter
                                     }
 
-                                    RuntimeButton {
-                                        Layout.preferredWidth: root.runtimeActionWidth
-                                        text: qsTr("Install")
-                                        visible: root.packagePath.length > 0
-                                        enabled: root.canInstallActivePackage()
-                                        toolTip: root.installUnavailableReason()
-                                        onClicked: root.installActivePackage()
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.preferredWidth: root.runtimeActionWidth
-                                        text: qsTr("Cancel")
-                                        visible: root.packagePath.length > 0
-                                        enabled: root.controller !== null && root.controller.busy
-                                        onClicked: root.controller.cancel()
-                                    }
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: root.runtimeFieldSpacing
-
-                                    FormRowLabel {
-                                        text: qsTr("Launch")
-                                    }
-
-                                    RuntimeTextField {
-                                        id: bundleField
-                                        Layout.preferredWidth: root.launchBundleFieldWidth
-                                        placeholderText: qsTr("Bundle")
-                                    }
-
-                                    RuntimeTextField {
-                                        id: abilityField
-                                        Layout.preferredWidth: 150
-                                        placeholderText: qsTr("Ability")
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.preferredWidth: root.runtimeActionWidth
-                                        text: qsTr("Start")
-                                        enabled: root.controller !== null
-                                                 && root.hasSelectedDevice
-                                                 && !root.controller.busy
-                                                 && bundleField.text.trim().length > 0
-                                        onClicked: root.controller.startAbility(bundleField.text, abilityField.text)
+                                    Label {
+                                        text: "x"
+                                        color: secondaryTextColor
+                                        font.pixelSize: 12
+                                        verticalAlignment: Text.AlignVCenter
                                     }
                                 }
                             }
 
-                            RuntimeGroup {
-                                title: qsTr("Interact")
-                                visible: root.controller !== null && root.controller.uiNodes.length > 0
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: root.runtimeFieldSpacing
-
-                                    FormRowLabel {
-                                        text: qsTr("Tap")
-                                    }
-
-                                    RuntimeTextField {
-                                        id: tapXField
-                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
-                                        placeholderText: qsTr("x")
-                                        validator: IntValidator { bottom: 0; top: 100000 }
-                                    }
-
-                                    RuntimeTextField {
-                                        id: tapYField
-                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
-                                        placeholderText: qsTr("y")
-                                        validator: IntValidator { bottom: 0; top: 100000 }
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
-                                        text: qsTr("Tap")
-                                        enabled: root.controller !== null
-                                                 && root.hasSelectedDevice
-                                                 && !root.controller.busy
-                                                 && tapXField.acceptableInput
-                                                 && tapYField.acceptableInput
-                                        onClicked: root.controller.tapUi(parseInt(tapXField.text), parseInt(tapYField.text))
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
-                                        text: qsTr("Tap Node")
-                                        enabled: root.controller !== null
-                                                 && root.hasSelectedDevice
-                                                 && !root.controller.busy
-                                                 && root.selectedUiNodeIndex >= 0
-                                        onClicked: root.controller.tapUiNode(root.selectedUiNodeIndex)
-                                    }
-
-                                    Item {
-                                        Layout.fillWidth: true
-                                    }
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
-
-                                    FormRowLabel {
-                                        text: qsTr("Type")
-                                    }
-
-                                    RuntimeTextField {
-                                        id: uiTextField
-                                        Layout.fillWidth: true
-                                        placeholderText: qsTr("text")
-                                    }
-
-                                    RuntimeButton {
-                                        Layout.preferredWidth: 72
-                                        text: qsTr("Type")
-                                        enabled: root.controller !== null
-                                                 && root.hasSelectedDevice
-                                                 && !root.controller.busy
-                                                 && uiTextField.text.length > 0
-                                        onClicked: {
-                                            if (tapXField.acceptableInput && tapYField.acceptableInput) {
-                                                root.controller.inputUiTextAt(parseInt(tapXField.text), parseInt(tapYField.text), uiTextField.text)
-                                            } else {
-                                                root.controller.inputFocusedUiText(uiTextField.text)
-                                            }
-                                        }
-                                    }
-                                }
+                            Item {
+                                Layout.fillWidth: true
                             }
-
-                            RuntimeGroup {
-                                title: qsTr("Evidence")
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
-
-                                    FormRowLabel {
-                                        text: qsTr("Hilog")
-                                    }
-
-                                    RuntimeComboBox {
-                                        id: hilogLevelCombo
-                                        Layout.preferredWidth: 92
-                                        model: [
-                                            qsTr("All"),
-                                            qsTr("Debug"),
-                                            qsTr("Info"),
-                                            qsTr("Warn"),
-                                            qsTr("Error"),
-                                            qsTr("Fatal")
-                                        ]
-                                    }
-
-                                    RuntimeTextField {
-                                        id: hilogFilterField
-                                        Layout.fillWidth: true
-                                        placeholderText: qsTr("filter")
-                                    }
-
-                                    RuntimeButton {
-                                        text: qsTr("Read")
-                                        Layout.preferredWidth: root.runtimeActionWidth
-                                        enabled: root.hasSelectedDevice && !root.controller.busy
-                                        onClicked: root.controller.readHilog(
-                                            hilogFilterField.text,
-                                            root.hilogLevelValue(),
-                                            800)
-                                    }
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
-                                    visible: root.controller !== null && root.controller.uiNodes.length > 0
-
-                                    FormRowLabel {
-                                        text: qsTr("UI")
-                                    }
-
-                                    RuntimeTextField {
-                                        id: uiNodeFilterField
-                                        Layout.fillWidth: true
-                                        placeholderText: qsTr("filter text / id / type")
-                                        onTextChanged: {
-                                            if (root.controller !== null) {
-                                                root.controller.uiNodeFilter = text
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
                         }
                     }
 
@@ -705,33 +530,754 @@ Rectangle {
                         color: dividerColor
                     }
 
-                    TabBar {
-                        id: evidenceTabs
-
-                        Layout.fillWidth: true
-                        visible: root.hasEvidenceDetails
-
-                        TabButton { text: qsTr("UI") }
-                        TabButton { text: qsTr("Commands") }
-                        TabButton { text: qsTr("Hilog") }
-                    }
-
-                    StackLayout {
+                    RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        currentIndex: evidenceTabs.currentIndex
+                        spacing: 0
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.minimumWidth: 610
+                            color: runtimeSurfaceColor
+                            clip: true
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 0
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 34
+                                    color: runtimeSurfaceColor
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        spacing: 4
+
+                                        RuntimeIconButton {
+                                            iconName: "scan"
+                                            toolTip: qsTr("Inspect UI")
+                                            enabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                                            onClicked: root.controller.captureUiSnapshot(bundleField.text)
+                                        }
+
+                                        RuntimeIconButton {
+                                            iconName: "maximize"
+                                            toolTip: qsTr("Fit preview")
+                                            enabled: root.screenImageSource().length > 0
+                                        }
+
+                                        RuntimeIconButton {
+                                            iconName: "search"
+                                            toolTip: qsTr("Locate selected node")
+                                            enabled: root.selectedUiNodeIndex >= 0
+                                        }
+
+                                        RuntimeIconButton {
+                                            iconName: "copy"
+                                            toolTip: qsTr("Copy selected node summary")
+                                            enabled: root.selectedUiNodeIndex >= 0
+                                        }
+
+                                        Rectangle {
+                                            Layout.preferredWidth: 1
+                                            Layout.preferredHeight: 16
+                                            color: runtimeLineColor
+                                        }
+
+                                        RuntimeIconButton {
+                                            iconName: "minus"
+                                            toolTip: qsTr("Zoom out")
+                                            enabled: root.screenImageSource().length > 0
+                                        }
+
+                                        Label {
+                                            Layout.preferredWidth: 42
+                                            text: qsTr("50%")
+                                            color: secondaryTextColor
+                                            font.pixelSize: 11
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+
+                                        RuntimeIconButton {
+                                            iconName: "plus"
+                                            toolTip: qsTr("Zoom in")
+                                            enabled: root.screenImageSource().length > 0
+                                        }
+
+                                        RuntimeIconButton {
+                                            iconName: "grid-2x2"
+                                            toolTip: qsTr("Toggle overlay")
+                                            enabled: root.controller !== null
+                                                     && root.controller.uiNodes.length > 0
+                                                     && root.screenImageSource().length > 0
+                                            onClicked: overlayCheck.checked = !overlayCheck.checked
+                                        }
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: root.controller !== null && root.controller.busy
+                                                  ? root.controller.activeOperation
+                                                  : root.controller !== null ? root.controller.status : ""
+                                            color: root.controller !== null && root.controller.errorMessage.length > 0
+                                                   ? dangerColor
+                                                   : secondaryTextColor
+                                            font.pixelSize: 11
+                                            horizontalAlignment: Text.AlignHCenter
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Label {
+                                            text: root.controller !== null
+                                                  ? qsTr("%1 nodes").arg(root.controller.uiNodes.length)
+                                                  : qsTr("0 nodes")
+                                            color: secondaryTextColor
+                                            font.pixelSize: 11
+                                            elide: Text.ElideRight
+                                        }
+
+                                        CheckBox {
+                                            id: overlayCheck
+                                            visible: false
+                                            checked: true
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 1
+                                    color: runtimeLineColor
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    spacing: 0
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        Layout.minimumWidth: 330
+                                        color: runtimeStageColor
+                                        clip: true
+
+                                        Rectangle {
+                                            id: screenStage
+
+                                            anchors.fill: parent
+                                            anchors.margins: 10
+                                            color: runtimeStageColor
+                                            clip: true
+
+                                            Rectangle {
+                                                id: screenSurface
+
+                                                readonly property real deviceAspect: screenshotImage.sourceSize.width > 0
+                                                                                  && screenshotImage.sourceSize.height > 0
+                                                                                  ? screenshotImage.sourceSize.width / screenshotImage.sourceSize.height
+                                                                                  : 1260 / 2720
+
+                                                anchors.centerIn: parent
+                                                width: Math.min(parent.width - 56, (parent.height - 28) * deviceAspect + 14)
+                                                height: Math.min(parent.height - 28, (width - 14) / deviceAspect + 14)
+                                                radius: 5
+                                                color: darkTheme ? "#121820" : "#f7fafb"
+                                                border.width: 1
+                                                border.color: screenshotImage.status === Image.Ready
+                                                              ? (darkTheme ? "#2d7fbc" : focusColor)
+                                                              : dividerColor
+                                                clip: true
+
+                                                Image {
+                                                    id: screenshotImage
+
+                                                    anchors.fill: parent
+                                                    anchors.margins: 7
+                                                    fillMode: Image.PreserveAspectFit
+                                                    source: root.screenImageSource()
+                                                    asynchronous: true
+                                                    cache: false
+                                                }
+
+                                                Repeater {
+                                                    model: root.controller !== null && overlayCheck.checked
+                                                           ? root.controller.filteredUiNodes
+                                                           : []
+
+                                                    delegate: Rectangle {
+                                                        required property var modelData
+                                                        required property int index
+
+                                                        readonly property bool selected: root.selectedUiNodeIndex === modelData.index
+
+                                                        visible: modelData.visible
+                                                                 && modelData.width > 0
+                                                                 && modelData.height > 0
+                                                                 && screenshotImage.status === Image.Ready
+                                                        x: root.overlayX(modelData.left)
+                                                        y: root.overlayY(modelData.top)
+                                                        width: Math.max(2, modelData.width * root.overlayScale())
+                                                        height: Math.max(2, modelData.height * root.overlayScale())
+                                                        color: selected
+                                                               ? (root.darkTheme ? "#2f80c166" : "#2f80c144")
+                                                               : "transparent"
+                                                        border.width: selected ? 2 : 1
+                                                        border.color: selected
+                                                                      ? root.focusColor
+                                                                      : (modelData.clickable ? "#d18f28" : (root.darkTheme ? "#7f8a92" : "#7b8790"))
+                                                        radius: 1
+
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            acceptedButtons: Qt.LeftButton
+                                                            hoverEnabled: true
+                                                            onClicked: root.selectedUiNodeIndex = modelData.index
+                                                            onDoubleClicked: {
+                                                                root.selectedUiNodeIndex = modelData.index
+                                                                if (root.controller !== null && !root.controller.busy) {
+                                                                    root.controller.tapUiNode(modelData.index)
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Label {
+                                                    anchors.centerIn: parent
+                                                    width: Math.min(parent.width - 40, 320)
+                                                    visible: root.screenImageSource().length === 0
+                                                    text: qsTr("Capture a snapshot or start auto refresh to inspect the device screen")
+                                                    color: secondaryTextColor
+                                                    font.pixelSize: 12
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.preferredWidth: 1
+                                        Layout.fillHeight: true
+                                        color: runtimeLineColor
+                                    }
+
+                                    Rectangle {
+                                        Layout.preferredWidth: 286
+                                        Layout.minimumWidth: 260
+                                        Layout.maximumWidth: 320
+                                        Layout.fillHeight: true
+                                        color: runtimeSurfaceColor
+
+                                        ColumnLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 10
+                                            spacing: 8
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                Layout.preferredHeight: 28
+                                                spacing: 8
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: qsTr("当前选中节点")
+                                                    color: Material.foreground
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.DemiBold
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                RuntimeButton {
+                                                    Layout.preferredWidth: 62
+                                                    text: qsTr("点击")
+                                                    enabled: root.controller !== null
+                                                             && root.hasSelectedDevice
+                                                             && !root.controller.busy
+                                                             && root.selectedUiNodeIndex >= 0
+                                                    onClicked: root.controller.tapUiNode(root.selectedUiNodeIndex)
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                Layout.fillHeight: true
+                                                color: runtimePanelColor
+                                                clip: true
+
+                                                ColumnLayout {
+                                                    anchors.fill: parent
+                                                    anchors.margins: 10
+                                                    spacing: 8
+
+                                                    RowLayout {
+                                                        Layout.fillWidth: true
+                                                        Layout.preferredHeight: 42
+                                                        spacing: 8
+
+                                                        ColumnLayout {
+                                                            Layout.fillWidth: true
+                                                            spacing: 2
+
+                                                            Label {
+                                                                Layout.fillWidth: true
+                                                                text: root.selectedNodeValue("type", qsTr("未选中节点"))
+                                                                color: Material.foreground
+                                                                font.pixelSize: 12
+                                                                font.weight: Font.DemiBold
+                                                                elide: Text.ElideRight
+                                                            }
+
+                                                            Label {
+                                                                Layout.fillWidth: true
+                                                                text: root.selectedNodeValue("id", root.selectedNodeText())
+                                                                color: secondaryTextColor
+                                                                font.pixelSize: 10
+                                                                elide: Text.ElideMiddle
+                                                            }
+                                                        }
+
+                                                        RuntimeIconButton {
+                                                            iconName: "copy"
+                                                            toolTip: qsTr("Copy")
+                                                            enabled: root.selectedUiNodeIndex >= 0
+                                                        }
+
+                                                        RuntimeIconButton {
+                                                            iconName: "maximize"
+                                                            toolTip: qsTr("Locate")
+                                                            enabled: root.selectedUiNodeIndex >= 0
+                                                        }
+                                                    }
+
+                                                    Rectangle {
+                                                        Layout.fillWidth: true
+                                                        Layout.preferredHeight: 1
+                                                        color: runtimeLineColor
+                                                    }
+
+                                                    Flickable {
+                                                        Layout.fillWidth: true
+                                                        Layout.fillHeight: true
+                                                        clip: true
+                                                        contentWidth: width
+                                                        contentHeight: nodePropertyColumn.implicitHeight
+                                                        boundsBehavior: Flickable.StopAtBounds
+                                                        boundsMovement: Flickable.StopAtBounds
+                                                        ScrollBar.vertical: ScrollBar {
+                                                            policy: ScrollBar.AsNeeded
+                                                        }
+
+                                                        ColumnLayout {
+                                                            id: nodePropertyColumn
+
+                                                            width: parent.width
+                                                            spacing: 0
+
+                                                            RuntimePropertyRow { label: qsTr("坐标"); value: root.selectedNodePositionText() }
+                                                            RuntimePropertyRow { label: qsTr("尺寸"); value: root.selectedNodeSizeText() }
+                                                            RuntimePropertyRow { label: qsTr("资源 ID"); value: root.selectedNodeValue("id", "-") }
+                                                            RuntimePropertyRow { label: qsTr("文本"); value: root.selectedNodeText() }
+                                                            RuntimePropertyRow { label: qsTr("内容描述"); value: root.selectedNodeValue("description", root.selectedNodeText()) }
+                                                            RuntimePropertyRow { label: qsTr("类名"); value: root.selectedNodeValue("type", "-") }
+                                                            RuntimePropertyRow { label: qsTr("可见性"); value: root.selectedNodeBoolText("visible") }
+                                                            RuntimePropertyRow { label: qsTr("启用"); value: root.selectedNodeBoolText("enabled") }
+                                                            RuntimePropertyRow { label: qsTr("焦点"); value: root.selectedNodeBoolText("focused") }
+                                                            RuntimePropertyRow { label: qsTr("点击able"); value: root.selectedNodeBoolText("clickable") }
+                                                            RuntimePropertyRow { label: qsTr("长按able"); value: root.selectedNodeBoolText("longClickable") }
+                                                            RuntimePropertyRow { label: qsTr("选中"); value: root.selectedNodeBoolText("selected") }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 1
+                            Layout.fillHeight: true
+                            color: runtimeLineColor
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 360
+                            Layout.minimumWidth: 330
+                            Layout.maximumWidth: 400
+                            Layout.fillHeight: true
+                            color: runtimeSurfaceColor
+                            clip: true
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 0
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 36
+                                    color: runtimeSurfaceColor
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        spacing: 4
+
+                                        RuntimeTabButton { text: qsTr("Console"); selected: root.consoleTabIndex === 0; onClicked: root.consoleTabIndex = 0 }
+                                        RuntimeTabButton { text: qsTr("App"); selected: root.consoleTabIndex === 1; onClicked: root.consoleTabIndex = 1 }
+                                        RuntimeTabButton { text: qsTr("Input"); selected: root.consoleTabIndex === 2; onClicked: root.consoleTabIndex = 2 }
+
+                                        Item { Layout.fillWidth: true }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 1
+                                    color: runtimeLineColor
+                                }
+
+                                StackLayout {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    currentIndex: root.consoleTabIndex
+
+                                    Flickable {
+                                        clip: true
+                                        contentWidth: width
+                                        contentHeight: consoleColumn.implicitHeight + 20
+                                        boundsBehavior: Flickable.StopAtBounds
+                                        boundsMovement: Flickable.StopAtBounds
+                                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                                        ColumnLayout {
+                                            id: consoleColumn
+
+                                            width: parent.width - 24
+                                            x: 12
+                                            y: 10
+                                            spacing: 10
+
+                                            RuntimeGroup {
+                                                title: qsTr("Status")
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: root.controller !== null && root.controller.errorMessage.length > 0
+                                                          ? root.controller.errorMessage
+                                                          : root.controller !== null ? root.controller.status : ""
+                                                    color: root.controller !== null && root.controller.errorMessage.length > 0
+                                                           ? dangerColor
+                                                           : secondaryTextColor
+                                                    font.pixelSize: 12
+                                                    wrapMode: Text.WordWrap
+                                                }
+
+                                                ProgressBar {
+                                                    Layout.fillWidth: true
+                                                    Layout.preferredHeight: 3
+                                                    indeterminate: root.controller !== null && root.controller.busy
+                                                    visible: root.controller !== null && root.controller.busy
+                                                }
+                                            }
+
+                                            RuntimeGroup {
+                                                title: qsTr("Hilog")
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 8
+
+                                                    RuntimeComboBox {
+                                                        id: hilogLevelCombo
+                                                        Layout.preferredWidth: 94
+                                                        model: [qsTr("All"), qsTr("Debug"), qsTr("Info"), qsTr("Warn"), qsTr("Error"), qsTr("Fatal")]
+                                                    }
+
+                                                    RuntimeTextField {
+                                                        id: hilogFilterField
+                                                        Layout.fillWidth: true
+                                                        placeholderText: qsTr("filter")
+                                                    }
+
+                                                    RuntimeButton {
+                                                        text: qsTr("Read")
+                                                        Layout.preferredWidth: root.runtimeActionWidth
+                                                        enabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                                                        onClicked: root.controller.readHilog(hilogFilterField.text, root.hilogLevelValue(), 800)
+                                                    }
+                                                }
+                                            }
+
+                                            RuntimeOutput {
+                                                Layout.fillWidth: true
+                                                Layout.preferredHeight: 150
+                                                text: root.controller !== null ? root.controller.commandLog : ""
+                                            }
+                                        }
+                                    }
+
+                                    Flickable {
+                                        clip: true
+                                        contentWidth: width
+                                        contentHeight: appColumn.implicitHeight + 20
+                                        boundsBehavior: Flickable.StopAtBounds
+                                        boundsMovement: Flickable.StopAtBounds
+                                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                                        ColumnLayout {
+                                            id: appColumn
+
+                                            width: parent.width - 24
+                                            x: 12
+                                            y: 10
+                                            spacing: 10
+
+                                            RuntimeGroup {
+                                                title: qsTr("Package")
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 8
+
+                                                    Label {
+                                                        Layout.fillWidth: true
+                                                        text: root.packageName.length > 0 ? root.packageName : qsTr("No package loaded")
+                                                        color: root.packageName.length > 0 ? Material.foreground : secondaryTextColor
+                                                        font.pixelSize: 12
+                                                        font.weight: root.packageName.length > 0 ? Font.DemiBold : Font.Normal
+                                                        elide: Text.ElideMiddle
+                                                        verticalAlignment: Text.AlignVCenter
+                                                    }
+
+                                                    RuntimeButton {
+                                                        Layout.preferredWidth: root.runtimeActionWidth
+                                                        text: qsTr("Install")
+                                                        visible: root.packagePath.length > 0
+                                                        enabled: root.canInstallActivePackage()
+                                                        toolTip: root.installUnavailableReason()
+                                                        onClicked: root.installActivePackage()
+                                                    }
+
+                                                    RuntimeButton {
+                                                        Layout.preferredWidth: root.runtimeActionWidth
+                                                        text: qsTr("Cancel")
+                                                        visible: root.packagePath.length > 0
+                                                        enabled: root.controller !== null && root.controller.busy
+                                                        onClicked: root.controller.cancel()
+                                                    }
+                                                }
+                                            }
+
+                                            RuntimeGroup {
+                                                title: qsTr("Launch")
+
+                                                RuntimeTextField {
+                                                    id: bundleField
+                                                    Layout.fillWidth: true
+                                                    placeholderText: qsTr("Bundle")
+                                                }
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: root.runtimeFieldSpacing
+
+                                                    RuntimeTextField {
+                                                        id: abilityField
+                                                        Layout.fillWidth: true
+                                                        placeholderText: qsTr("Ability")
+                                                    }
+
+                                                    RuntimeButton {
+                                                        Layout.preferredWidth: root.runtimeActionWidth
+                                                        text: qsTr("Start")
+                                                        enabled: root.controller !== null
+                                                                 && root.hasSelectedDevice
+                                                                 && !root.controller.busy
+                                                                 && bundleField.text.trim().length > 0
+                                                        onClicked: root.controller.startAbility(bundleField.text, abilityField.text)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Flickable {
+                                        clip: true
+                                        contentWidth: width
+                                        contentHeight: inputColumn.implicitHeight + 20
+                                        boundsBehavior: Flickable.StopAtBounds
+                                        boundsMovement: Flickable.StopAtBounds
+                                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                                        ColumnLayout {
+                                            id: inputColumn
+
+                                            width: parent.width - 24
+                                            x: 12
+                                            y: 10
+                                            spacing: 10
+
+                                            RuntimeGroup {
+                                                title: qsTr("Screen Keys")
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 8
+
+                                                    RuntimeButton {
+                                                        Layout.fillWidth: true
+                                                        text: qsTr("Back")
+                                                        enabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                                                        onClicked: root.controller.pressDeviceKey("Back")
+                                                    }
+
+                                                    RuntimeButton {
+                                                        Layout.fillWidth: true
+                                                        text: qsTr("Home")
+                                                        enabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                                                        onClicked: root.controller.pressDeviceKey("Home")
+                                                    }
+                                                }
+                                            }
+
+                                            RuntimeGroup {
+                                                title: qsTr("Pointer")
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: root.runtimeFieldSpacing
+
+                                                    RuntimeTextField {
+                                                        id: tapXField
+                                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
+                                                        placeholderText: qsTr("x")
+                                                        validator: IntValidator { bottom: 0; top: 100000 }
+                                                    }
+
+                                                    RuntimeTextField {
+                                                        id: tapYField
+                                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
+                                                        placeholderText: qsTr("y")
+                                                        validator: IntValidator { bottom: 0; top: 100000 }
+                                                    }
+
+                                                    RuntimeButton {
+                                                        Layout.preferredWidth: root.runtimeCoordinateFieldWidth
+                                                        text: qsTr("Tap")
+                                                        enabled: root.controller !== null
+                                                                 && root.hasSelectedDevice
+                                                                 && !root.controller.busy
+                                                                 && tapXField.acceptableInput
+                                                                 && tapYField.acceptableInput
+                                                        onClicked: root.controller.tapUi(parseInt(tapXField.text), parseInt(tapYField.text))
+                                                    }
+
+                                                    RuntimeButton {
+                                                        Layout.preferredWidth: 86
+                                                        text: qsTr("Tap Node")
+                                                        enabled: root.controller !== null
+                                                                 && root.hasSelectedDevice
+                                                                 && !root.controller.busy
+                                                                 && root.selectedUiNodeIndex >= 0
+                                                        onClicked: root.controller.tapUiNode(root.selectedUiNodeIndex)
+                                                    }
+                                                }
+                                            }
+
+                                            RuntimeGroup {
+                                                title: qsTr("Keyboard")
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 8
+
+                                                    RuntimeTextField {
+                                                        id: uiTextField
+                                                        Layout.fillWidth: true
+                                                        placeholderText: qsTr("text")
+                                                    }
+
+                                                    RuntimeButton {
+                                                        Layout.preferredWidth: 72
+                                                        text: qsTr("Type")
+                                                        enabled: root.controller !== null
+                                                                 && root.hasSelectedDevice
+                                                                 && !root.controller.busy
+                                                                 && uiTextField.text.length > 0
+                                                        onClicked: {
+                                                            if (tapXField.acceptableInput && tapYField.acceptableInput) {
+                                                                root.controller.inputUiTextAt(parseInt(tapXField.text), parseInt(tapYField.text), uiTextField.text)
+                                                            } else {
+                                                                root.controller.inputFocusedUiText(uiTextField.text)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: dividerColor
                         visible: root.hasEvidenceDetails
+                    }
 
-                        RuntimeOutput {
-                            text: root.uiNodesEvidenceText()
-                        }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: root.hasEvidenceDetails ? Math.max(180, Math.min(260, root.height * 0.28)) : 0
+                        visible: root.hasEvidenceDetails
+                        color: inputColor
 
-                        RuntimeOutput {
-                            text: root.controller !== null ? root.controller.commandLog : ""
-                        }
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 0
 
-                        RuntimeOutput {
-                            text: root.controller !== null ? root.controller.hilogText : ""
+                            Rectangle {
+                                id: evidenceTabs
+
+                                property int currentIndex: 0
+
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 36
+                                color: darkTheme ? "#151719" : "#f5f8fa"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 4
+
+                                    RuntimeTabButton { text: qsTr("UI"); selected: evidenceTabs.currentIndex === 0; onClicked: evidenceTabs.currentIndex = 0 }
+                                    RuntimeTabButton { text: qsTr("Commands"); selected: evidenceTabs.currentIndex === 1; onClicked: evidenceTabs.currentIndex = 1 }
+                                    RuntimeTabButton { text: qsTr("Hilog"); selected: evidenceTabs.currentIndex === 2; onClicked: evidenceTabs.currentIndex = 2 }
+
+                                    Item { Layout.fillWidth: true }
+                                }
+                            }
+
+                            StackLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                currentIndex: evidenceTabs.currentIndex
+
+                                RuntimeOutput { text: root.uiNodesEvidenceText() }
+                                RuntimeOutput { text: root.controller !== null ? root.controller.commandLog : "" }
+                                RuntimeOutput { text: root.controller !== null ? root.controller.hilogText : "" }
+                            }
                         }
                     }
                 }
@@ -993,6 +1539,233 @@ Rectangle {
         }
     }
 
+    component QuickToolTile: AbstractButton {
+        id: toolTile
+
+        property string iconName: ""
+        property bool active: false
+        property bool available: true
+        property bool actionEnabled: true
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: 64
+        implicitWidth: 52
+        implicitHeight: 64
+        padding: 0
+        hoverEnabled: available
+        enabled: available && actionEnabled
+
+        contentItem: ColumnLayout {
+            spacing: 4
+
+            Rectangle {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: 44
+                Layout.preferredHeight: 38
+                radius: 3
+                color: !toolTile.available
+                       ? (root.darkTheme ? "#1a1d21" : "#e6ecef")
+                       : toolTile.down
+                       ? (root.darkTheme ? "#152637" : "#d3e5ef")
+                       : toolTile.hovered || toolTile.active
+                       ? (root.darkTheme ? "#162a3c" : "#dcecf5")
+                       : (root.darkTheme ? "#20262d" : "#e8eef2")
+                border.width: toolTile.active || toolTile.hovered ? 1 : 1
+                border.color: toolTile.active || toolTile.hovered
+                              ? root.focusColor
+                              : (root.darkTheme ? "#2d3742" : "#ccd7dc")
+
+                Icon {
+                    anchors.centerIn: parent
+                    width: 19
+                    height: 19
+                    name: toolTile.iconName
+                    color: !toolTile.enabled
+                           ? root.secondaryTextColor
+                           : toolTile.active || toolTile.hovered
+                           ? root.focusColor
+                           : Material.foreground
+                    opacity: toolTile.enabled ? 1.0 : 0.5
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: toolTile.text
+                color: root.secondaryTextColor
+                opacity: toolTile.enabled ? 1.0 : 0.5
+                font.pixelSize: 10
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+        }
+
+        background: Item {}
+    }
+
+    component DeviceInfoMetric: Rectangle {
+        property string label: ""
+        property string value: "-"
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: 30
+        radius: 3
+        color: root.darkTheme ? "#191b1f" : "#f2f5f7"
+        border.width: 1
+        border.color: root.darkTheme ? "#2b2f34" : "#e0e6e9"
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 7
+            anchors.rightMargin: 7
+            anchors.topMargin: 3
+            anchors.bottomMargin: 3
+            spacing: 0
+
+            Label {
+                Layout.fillWidth: true
+                text: label
+                color: secondaryTextColor
+                font.pixelSize: 9
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: value.length > 0 ? value : "-"
+                color: Material.foreground
+                font.pixelSize: 11
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+        }
+    }
+
+    component SidebarInfoRow: RowLayout {
+        property string label: ""
+        property string value: "-"
+        property int maximumLines: 1
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: Math.max(22, sidebarValue.implicitHeight + 6)
+        spacing: 10
+
+        Label {
+            Layout.preferredWidth: 88
+            text: label
+            color: secondaryTextColor
+            font.pixelSize: 10
+            elide: Text.ElideRight
+            maximumLineCount: 1
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        Label {
+            id: sidebarValue
+
+            Layout.fillWidth: true
+            text: value.length > 0 ? value : "-"
+            color: Material.foreground
+            font.pixelSize: 10
+            horizontalAlignment: Text.AlignRight
+            lineHeight: 1.12
+            wrapMode: maximumLines > 1 ? Text.WrapAnywhere : Text.NoWrap
+            elide: Text.ElideRight
+            maximumLineCount: maximumLines
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    component RuntimePropertyRow: Rectangle {
+        property string label: ""
+        property string value: "-"
+
+        Layout.fillWidth: true
+        implicitHeight: Math.max(28, rowValue.implicitHeight + 11)
+        color: "transparent"
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: root.darkTheme ? "#20303d" : "#dfe7eb"
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 0
+            anchors.rightMargin: 0
+            spacing: 10
+
+            Label {
+                Layout.preferredWidth: 74
+                text: label
+                color: secondaryTextColor
+                font.pixelSize: 10
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+
+            Label {
+                id: rowValue
+
+                Layout.fillWidth: true
+                text: value.length > 0 ? value : "-"
+                color: Material.foreground
+                font.pixelSize: 10
+                lineHeight: 1.15
+                wrapMode: Text.WrapAnywhere
+                maximumLineCount: 3
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+    }
+
+    component RuntimeTabButton: AbstractButton {
+        id: tabButton
+
+        property bool selected: false
+
+        Layout.preferredWidth: Math.max(74, contentItem.implicitWidth + 24)
+        Layout.preferredHeight: 28
+        implicitHeight: 28
+        padding: 0
+        hoverEnabled: true
+
+        contentItem: Label {
+            text: tabButton.text
+            color: tabButton.selected
+                   ? (root.darkTheme ? "#d7f4ff" : "#1f6f9d")
+                   : (tabButton.hovered ? Material.foreground : root.secondaryTextColor)
+            font.pixelSize: 11
+            font.weight: tabButton.selected ? Font.DemiBold : Font.Normal
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        background: Rectangle {
+            color: tabButton.hovered && !tabButton.selected
+                   ? (root.darkTheme ? "#172330" : "#e5edf1")
+                   : "transparent"
+            border.width: 0
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 2
+                color: root.focusColor
+                visible: tabButton.selected
+            }
+        }
+    }
+
     component RuntimeGroup: Rectangle {
         id: group
 
@@ -1001,10 +1774,9 @@ Rectangle {
 
         Layout.fillWidth: true
         implicitHeight: groupBody.implicitHeight + 20
-        radius: 4
-        color: root.darkTheme ? "#24262a" : "#f8fafb"
-        border.width: 1
-        border.color: root.dividerColor
+        radius: 3
+        color: root.runtimePanelColor
+        border.width: 0
 
         ColumnLayout {
             id: groupBody
@@ -1039,11 +1811,12 @@ Rectangle {
 
         property string iconName: ""
         property string toolTip: ""
+        property int iconSize: 15
 
-        Layout.preferredWidth: 30
-        Layout.preferredHeight: 30
-        implicitWidth: 30
-        implicitHeight: 30
+        Layout.preferredWidth: 28
+        Layout.preferredHeight: 28
+        implicitWidth: 28
+        implicitHeight: 28
         padding: 0
         hoverEnabled: true
         ToolTip.text: toolTip
@@ -1053,12 +1826,13 @@ Rectangle {
         contentItem: Item {
             Icon {
                 anchors.centerIn: parent
-                width: 14
-                height: 14
-                name: iconButton.iconName
+                width: iconButton.iconSize
+                height: iconButton.iconSize
+                name: iconButton.resolvedIconName()
                 color: iconButton.enabled
-                       ? Material.foreground
+                       ? (iconButton.hovered ? root.focusColor : Material.foreground)
                        : root.secondaryTextColor
+                opacity: iconButton.enabled ? 1.0 : 0.42
             }
         }
 
@@ -1067,10 +1841,38 @@ Rectangle {
             color: !iconButton.enabled
                    ? "transparent"
                    : iconButton.down
-                   ? (root.darkTheme ? "#202327" : "#d6dde1")
-                   : iconButton.hovered
-                   ? (root.darkTheme ? "#2a2d31" : "#e7ecef")
-                   : "transparent"
+                    ? (root.darkTheme ? "#202327" : "#d6dde1")
+                    : iconButton.hovered
+                    ? (root.darkTheme ? "#1a2732" : "#e7ecef")
+                    : "transparent"
+        }
+
+        function resolvedIconName() {
+            if (iconName === "copy") {
+                return "runtime-copy"
+            }
+            if (iconName === "refresh-cw") {
+                return "runtime-refresh-cw"
+            }
+            if (iconName === "scan") {
+                return "runtime-scan"
+            }
+            if (iconName === "maximize") {
+                return "runtime-fit"
+            }
+            if (iconName === "search") {
+                return "runtime-search"
+            }
+            if (iconName === "minus") {
+                return "runtime-minus"
+            }
+            if (iconName === "plus") {
+                return "runtime-plus"
+            }
+            if (iconName === "grid-2x2") {
+                return "runtime-grid"
+            }
+            return iconName
         }
     }
 
@@ -1176,7 +1978,7 @@ Rectangle {
 
             onPaint: {
                 const context = getContext("2d")
-                context.reset()
+                context.clearRect(0, 0, width, height)
                 context.lineWidth = 1.6
                 context.lineCap = "round"
                 context.lineJoin = "round"
@@ -1199,7 +2001,7 @@ Rectangle {
             radius: 3
             color: root.inputColor
             border.width: 1
-            border.color: combo.activeFocus || combo.popup.visible ? root.focusColor : root.dividerColor
+            border.color: combo.activeFocus || combo.popup.visible ? root.focusColor : root.runtimeLineColor
         }
 
         delegate: ItemDelegate {
@@ -1278,7 +2080,7 @@ Rectangle {
         implicitHeight: 30
         radius: 3
         backgroundColor: root.inputColor
-        borderColor: root.dividerColor
+        borderColor: root.runtimeLineColor
         focusBorderColor: root.focusColor
         textColor: Material.foreground
         placeholderColor: root.secondaryTextColor
@@ -1294,7 +2096,7 @@ Rectangle {
         activeFocusOnTab: true
         color: root.inputColor
         border.width: 1
-        border.color: outputRoot.activeFocus || outputText.activeFocus ? root.focusColor : root.dividerColor
+        border.color: outputRoot.activeFocus || outputText.activeFocus ? root.focusColor : root.runtimeLineColor
         clip: true
 
         Keys.priority: Keys.BeforeItem
@@ -1405,6 +2207,235 @@ Rectangle {
             outputRoot.activateOutput()
             outputText.selectAll()
         }
+    }
+
+    function deviceInfoValue(key, fallback) {
+        if (controller === null
+                || controller.selectedDeviceInfo === undefined
+                || controller.selectedDeviceInfo === null) {
+            return fallback
+        }
+        const value = controller.selectedDeviceInfo[key]
+        if (value === undefined || value === null) {
+            return fallback
+        }
+        const text = String(value).trim()
+        return text.length > 0 ? text : fallback
+    }
+
+    function selectedDeviceTitle() {
+        return root.deviceNameText()
+    }
+
+    function deviceNameText() {
+        if (!root.hasSelectedDevice) {
+            return qsTr("No device selected")
+        }
+        const displayName = root.deviceInfoValue("deviceName", "")
+        if (displayName.length > 0) {
+            return displayName
+        }
+        const modelName = root.deviceInfoValue("modelName", root.deviceInfoValue("productName", ""))
+        if (modelName.length > 0) {
+            return root.normalizedPhoneName(modelName)
+        }
+        const model = root.deviceInfoValue("model", "")
+        if (model.length > 0) {
+            return model
+        }
+        return root.deviceInfoValue("id", root.controller.selectedDeviceId)
+    }
+
+    function selectedDeviceSubtitle() {
+        return root.modelNameText()
+    }
+
+    function modelNameText() {
+        if (!root.hasSelectedDevice) {
+            return qsTr("Connect a device with HDC to inspect runtime state.")
+        }
+        const modelName = root.deviceInfoValue("modelName", root.deviceInfoValue("productName", ""))
+        if (modelName.length > 0) {
+            return modelName
+        }
+        const model = root.deviceInfoValue("modelCode", root.deviceInfoValue("model", ""))
+        if (model.length > 0) {
+            return model
+        }
+        return root.deviceInfoValue("id", root.controller.selectedDeviceId)
+    }
+
+    function normalizedPhoneName(value) {
+        let text = String(value).trim()
+        const prefixes = [ "HUAWEI ", "HONOR " ]
+        for (let i = 0; i < prefixes.length; ++i) {
+            if (text.toUpperCase().startsWith(prefixes[i])) {
+                text = text.slice(prefixes[i].length).trim()
+                break
+            }
+        }
+        return text.length > 0 ? text : value
+    }
+
+    function versionNumberFromText(value) {
+        const match = String(value).match(/\d+(?:\.\d+){2,}/)
+        return match === null ? "" : match[0]
+    }
+
+    function systemVersionText() {
+        if (!root.hasSelectedDevice) {
+            return "-"
+        }
+        const model = root.deviceInfoValue("model", "")
+        const softwareVersion = root.deviceInfoValue("softwareVersion", root.deviceInfoValue("system", ""))
+        const version = root.versionNumberFromText(softwareVersion)
+        if (model.length > 0 && version.length > 0) {
+            return model + " " + version
+        }
+        if (softwareVersion.length > 0) {
+            const paren = softwareVersion.indexOf("(")
+            return paren > 0 ? softwareVersion.slice(0, paren).trim() : softwareVersion
+        }
+        return root.deviceInfoValue("ohosFullName", "-")
+    }
+
+    function softwareVersionText() {
+        return root.deviceInfoValue("softwareVersion",
+               root.deviceInfoValue("system",
+               root.deviceInfoValue("ohosFullName", "-")))
+    }
+
+    function harmonyVersionFallbackText() {
+        const version = root.versionNumberFromText(root.softwareVersionText())
+        if (version.length === 0) {
+            return "-"
+        }
+        const parts = version.split(".")
+        return parts.length >= 3 ? parts.slice(0, 3).join(".") : version
+    }
+
+    function normalizedResolutionText(width, height) {
+        const first = Math.round(width)
+        const second = Math.round(height)
+        if (first <= 0 || second <= 0) {
+            return "-"
+        }
+        return Math.max(first, second) + " x " + Math.min(first, second)
+    }
+
+    function screenResolutionText() {
+        const probed = root.deviceInfoValue("screenResolution", "")
+        if (probed.length > 0) {
+            return probed
+        }
+        if (screenshotImage.status === Image.Ready
+                && screenshotImage.sourceSize.width > 0
+                && screenshotImage.sourceSize.height > 0) {
+            return root.normalizedResolutionText(screenshotImage.sourceSize.width, screenshotImage.sourceSize.height)
+        }
+        return "-"
+    }
+
+    function selectedNode() {
+        if (controller === null || root.selectedUiNodeIndex < 0) {
+            return null
+        }
+        for (let i = 0; i < controller.filteredUiNodes.length; ++i) {
+            const node = controller.filteredUiNodes[i]
+            if (node.index === root.selectedUiNodeIndex) {
+                return node
+            }
+        }
+        for (let j = 0; j < controller.uiNodes.length; ++j) {
+            const fallbackNode = controller.uiNodes[j]
+            if (fallbackNode.index === root.selectedUiNodeIndex) {
+                return fallbackNode
+            }
+        }
+        return null
+    }
+
+    function selectedNodeTitle() {
+        const node = root.selectedNode()
+        if (node === null) {
+            return qsTr("No node selected")
+        }
+        const type = node.type !== undefined && node.type.length > 0 ? node.type : qsTr("Node")
+        const id = node.id !== undefined && node.id.length > 0 ? node.id : ""
+        return id.length > 0 ? type + "  " + id : type + "  #" + node.index
+    }
+
+    function selectedNodeBounds() {
+        const node = root.selectedNode()
+        if (node === null) {
+            return "-"
+        }
+        if (node.bounds !== undefined && node.bounds.length > 0) {
+            return node.bounds
+        }
+        return "[" + node.left + "," + node.top + "][" + node.right + "," + node.bottom + "]"
+    }
+
+    function selectedNodeText() {
+        const node = root.selectedNode()
+        if (node === null) {
+            return "-"
+        }
+        const label = node.label !== undefined ? String(node.label).trim() : ""
+        if (label.length > 0) {
+            return label
+        }
+        const id = node.id !== undefined ? String(node.id).trim() : ""
+        return id.length > 0 ? id : "-"
+    }
+
+    function selectedNodeValue(key, fallback) {
+        const node = root.selectedNode()
+        if (node === null || node[key] === undefined || node[key] === null) {
+            return fallback
+        }
+        const value = String(node[key]).trim()
+        return value.length > 0 ? value : fallback
+    }
+
+    function selectedNodeBoolText(key) {
+        const node = root.selectedNode()
+        if (node === null || node[key] === undefined || node[key] === null) {
+            return "-"
+        }
+        return node[key] ? "true" : "false"
+    }
+
+    function selectedNodeSize() {
+        const node = root.selectedNode()
+        if (node === null || node.width === undefined || node.height === undefined) {
+            return "-"
+        }
+        return node.width + " x " + node.height
+    }
+
+    function selectedNodeSizeText() {
+        const node = root.selectedNode()
+        if (node === null || node.width === undefined || node.height === undefined) {
+            return "-"
+        }
+        return "W " + node.width + "    H " + node.height
+    }
+
+    function selectedNodePositionText() {
+        const node = root.selectedNode()
+        if (node === null || node.left === undefined || node.top === undefined) {
+            return "-"
+        }
+        return "X " + node.left + "    Y " + node.top
+    }
+
+    function selectedNodeSummary() {
+        const node = root.selectedNode()
+        if (node === null) {
+            return qsTr("No node selected")
+        }
+        return root.selectedNodeTitle() + "  " + root.selectedNodeBounds()
     }
 
     function screenImageSource() {

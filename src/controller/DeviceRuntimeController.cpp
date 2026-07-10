@@ -17,6 +17,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -24,6 +25,7 @@
 #include <QtConcurrent>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <utility>
@@ -77,6 +79,302 @@ struct DeviceDowngradeRecoveryResult {
     QString commandLog;
     DeviceLaunchMetadata launchMetadata;
 };
+
+QString cleanedDeviceInfoValue(QString value)
+{
+    value = value.trimmed();
+    if (value.compare(QStringLiteral("unknown"), Qt::CaseInsensitive) == 0
+        || value.compare(QStringLiteral("null"), Qt::CaseInsensitive) == 0
+        || value == QStringLiteral("[]")
+        || (value.startsWith(QStringLiteral("Get parameter \"")) && value.contains(QStringLiteral(" fail!")))) {
+        return {};
+    }
+    return value;
+}
+
+QString firstDeviceCommandLine(const CommandResult& result)
+{
+    const QString output = result.standardOutput.trimmed();
+    if (output.isEmpty()) {
+        return {};
+    }
+    return cleanedDeviceInfoValue(output.split(QLatin1Char('\n')).value(0));
+}
+
+QString readDeviceShellValue(
+    const HdcDeviceBackend& backend,
+    const QString& targetId,
+    const QStringList& shellArguments)
+{
+    QStringList arguments = backend.targetArguments(targetId);
+    arguments << QStringLiteral("shell");
+    arguments << shellArguments;
+    const CommandResult result = CommandRunner::runBlocking({
+        .program = backend.resolvedProgram(),
+        .arguments = arguments,
+        .timeoutMs = 3000
+    });
+    return result.succeeded() ? firstDeviceCommandLine(result) : QString();
+}
+
+QString readDeviceParam(
+    const HdcDeviceBackend& backend,
+    const QString& targetId,
+    const QString& name)
+{
+    return readDeviceShellValue(
+        backend,
+        targetId,
+        { QStringLiteral("param"), QStringLiteral("get"), name });
+}
+
+QString readDeviceShellOutput(
+    const HdcDeviceBackend& backend,
+    const QString& targetId,
+    const QString& script)
+{
+    const CommandResult result = CommandRunner::runBlocking(backend.shellCommandRequest(script, targetId, 3000));
+    return result.succeeded() ? result.standardOutput.trimmed() : QString();
+}
+
+QString firstNonEmptyParam(
+    const HdcDeviceBackend& backend,
+    const QString& targetId,
+    const QStringList& names)
+{
+    for (const QString& name : names) {
+        const QString value = readDeviceParam(backend, targetId, name);
+        if (!value.isEmpty()) {
+            return value;
+        }
+    }
+    return {};
+}
+
+QString versionPrefix(const QString& value, int components)
+{
+    const QRegularExpression re(QStringLiteral("(\\d+(?:\\.\\d+){%1,})").arg(qMax(0, components - 1)));
+    const QRegularExpressionMatch match = re.match(value);
+    if (!match.hasMatch()) {
+        return {};
+    }
+    const QStringList parts = match.captured(1).split(QLatin1Char('.'), Qt::SkipEmptyParts);
+    if (parts.size() < components) {
+        return {};
+    }
+    return parts.mid(0, components).join(QLatin1Char('.'));
+}
+
+QString formattedDecimalGb(double gb, int decimals)
+{
+    if (gb <= 0.0) {
+        return {};
+    }
+    double value = gb;
+    if (decimals == 0) {
+        value = std::round(value);
+    }
+    QString text = QString::number(value, 'f', decimals);
+    while (text.contains(QLatin1Char('.')) && text.endsWith(QLatin1Char('0'))) {
+        text.chop(1);
+    }
+    if (text.endsWith(QLatin1Char('.'))) {
+        text.chop(1);
+    }
+    return text + QStringLiteral(" GB");
+}
+
+QString probeRunningMemory(const HdcDeviceBackend& backend, const QString& targetId)
+{
+    const QString memTotalLine = readDeviceShellValue(
+        backend,
+        targetId,
+        { QStringLiteral("cat"), QStringLiteral("/proc/meminfo") });
+    const QRegularExpressionMatch match = QRegularExpression(QStringLiteral("MemTotal:\\s*(\\d+)\\s*kB"))
+        .match(memTotalLine);
+    if (!match.hasMatch()) {
+        return {};
+    }
+    const double gb = match.captured(1).toDouble() * 1024.0 / 1000000000.0;
+    return formattedDecimalGb(gb, 0);
+}
+
+QString probeStorage(const HdcDeviceBackend& backend, const QString& targetId)
+{
+    const QString output = readDeviceShellOutput(backend, targetId, QStringLiteral("df -k /data 2>/dev/null"));
+    const QStringList lines = output.split(QRegularExpression(QStringLiteral("[\\r\\n]+")), Qt::SkipEmptyParts);
+    if (lines.size() < 2) {
+        return {};
+    }
+    const QStringList parts = lines.last().simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (parts.size() < 4) {
+        return {};
+    }
+    bool totalOk = false;
+    bool availableOk = false;
+    const double totalGb = parts.value(1).toDouble(&totalOk) * 1024.0 / 1000000000.0;
+    const double availableGb = parts.value(3).toDouble(&availableOk) * 1024.0 / 1000000000.0;
+    if (!totalOk || !availableOk) {
+        return {};
+    }
+    return QStringLiteral("%1: %2\n%3: %4")
+        .arg(
+            QStringLiteral("Available"),
+            formattedDecimalGb(availableGb, 2),
+            QStringLiteral("Total"),
+            formattedDecimalGb(totalGb, 0));
+}
+
+QString probeImei(const HdcDeviceBackend& backend, const QString& targetId)
+{
+    QString imei = firstNonEmptyParam(
+        backend,
+        targetId,
+        {
+            QStringLiteral("persist.radio.imei"),
+            QStringLiteral("ril.gsm.imei"),
+            QStringLiteral("gsm.imei"),
+            QStringLiteral("const.product.imei")
+        });
+    imei.replace(QLatin1Char(','), QLatin1Char('\n'));
+    imei.replace(QLatin1Char(';'), QLatin1Char('\n'));
+    const QStringList values = imei.split(QRegularExpression(QStringLiteral("[\\r\\n\\s]+")), Qt::SkipEmptyParts);
+    QStringList cleaned;
+    for (const QString& value : values) {
+        if (value.size() >= 14 && value.size() <= 18 && std::all_of(value.cbegin(), value.cend(), [](const QChar ch) {
+                return ch.isDigit();
+            })) {
+            cleaned.append(value);
+        }
+    }
+    cleaned.removeDuplicates();
+    return cleaned.join(QLatin1Char('\n'));
+}
+
+QString formatResolution(int first, int second)
+{
+    if (first <= 0 || second <= 0) {
+        return {};
+    }
+    return QStringLiteral("%1 x %2").arg(qMax(first, second)).arg(qMin(first, second));
+}
+
+QString screenResolutionFromOutput(const QString& output)
+{
+    const QRegularExpression namedPair(
+        QStringLiteral("(?:width|screenWidth|physicalWidth)\\D{0,32}(\\d{3,5}).{0,120}(?:height|screenHeight|physicalHeight)\\D{0,32}(\\d{3,5})"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+    QRegularExpressionMatch match = namedPair.match(output);
+    if (match.hasMatch()) {
+        const int width = match.captured(1).toInt();
+        const int height = match.captured(2).toInt();
+        if (width >= 320 && height >= 320) {
+            return formatResolution(width, height);
+        }
+    }
+
+    const QRegularExpression compactPair(QStringLiteral("(\\d{3,5})\\s*[xX]\\s*(\\d{3,5})"));
+    QRegularExpressionMatchIterator matches = compactPair.globalMatch(output);
+    while (matches.hasNext()) {
+        match = matches.next();
+        const int first = match.captured(1).toInt();
+        const int second = match.captured(2).toInt();
+        if (first >= 320 && second >= 320) {
+            return formatResolution(first, second);
+        }
+    }
+    return {};
+}
+
+QString probeScreenResolution(const HdcDeviceBackend& backend, const QString& targetId)
+{
+    const QString output = readDeviceShellOutput(
+        backend,
+        targetId,
+        QStringLiteral("(hidumper -s RenderService -a screen 2>/dev/null; "
+                       "hidumper -s DisplayManagerService -a screen 2>/dev/null; "
+                       "hidumper -s WindowManagerService -a '-a' 2>/dev/null; "
+                       "wm size 2>/dev/null)"));
+    return screenResolutionFromOutput(output);
+}
+
+QVariantMap probeDeviceInfo(const HdcDeviceBackend& backend, const QString& targetId)
+{
+    QVariantMap info;
+    const QString model = readDeviceParam(backend, targetId, QStringLiteral("const.product.model"));
+    const QString productName = readDeviceParam(backend, targetId, QStringLiteral("const.product.name"));
+    const QString softwareVersion = readDeviceParam(backend, targetId, QStringLiteral("const.product.software.version"));
+    const QString harmonyVersion = firstNonEmptyParam(
+        backend,
+        targetId,
+        {
+            QStringLiteral("const.ohos.version"),
+            QStringLiteral("const.ohos.release"),
+            QStringLiteral("const.ohos.apiversion.release")
+        });
+    const QString ohosFullName = readDeviceParam(backend, targetId, QStringLiteral("const.ohos.fullname"));
+    const QString apiVersion = readDeviceParam(backend, targetId, QStringLiteral("const.ohos.apiversion"));
+    const QString abiList = readDeviceParam(backend, targetId, QStringLiteral("const.product.cpu.abilist"));
+    const QString abiSingle = readDeviceParam(backend, targetId, QStringLiteral("const.product.cpu.abi"));
+    const QString windowDensity = readDeviceParam(backend, targetId, QStringLiteral("const.window.density"));
+    const QString persistDpi = readDeviceParam(backend, targetId, QStringLiteral("persist.sys.dpi"));
+    const QString kernel = readDeviceShellValue(backend, targetId, { QStringLiteral("uname"), QStringLiteral("-r") });
+    const QString runningMemory = probeRunningMemory(backend, targetId);
+    const QString storage = probeStorage(backend, targetId);
+    const QString imei = probeImei(backend, targetId);
+    const QString screenResolution = probeScreenResolution(backend, targetId);
+
+    if (!model.isEmpty()) {
+        info.insert(QStringLiteral("model"), model);
+        info.insert(QStringLiteral("modelCode"), model);
+    }
+    if (!productName.isEmpty()) {
+        info.insert(QStringLiteral("productName"), productName);
+        info.insert(QStringLiteral("modelName"), productName);
+    }
+    if (!softwareVersion.isEmpty()) {
+        info.insert(QStringLiteral("softwareVersion"), softwareVersion);
+        info.insert(QStringLiteral("system"), softwareVersion);
+    } else if (!ohosFullName.isEmpty()) {
+        info.insert(QStringLiteral("ohosFullName"), ohosFullName);
+        info.insert(QStringLiteral("system"), ohosFullName);
+    }
+    const QString resolvedHarmonyVersion = !harmonyVersion.isEmpty()
+        ? harmonyVersion
+        : versionPrefix(softwareVersion.isEmpty() ? ohosFullName : softwareVersion, 3);
+    if (!resolvedHarmonyVersion.isEmpty()) {
+        info.insert(QStringLiteral("harmonyVersion"), resolvedHarmonyVersion);
+    }
+    if (!apiVersion.isEmpty()) {
+        info.insert(QStringLiteral("apiVersion"), apiVersion);
+    }
+    if (!abiList.isEmpty()) {
+        info.insert(QStringLiteral("abi"), abiList);
+    } else if (!abiSingle.isEmpty()) {
+        info.insert(QStringLiteral("abi"), abiSingle);
+    }
+    if (!windowDensity.isEmpty()) {
+        info.insert(QStringLiteral("dpi"), windowDensity);
+    } else if (!persistDpi.isEmpty()) {
+        info.insert(QStringLiteral("dpi"), persistDpi);
+    }
+    if (!kernel.isEmpty()) {
+        info.insert(QStringLiteral("kernel"), kernel);
+    }
+    if (!runningMemory.isEmpty()) {
+        info.insert(QStringLiteral("runningMemory"), runningMemory);
+    }
+    if (!storage.isEmpty()) {
+        info.insert(QStringLiteral("storage"), storage);
+    }
+    if (!imei.isEmpty()) {
+        info.insert(QStringLiteral("imei"), imei);
+    }
+    if (!screenResolution.isEmpty()) {
+        info.insert(QStringLiteral("screenResolution"), screenResolution);
+    }
+    return info;
+}
 
 bool hasLaunchMetadata(const DeviceLaunchMetadata& metadata)
 {
@@ -761,6 +1059,11 @@ QString DeviceRuntimeController::selectedDeviceId() const
     return selectedDeviceId_;
 }
 
+QVariantMap DeviceRuntimeController::selectedDeviceInfo() const
+{
+    return selectedDeviceInfo_;
+}
+
 void DeviceRuntimeController::setSelectedDeviceId(const QString& selectedDeviceId)
 {
     const QString trimmed = selectedDeviceId.trimmed();
@@ -770,6 +1073,7 @@ void DeviceRuntimeController::setSelectedDeviceId(const QString& selectedDeviceI
     selectedDeviceId_ = trimmed;
     clearDeviceSessionState();
     emit selectedDeviceChanged();
+    refreshSelectedDeviceInfo();
     if (!launchMetadataPackagePath_.isEmpty()) {
         refreshLaunchMetadata(launchMetadataPackagePath_);
     }
@@ -1927,6 +2231,65 @@ void DeviceRuntimeController::setDevices(const QList<HdcDeviceTarget>& targets)
         }
     }
     emit devicesChanged();
+    refreshSelectedDeviceInfo();
+}
+
+void DeviceRuntimeController::refreshSelectedDeviceInfo()
+{
+    const int requestId = ++selectedDeviceInfoRequestId_;
+    const QString targetId = currentTargetId();
+    QVariantMap baseInfo = selectedDeviceBaseInfo();
+    setSelectedDeviceInfo(baseInfo);
+    if (targetId.isEmpty()) {
+        return;
+    }
+
+    auto* watcher = new QFutureWatcher<QVariantMap>(this);
+    connect(watcher, &QFutureWatcher<QVariantMap>::finished, this, [this, watcher, requestId, baseInfo]() mutable {
+        const QVariantMap probedInfo = watcher->result();
+        watcher->deleteLater();
+        if (requestId != selectedDeviceInfoRequestId_) {
+            return;
+        }
+        for (auto it = probedInfo.cbegin(); it != probedInfo.cend(); ++it) {
+            baseInfo.insert(it.key(), it.value());
+        }
+        setSelectedDeviceInfo(baseInfo);
+    });
+    const HdcDeviceBackend backend = backend_;
+    watcher->setFuture(QtConcurrent::run([backend, targetId]() {
+        return probeDeviceInfo(backend, targetId);
+    }));
+}
+
+void DeviceRuntimeController::setSelectedDeviceInfo(const QVariantMap& info)
+{
+    if (selectedDeviceInfo_ == info) {
+        return;
+    }
+    selectedDeviceInfo_ = info;
+    emit selectedDeviceInfoChanged();
+}
+
+QVariantMap DeviceRuntimeController::selectedDeviceBaseInfo() const
+{
+    QVariantMap info;
+    const QString targetId = currentTargetId();
+    if (targetId.isEmpty()) {
+        return info;
+    }
+    info.insert(QStringLiteral("id"), targetId);
+    for (const QVariant& deviceValue : devices_) {
+        const QVariantMap device = deviceValue.toMap();
+        if (device.value(QStringLiteral("id")).toString() != targetId) {
+            continue;
+        }
+        info.insert(QStringLiteral("state"), device.value(QStringLiteral("state")).toString());
+        info.insert(QStringLiteral("stateDisplay"), device.value(QStringLiteral("stateDisplay")).toString());
+        info.insert(QStringLiteral("rawLine"), device.value(QStringLiteral("rawLine")).toString());
+        break;
+    }
+    return info;
 }
 
 void DeviceRuntimeController::clearDeviceSessionState()

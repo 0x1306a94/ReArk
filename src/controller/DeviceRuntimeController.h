@@ -11,6 +11,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 
 #include <stop_token>
 
@@ -43,6 +44,7 @@ class DeviceRuntimeController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList devices READ devices NOTIFY devicesChanged)
     Q_PROPERTY(QString selectedDeviceId READ selectedDeviceId WRITE setSelectedDeviceId NOTIFY selectedDeviceChanged)
+    Q_PROPERTY(QVariantMap selectedDeviceInfo READ selectedDeviceInfo NOTIFY selectedDeviceInfoChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString activeOperation READ activeOperation NOTIFY busyChanged)
     Q_PROPERTY(bool screenRefreshBusy READ screenRefreshBusy NOTIFY busyChanged)
@@ -70,6 +72,7 @@ public:
     [[nodiscard]] QVariantList devices() const;
     [[nodiscard]] QString selectedDeviceId() const;
     void setSelectedDeviceId(const QString& selectedDeviceId);
+    [[nodiscard]] QVariantMap selectedDeviceInfo() const;
 
     [[nodiscard]] bool busy() const;
     [[nodiscard]] QString activeOperation() const;
@@ -119,6 +122,7 @@ public:
 signals:
     void devicesChanged();
     void selectedDeviceChanged();
+    void selectedDeviceInfoChanged();
     void busyChanged();
     void statusChanged();
     void errorMessageChanged();
@@ -154,6 +158,9 @@ private:
     void setErrorMessage(const QString& errorMessage);
     void setScreenRefreshStatus(const QString& status);
     void setDevices(const QList<HdcDeviceTarget>& targets);
+    void refreshSelectedDeviceInfo();
+    void setSelectedDeviceInfo(const QVariantMap& info);
+    [[nodiscard]] QVariantMap selectedDeviceBaseInfo() const;
     void setUiNodes(const QList<UiAutomationNode>& nodes);
     void refreshFilteredUiNodes();
     void clearDeviceSessionState();
@@ -177,6 +184,7 @@ private:
     QTimer initialUiSnapshotTimer_;
     QElapsedTimer screenRefreshElapsed_;
     QVariantList devices_;
+    QVariantMap selectedDeviceInfo_;
     QVariantList uiNodes_;
     QVariantList filteredUiNodes_;
     QList<UiAutomationNode> parsedUiNodes_;
@@ -213,6 +221,7 @@ private:
     double screenRefreshFps_ = 0.0;
     int activeCommandId_ = 0;
     int launchMetadataRequestId_ = 0;
+    int selectedDeviceInfoRequestId_ = 0;
     bool busy_ = false;
     bool hasPendingSigningInstall_ = false;
     bool hasPendingDowngradeRecovery_ = false;

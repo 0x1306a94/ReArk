@@ -31,6 +31,48 @@ Item {
         if (name === "copy") {
             return "qrc:/icons/fontawesome/copy.svg"
         }
+        if (name === "runtime-arrow-left") {
+            return "qrc:/icons/runtime-arrow-left.svg"
+        }
+        if (name === "runtime-copy") {
+            return "qrc:/icons/runtime-copy.svg"
+        }
+        if (name === "runtime-fit") {
+            return "qrc:/icons/runtime-fit.svg"
+        }
+        if (name === "runtime-grid") {
+            return "qrc:/icons/runtime-grid.svg"
+        }
+        if (name === "runtime-home") {
+            return "qrc:/icons/runtime-home.svg"
+        }
+        if (name === "runtime-minus") {
+            return "qrc:/icons/runtime-minus.svg"
+        }
+        if (name === "runtime-more") {
+            return "qrc:/icons/runtime-more.svg"
+        }
+        if (name === "runtime-package") {
+            return "qrc:/icons/runtime-package.svg"
+        }
+        if (name === "runtime-plus") {
+            return "qrc:/icons/runtime-plus.svg"
+        }
+        if (name === "runtime-refresh-cw") {
+            return "qrc:/icons/runtime-refresh-cw.svg"
+        }
+        if (name === "runtime-rotate-ccw") {
+            return "qrc:/icons/runtime-rotate-ccw.svg"
+        }
+        if (name === "runtime-scan") {
+            return "qrc:/icons/runtime-scan.svg"
+        }
+        if (name === "runtime-search") {
+            return "qrc:/icons/runtime-search.svg"
+        }
+        if (name === "runtime-terminal") {
+            return "qrc:/icons/runtime-terminal.svg"
+        }
         if (name === "folder-open") {
             return "qrc:/icons/folder-open-white.svg"
         }

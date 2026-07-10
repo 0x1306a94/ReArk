@@ -797,4 +797,29 @@ if(BUILD_TESTING)
                 "${REARK_ABC_EVIDENCE_SAMPLE}"
                 "${REARK_HARMONY_PACKING_TOOL}")
     endif()
+
+    qt_add_executable(reark_install_samples_smoke_test
+        tests/InstallSamplesSmokeTest.cpp
+        controller/ProtectedSettingsSecret.cpp
+        controller/ProtectedSettingsSecret.h
+        controller/SigningSettings.cpp
+        controller/SigningSettings.h
+    )
+    target_include_directories(reark_install_samples_smoke_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(reark_install_samples_smoke_test PRIVATE
+        reark_core
+    )
+    if(WIN32)
+        target_link_libraries(reark_install_samples_smoke_test PRIVATE Crypt32)
+    endif()
+    if(WIN32)
+        add_custom_command(TARGET reark_install_samples_smoke_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:reark_install_samples_smoke_test>
+                $<TARGET_FILE_DIR:reark_install_samples_smoke_test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endif()

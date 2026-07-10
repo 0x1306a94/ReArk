@@ -340,6 +340,282 @@ bool rewriteMetadataBundle(
     return true;
 }
 
+bool stripModuleRequestPermissions(
+    std::vector<std::byte>* bytes,
+    const QStringList& permissions,
+    QString* error,
+    int* removedCount)
+{
+    if (bytes == nullptr || permissions.isEmpty()) {
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytesToByteArray(*bytes), &parseError);
+    if (!document.isObject()) {
+        if (error != nullptr && document.isNull()) {
+            *error = QStringLiteral("Parse module.json failed while stripping permissions: %1")
+                .arg(parseError.errorString());
+        }
+        return false;
+    }
+
+    QJsonObject root = document.object();
+    QJsonObject module = root.value(QStringLiteral("module")).toObject();
+    QJsonArray requestPermissions = module.value(QStringLiteral("requestPermissions")).toArray();
+    if (requestPermissions.isEmpty()) {
+        return false;
+    }
+
+    QJsonArray kept;
+    int removed = 0;
+    for (const QJsonValue& value : requestPermissions) {
+        const QString name = value.toObject().value(QStringLiteral("name")).toString().trimmed();
+        if (!name.isEmpty() && permissions.contains(name, Qt::CaseSensitive)) {
+            ++removed;
+            continue;
+        }
+        kept.append(value);
+    }
+
+    if (removed <= 0) {
+        return false;
+    }
+
+    module.insert(QStringLiteral("requestPermissions"), kept);
+    root.insert(QStringLiteral("module"), module);
+    *bytes = byteArrayToBytes(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    if (removedCount != nullptr) {
+        *removedCount = removed;
+    }
+    return true;
+}
+
+int encodedHarmonyApiVersion(int api)
+{
+    if (api <= 0) {
+        return 0;
+    }
+    if (api == 17) {
+        return 50005017;
+    }
+    if (api == 22) {
+        return 60002022;
+    }
+    if (api == 23) {
+        return 60100023;
+    }
+    if (api == 24) {
+        return 60101024;
+    }
+    return api;
+}
+
+int compatibleApiValueForExistingField(int api, const QJsonValue& currentValue)
+{
+    if (api <= 0) {
+        return 0;
+    }
+    if (currentValue.toInt() > 1000) {
+        return encodedHarmonyApiVersion(api);
+    }
+    return api;
+}
+
+bool ensureStringArrayContains(QJsonObject* object, const QString& key, const QStringList& values)
+{
+    if (object == nullptr || values.isEmpty()) {
+        return false;
+    }
+
+    QJsonArray array = object->value(key).toArray();
+    bool changed = false;
+    for (const QString& rawValue : values) {
+        const QString value = rawValue.trimmed();
+        if (value.isEmpty()) {
+            continue;
+        }
+
+        bool found = false;
+        for (const QJsonValue& item : array) {
+            if (item.toString() == value) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            array.append(value);
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        object->insert(key, array);
+    }
+    return changed;
+}
+
+bool patchModuleCompatibilityMetadata(
+    std::vector<std::byte>* bytes,
+    const QStringList& forcedDeviceTypes,
+    int forcedCompatibleApi,
+    int forcedTargetApi,
+    QString* error,
+    QStringList* changes)
+{
+    if (bytes == nullptr
+        || (forcedDeviceTypes.isEmpty() && forcedCompatibleApi <= 0 && forcedTargetApi <= 0)) {
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytesToByteArray(*bytes), &parseError);
+    if (!document.isObject()) {
+        if (error != nullptr && document.isNull()) {
+            *error = QStringLiteral("Parse module.json failed while patching compatibility metadata: %1")
+                .arg(parseError.errorString());
+        }
+        return false;
+    }
+
+    QJsonObject root = document.object();
+    QJsonObject app = root.value(QStringLiteral("app")).toObject();
+    QJsonObject module = root.value(QStringLiteral("module")).toObject();
+    bool changed = false;
+
+    if (!forcedDeviceTypes.isEmpty()
+        && ensureStringArrayContains(&module, QStringLiteral("deviceTypes"), forcedDeviceTypes)) {
+        changed = true;
+        if (changes != nullptr) {
+            changes->append(QStringLiteral("module.deviceTypes+=%1").arg(forcedDeviceTypes.join(QStringLiteral(","))));
+        }
+    }
+
+    if (forcedCompatibleApi > 0) {
+        const QJsonValue currentValue = app.value(QStringLiteral("minAPIVersion"));
+        const int patchedValue = compatibleApiValueForExistingField(forcedCompatibleApi, currentValue);
+        if (currentValue.toInt() != patchedValue) {
+            app.insert(QStringLiteral("minAPIVersion"), patchedValue);
+            changed = true;
+            if (changes != nullptr) {
+                changes->append(QStringLiteral("app.minAPIVersion=%1").arg(patchedValue));
+            }
+        }
+    }
+
+    if (forcedTargetApi > 0) {
+        const QJsonValue currentValue = app.value(QStringLiteral("targetAPIVersion"));
+        const int patchedValue = compatibleApiValueForExistingField(forcedTargetApi, currentValue);
+        if (currentValue.toInt() != patchedValue) {
+            app.insert(QStringLiteral("targetAPIVersion"), patchedValue);
+            changed = true;
+            if (changes != nullptr) {
+                changes->append(QStringLiteral("app.targetAPIVersion=%1").arg(patchedValue));
+            }
+        }
+    }
+
+    if (!changed) {
+        return false;
+    }
+
+    root.insert(QStringLiteral("app"), app);
+    root.insert(QStringLiteral("module"), module);
+    *bytes = byteArrayToBytes(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    return true;
+}
+
+bool patchPackInfoCompatibilityMetadata(
+    std::vector<std::byte>* bytes,
+    const QStringList& forcedDeviceTypes,
+    int forcedCompatibleApi,
+    int forcedTargetApi,
+    QString* error,
+    QStringList* changes)
+{
+    if (bytes == nullptr
+        || (forcedDeviceTypes.isEmpty() && forcedCompatibleApi <= 0 && forcedTargetApi <= 0)) {
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytesToByteArray(*bytes), &parseError);
+    if (!document.isObject()) {
+        if (error != nullptr && document.isNull()) {
+            *error = QStringLiteral("Parse pack.info failed while patching compatibility metadata: %1")
+                .arg(parseError.errorString());
+        }
+        return false;
+    }
+
+    QJsonObject root = document.object();
+    QJsonObject summary = root.value(QStringLiteral("summary")).toObject();
+    QJsonArray modules = summary.value(QStringLiteral("modules")).toArray();
+    QJsonArray rewrittenModules;
+    bool changed = false;
+
+    for (const QJsonValue& value : modules) {
+        QJsonObject module = value.toObject();
+        if (!forcedDeviceTypes.isEmpty()
+            && ensureStringArrayContains(&module, QStringLiteral("deviceType"), forcedDeviceTypes)) {
+            changed = true;
+            if (changes != nullptr) {
+                changes->append(QStringLiteral("pack.summary.modules.deviceType+=%1")
+                    .arg(forcedDeviceTypes.join(QStringLiteral(","))));
+            }
+        }
+
+        QJsonObject apiVersion = module.value(QStringLiteral("apiVersion")).toObject();
+        if (forcedCompatibleApi > 0
+            && apiVersion.value(QStringLiteral("compatible")).toInt() != forcedCompatibleApi) {
+            apiVersion.insert(QStringLiteral("compatible"), forcedCompatibleApi);
+            changed = true;
+            if (changes != nullptr) {
+                changes->append(QStringLiteral("pack.summary.modules.apiVersion.compatible=%1")
+                    .arg(forcedCompatibleApi));
+            }
+        }
+        if (forcedTargetApi > 0
+            && apiVersion.value(QStringLiteral("target")).toInt() != forcedTargetApi) {
+            apiVersion.insert(QStringLiteral("target"), forcedTargetApi);
+            changed = true;
+            if (changes != nullptr) {
+                changes->append(QStringLiteral("pack.summary.modules.apiVersion.target=%1")
+                    .arg(forcedTargetApi));
+            }
+        }
+        if (!apiVersion.isEmpty()) {
+            module.insert(QStringLiteral("apiVersion"), apiVersion);
+        }
+        rewrittenModules.append(module);
+    }
+
+    QJsonArray packages = root.value(QStringLiteral("packages")).toArray();
+    QJsonArray rewrittenPackages;
+    for (const QJsonValue& value : packages) {
+        QJsonObject package = value.toObject();
+        if (!forcedDeviceTypes.isEmpty()
+            && ensureStringArrayContains(&package, QStringLiteral("deviceType"), forcedDeviceTypes)) {
+            changed = true;
+            if (changes != nullptr) {
+                changes->append(QStringLiteral("pack.packages.deviceType+=%1")
+                    .arg(forcedDeviceTypes.join(QStringLiteral(","))));
+            }
+        }
+        rewrittenPackages.append(package);
+    }
+
+    if (!changed) {
+        return false;
+    }
+
+    summary.insert(QStringLiteral("modules"), rewrittenModules);
+    root.insert(QStringLiteral("summary"), summary);
+    root.insert(QStringLiteral("packages"), rewrittenPackages);
+    *bytes = byteArrayToBytes(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    return true;
+}
+
 QString requiredPackingInputError(const QString& unpackedRoot)
 {
     const QDir root(unpackedRoot);
@@ -448,6 +724,60 @@ HarmonyBundleRewriteResult HarmonyPackageRewriter::rewriteBundleIdentity(
                     .arg(metadataReplacements));
             } else if (!metadataError.isEmpty()) {
                 result.error = QStringLiteral("%1: %2").arg(resourcePath, metadataError);
+                result.report = reports.join(QStringLiteral("\n\n"));
+                return result;
+            }
+        }
+
+        if (resourcePath == QStringLiteral("module.json") && !request.strippedRequestPermissions.isEmpty()) {
+            QString stripError;
+            int removedPermissions = 0;
+            if (stripModuleRequestPermissions(
+                    &bytes,
+                    request.strippedRequestPermissions,
+                    &stripError,
+                    &removedPermissions)) {
+                reports.append(QStringLiteral("[hap permission strip] %1\npermissions=\"%2\"\nremoved=%3")
+                    .arg(resourcePath, request.strippedRequestPermissions.join(QStringLiteral(",")))
+                    .arg(removedPermissions));
+            } else if (!stripError.isEmpty()) {
+                result.error = QStringLiteral("%1: %2").arg(resourcePath, stripError);
+                result.report = reports.join(QStringLiteral("\n\n"));
+                return result;
+            }
+        }
+
+        if (resourcePath == QStringLiteral("module.json")) {
+            QString patchError;
+            QStringList changes;
+            if (patchModuleCompatibilityMetadata(
+                    &bytes,
+                    request.forcedDeviceTypes,
+                    request.forcedCompatibleApi,
+                    request.forcedTargetApi,
+                    &patchError,
+                    &changes)) {
+                reports.append(QStringLiteral("[hap compatibility patch] %1\n%2")
+                    .arg(resourcePath, changes.join(QStringLiteral("\n"))));
+            } else if (!patchError.isEmpty()) {
+                result.error = QStringLiteral("%1: %2").arg(resourcePath, patchError);
+                result.report = reports.join(QStringLiteral("\n\n"));
+                return result;
+            }
+        } else if (resourcePath == QStringLiteral("pack.info")) {
+            QString patchError;
+            QStringList changes;
+            if (patchPackInfoCompatibilityMetadata(
+                    &bytes,
+                    request.forcedDeviceTypes,
+                    request.forcedCompatibleApi,
+                    request.forcedTargetApi,
+                    &patchError,
+                    &changes)) {
+                reports.append(QStringLiteral("[hap compatibility patch] %1\n%2")
+                    .arg(resourcePath, changes.join(QStringLiteral("\n"))));
+            } else if (!patchError.isEmpty()) {
+                result.error = QStringLiteral("%1: %2").arg(resourcePath, patchError);
                 result.report = reports.join(QStringLiteral("\n\n"));
                 return result;
             }

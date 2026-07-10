@@ -163,6 +163,10 @@ CommandRequest HarmonyHapSigner::packCommand(const HarmonyHapPackingRequest& req
     if (QFileInfo::exists(pkgContextPath)) {
         arguments << QStringLiteral("--pkg-context-path") << pkgContextPath;
     }
+    const QString hnpPath = cleanFilePath(root.filePath(QStringLiteral("hnp")));
+    if (QFileInfo::exists(hnpPath)) {
+        arguments << QStringLiteral("--hnp-path") << hnpPath;
+    }
 
     return {
         .program = request.javaProgram.trimmed().isEmpty()

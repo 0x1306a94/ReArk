@@ -4,6 +4,7 @@
 #include "core/CommandRunner.h"
 
 #include <QString>
+#include <QStringList>
 #include <stop_token>
 
 struct HarmonyBundleRewriteRequest {
@@ -11,6 +12,10 @@ struct HarmonyBundleRewriteRequest {
     QString outputHapPath;
     QString oldBundleName;
     QString newBundleName;
+    QStringList strippedRequestPermissions;
+    QStringList forcedDeviceTypes;
+    int forcedCompatibleApi = 0;
+    int forcedTargetApi = 0;
     QString javaProgram;
     QString packingToolPath;
     std::stop_token stopToken;

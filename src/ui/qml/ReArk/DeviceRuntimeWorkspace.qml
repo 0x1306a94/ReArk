@@ -19,6 +19,7 @@ Rectangle {
     property bool launchFieldsReady: false
     property int selectedUiNodeIndex: -1
     property int consoleTabIndex: 0
+    property string consoleOutputMode: "commands"
     property var activeRuntimeOutput: null
     property string pendingInstallPackagePath: ""
     readonly property bool hasUiEvidence: controller !== null && controller.filteredUiNodes.length > 0
@@ -44,6 +45,20 @@ Rectangle {
     readonly property int runtimeFieldSpacing: 8
     readonly property int runtimeCoordinateFieldWidth: 72
     readonly property int launchBundleFieldWidth: runtimeCoordinateFieldWidth * 2 + runtimeFieldSpacing
+    readonly property int runtimeInspectorMinWidth: 400
+    readonly property int runtimeInspectorMidWidth: 500
+    readonly property int runtimeInspectorWideMinWidth: 560
+    readonly property int runtimeInspectorMaxWidth: 720
+    readonly property int runtimeInspectorMidBreakpoint: 1450
+    readonly property int runtimeInspectorWideBreakpoint: 1700
+    readonly property real runtimeInspectorWideRatio: 0.34
+    readonly property int runtimeInspectorWidth: root.width >= runtimeInspectorWideBreakpoint
+                                                 ? Math.round(Math.min(runtimeInspectorMaxWidth,
+                                                                      Math.max(runtimeInspectorWideMinWidth,
+                                                                               root.width * runtimeInspectorWideRatio)))
+                                                 : root.width >= runtimeInspectorMidBreakpoint
+                                                   ? runtimeInspectorMidWidth
+                                                   : runtimeInspectorMinWidth
 
     signal backRequested()
 
@@ -88,6 +103,20 @@ Rectangle {
 
     onControllerChanged: {
         root.refreshActiveLaunchMetadata()
+    }
+
+    Connections {
+        target: root.controller
+
+        function onCommandLogChanged() {
+            root.consoleOutputMode = "commands"
+        }
+
+        function onHilogTextChanged() {
+            if (root.controller !== null && root.controller.hilogText.length > 0) {
+                root.consoleOutputMode = "hilog"
+            }
+        }
     }
 
     Component.onCompleted: {
@@ -146,21 +175,6 @@ Rectangle {
                             onClicked: root.backRequested()
                         }
 
-                        Label {
-                            Layout.fillWidth: true
-                            text: qsTr("Devices")
-                            color: Material.foreground
-                            font.pixelSize: 13
-                            font.weight: Font.DemiBold
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
                         RuntimeComboBox {
                             id: deviceCombo
 
@@ -186,7 +200,7 @@ Rectangle {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 352
+                        Layout.preferredHeight: 326
                         radius: 4
                         color: panelColor
                         border.width: 0
@@ -200,53 +214,27 @@ Rectangle {
                             anchors.rightMargin: 12
                             anchors.topMargin: 12
                             anchors.bottomMargin: 10
-                            spacing: 6
+                            spacing: 4
 
-                            RowLayout {
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 8
+                                spacing: 2
 
-                                ColumnLayout {
+                                Label {
                                     Layout.fillWidth: true
-                                    spacing: 2
-
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: root.deviceNameText()
-                                        color: Material.foreground
-                                        font.pixelSize: 17
-                                        font.weight: Font.DemiBold
-                                        elide: Text.ElideRight
-                                    }
-
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: root.modelNameText()
-                                        color: secondaryTextColor
-                                        font.pixelSize: 11
-                                        elide: Text.ElideMiddle
-                                    }
+                                    text: root.deviceNameText()
+                                    color: Material.foreground
+                                    font.pixelSize: 17
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
                                 }
 
-                                Rectangle {
-                                    Layout.preferredWidth: Math.max(64, sidebarStateLabel.implicitWidth + 16)
-                                    Layout.preferredHeight: 22
-                                    radius: 3
-                                    color: darkTheme ? "#12314a" : "#dceef9"
-                                    border.width: 1
-                                    border.color: darkTheme ? "#2d5f86" : "#b8d9eb"
-                                    visible: root.hasSelectedDevice
-
-                                    Label {
-                                        id: sidebarStateLabel
-
-                                        anchors.centerIn: parent
-                                        text: root.deviceInfoValue("stateDisplay", root.deviceInfoValue("state", qsTr("online")))
-                                        color: darkTheme ? "#cbe8ff" : "#225f86"
-                                        font.pixelSize: 10
-                                        font.weight: Font.DemiBold
-                                        elide: Text.ElideRight
-                                    }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: root.modelNameText()
+                                    color: secondaryTextColor
+                                    font.pixelSize: 11
+                                    elide: Text.ElideMiddle
                                 }
                             }
 
@@ -280,12 +268,6 @@ Rectangle {
                             }
 
                             SidebarInfoRow {
-                                label: qsTr("IMEI")
-                                value: root.deviceInfoValue("imei", "-")
-                                maximumLines: 2
-                            }
-
-                            SidebarInfoRow {
                                 label: qsTr("运行内存")
                                 value: root.deviceInfoValue("runningMemory", "-")
                             }
@@ -293,7 +275,6 @@ Rectangle {
                             SidebarInfoRow {
                                 label: qsTr("存储")
                                 value: root.deviceInfoValue("storage", "-")
-                                maximumLines: 2
                             }
 
                             SidebarInfoRow {
@@ -888,8 +869,8 @@ Rectangle {
                                                             RuntimePropertyRow { label: qsTr("可见性"); value: root.selectedNodeBoolText("visible") }
                                                             RuntimePropertyRow { label: qsTr("启用"); value: root.selectedNodeBoolText("enabled") }
                                                             RuntimePropertyRow { label: qsTr("焦点"); value: root.selectedNodeBoolText("focused") }
-                                                            RuntimePropertyRow { label: qsTr("点击able"); value: root.selectedNodeBoolText("clickable") }
-                                                            RuntimePropertyRow { label: qsTr("长按able"); value: root.selectedNodeBoolText("longClickable") }
+                                                            RuntimePropertyRow { label: qsTr("可点击"); value: root.selectedNodeBoolText("clickable") }
+                                                            RuntimePropertyRow { label: qsTr("可长按"); value: root.selectedNodeBoolText("longClickable") }
                                                             RuntimePropertyRow { label: qsTr("选中"); value: root.selectedNodeBoolText("selected") }
                                                         }
                                                     }
@@ -908,9 +889,9 @@ Rectangle {
                         }
 
                         Rectangle {
-                            Layout.preferredWidth: 360
-                            Layout.minimumWidth: 330
-                            Layout.maximumWidth: 400
+                            Layout.preferredWidth: root.runtimeInspectorWidth
+                            Layout.minimumWidth: root.runtimeInspectorMinWidth
+                            Layout.maximumWidth: root.runtimeInspectorMaxWidth
                             Layout.fillHeight: true
                             color: runtimeSurfaceColor
                             clip: true
@@ -921,13 +902,13 @@ Rectangle {
 
                                 Rectangle {
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 36
+                                    Layout.preferredHeight: 42
                                     color: runtimeSurfaceColor
 
                                     RowLayout {
                                         anchors.fill: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 8
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
                                         spacing: 4
 
                                         RuntimeTabButton { text: qsTr("Console"); selected: root.consoleTabIndex === 0; onClicked: root.consoleTabIndex = 0 }
@@ -938,21 +919,17 @@ Rectangle {
                                     }
                                 }
 
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 1
-                                    color: runtimeLineColor
-                                }
-
                                 StackLayout {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     currentIndex: root.consoleTabIndex
 
                                     Flickable {
+                                        id: consoleFlickable
+
                                         clip: true
                                         contentWidth: width
-                                        contentHeight: consoleColumn.implicitHeight + 20
+                                        contentHeight: consoleColumn.height + 20
                                         boundsBehavior: Flickable.StopAtBounds
                                         boundsMovement: Flickable.StopAtBounds
                                         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
@@ -960,66 +937,136 @@ Rectangle {
                                         ColumnLayout {
                                             id: consoleColumn
 
-                                            width: parent.width - 24
+                                            width: consoleFlickable.width - 24
+                                            height: Math.max(consoleFlickable.height - 20, implicitHeight)
                                             x: 12
-                                            y: 10
+                                            y: 8
                                             spacing: 10
 
-                                            RuntimeGroup {
-                                                title: qsTr("Status")
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                implicitHeight: consoleStatusBody.implicitHeight + 18
+                                                radius: 4
+                                                color: root.runtimePanelColor
+                                                border.width: 0
 
-                                                Label {
-                                                    Layout.fillWidth: true
-                                                    text: root.controller !== null && root.controller.errorMessage.length > 0
-                                                          ? root.controller.errorMessage
-                                                          : root.controller !== null ? root.controller.status : ""
-                                                    color: root.controller !== null && root.controller.errorMessage.length > 0
-                                                           ? dangerColor
-                                                           : secondaryTextColor
-                                                    font.pixelSize: 12
-                                                    wrapMode: Text.WordWrap
-                                                }
+                                                ColumnLayout {
+                                                    id: consoleStatusBody
 
-                                                ProgressBar {
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredHeight: 3
-                                                    indeterminate: root.controller !== null && root.controller.busy
-                                                    visible: root.controller !== null && root.controller.busy
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 10
+                                                    anchors.topMargin: 8
+                                                    anchors.bottomMargin: 8
+                                                    spacing: 6
+
+                                                    RowLayout {
+                                                        Layout.fillWidth: true
+                                                        spacing: 8
+
+                                                        Label {
+                                                            Layout.fillWidth: true
+                                                            text: qsTr("Status")
+                                                            color: root.secondaryTextColor
+                                                            font.pixelSize: 11
+                                                            font.weight: Font.DemiBold
+                                                            elide: Text.ElideRight
+                                                        }
+
+                                                        RuntimeStatusPill {
+                                                            text: root.runtimeStatusPillText()
+                                                            tone: root.runtimeStatusTone()
+                                                        }
+                                                    }
+
+                                                    Label {
+                                                        Layout.fillWidth: true
+                                                        text: root.controller !== null && root.controller.errorMessage.length > 0
+                                                              ? root.controller.errorMessage
+                                                              : root.controller !== null ? root.controller.status : ""
+                                                        color: root.controller !== null && root.controller.errorMessage.length > 0
+                                                               ? dangerColor
+                                                               : Material.foreground
+                                                        font.pixelSize: 12
+                                                        lineHeight: 1.15
+                                                        wrapMode: Text.WordWrap
+                                                    }
+
+                                                    ProgressBar {
+                                                        Layout.fillWidth: true
+                                                        Layout.preferredHeight: 3
+                                                        indeterminate: root.controller !== null && root.controller.busy
+                                                        visible: root.controller !== null && root.controller.busy
+                                                    }
                                                 }
                                             }
 
-                                            RuntimeGroup {
-                                                title: qsTr("Hilog")
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 8
 
-                                                RowLayout {
+                                                Label {
+                                                    Layout.preferredWidth: 40
+                                                    text: qsTr("Hilog")
+                                                    color: root.secondaryTextColor
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.DemiBold
+                                                    elide: Text.ElideRight
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
+
+                                                RuntimeComboBox {
+                                                    id: hilogLevelCombo
+                                                    Layout.preferredWidth: 88
+                                                    model: [qsTr("All"), qsTr("Debug"), qsTr("Info"), qsTr("Warn"), qsTr("Error"), qsTr("Fatal")]
+                                                }
+
+                                                RuntimeTextField {
+                                                    id: hilogFilterField
                                                     Layout.fillWidth: true
-                                                    spacing: 8
+                                                    placeholderText: qsTr("filter")
+                                                }
 
-                                                    RuntimeComboBox {
-                                                        id: hilogLevelCombo
-                                                        Layout.preferredWidth: 94
-                                                        model: [qsTr("All"), qsTr("Debug"), qsTr("Info"), qsTr("Warn"), qsTr("Error"), qsTr("Fatal")]
-                                                    }
+                                                RuntimeButton {
+                                                    text: qsTr("Read")
+                                                    Layout.preferredWidth: root.runtimeActionWidth
+                                                    enabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
+                                                    onClicked: root.controller.readHilog(hilogFilterField.text, root.hilogLevelValue(), 800)
+                                                }
+                                            }
 
-                                                    RuntimeTextField {
-                                                        id: hilogFilterField
-                                                        Layout.fillWidth: true
-                                                        placeholderText: qsTr("filter")
-                                                    }
+                                            RowLayout {
+                                                Layout.fillWidth: true
 
-                                                    RuntimeButton {
-                                                        text: qsTr("Read")
-                                                        Layout.preferredWidth: root.runtimeActionWidth
-                                                        enabled: root.hasSelectedDevice && root.controller !== null && !root.controller.busy
-                                                        onClicked: root.controller.readHilog(hilogFilterField.text, root.hilogLevelValue(), 800)
-                                                    }
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: qsTr("Output")
+                                                    color: root.secondaryTextColor
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.DemiBold
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                RuntimeOutputModeButton {
+                                                    text: qsTr("Commands")
+                                                    selected: root.consoleOutputMode === "commands"
+                                                    enabled: root.controller !== null
+                                                    onClicked: root.consoleOutputMode = "commands"
+                                                }
+
+                                                RuntimeOutputModeButton {
+                                                    text: qsTr("Hilog")
+                                                    selected: root.consoleOutputMode === "hilog"
+                                                    enabled: root.controller !== null
+                                                    onClicked: root.consoleOutputMode = "hilog"
                                                 }
                                             }
 
                                             RuntimeOutput {
                                                 Layout.fillWidth: true
-                                                Layout.preferredHeight: 150
-                                                text: root.controller !== null ? root.controller.commandLog : ""
+                                                Layout.fillHeight: true
+                                                Layout.minimumHeight: 160
+                                                text: root.consoleOutputText()
                                             }
                                         }
                                     }
@@ -1604,77 +1651,43 @@ Rectangle {
         background: Item {}
     }
 
-    component DeviceInfoMetric: Rectangle {
-        property string label: ""
-        property string value: "-"
-
-        Layout.fillWidth: true
-        Layout.preferredHeight: 30
-        radius: 3
-        color: root.darkTheme ? "#191b1f" : "#f2f5f7"
-        border.width: 1
-        border.color: root.darkTheme ? "#2b2f34" : "#e0e6e9"
-
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 7
-            anchors.rightMargin: 7
-            anchors.topMargin: 3
-            anchors.bottomMargin: 3
-            spacing: 0
-
-            Label {
-                Layout.fillWidth: true
-                text: label
-                color: secondaryTextColor
-                font.pixelSize: 9
-                elide: Text.ElideRight
-                maximumLineCount: 1
-            }
-
-            Label {
-                Layout.fillWidth: true
-                text: value.length > 0 ? value : "-"
-                color: Material.foreground
-                font.pixelSize: 11
-                elide: Text.ElideRight
-                maximumLineCount: 1
-            }
-        }
-    }
-
-    component SidebarInfoRow: RowLayout {
+    component SidebarInfoRow: Rectangle {
         property string label: ""
         property string value: "-"
         property int maximumLines: 1
 
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.max(22, sidebarValue.implicitHeight + 6)
-        spacing: 10
+        implicitHeight: Math.max(24, sidebarValue.implicitHeight + 8)
+        color: "transparent"
 
-        Label {
-            Layout.preferredWidth: 88
-            text: label
-            color: secondaryTextColor
-            font.pixelSize: 10
-            elide: Text.ElideRight
-            maximumLineCount: 1
-            verticalAlignment: Text.AlignVCenter
-        }
+        RowLayout {
+            anchors.fill: parent
+            spacing: 10
 
-        Label {
-            id: sidebarValue
+            Label {
+                Layout.preferredWidth: 92
+                text: label
+                color: secondaryTextColor
+                font.pixelSize: 10
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                verticalAlignment: Text.AlignVCenter
+            }
 
-            Layout.fillWidth: true
-            text: value.length > 0 ? value : "-"
-            color: Material.foreground
-            font.pixelSize: 10
-            horizontalAlignment: Text.AlignRight
-            lineHeight: 1.12
-            wrapMode: maximumLines > 1 ? Text.WrapAnywhere : Text.NoWrap
-            elide: Text.ElideRight
-            maximumLineCount: maximumLines
-            verticalAlignment: Text.AlignVCenter
+            Label {
+                id: sidebarValue
+
+                Layout.fillWidth: true
+                text: value.length > 0 ? value : "-"
+                color: Material.foreground
+                font.pixelSize: 10
+                horizontalAlignment: Text.AlignRight
+                lineHeight: 1.12
+                wrapMode: maximumLines > 1 ? Text.WrapAnywhere : Text.NoWrap
+                elide: Text.ElideRight
+                maximumLineCount: maximumLines
+                verticalAlignment: Text.AlignVCenter
+            }
         }
     }
 
@@ -1683,22 +1696,14 @@ Rectangle {
         property string value: "-"
 
         Layout.fillWidth: true
-        implicitHeight: Math.max(28, rowValue.implicitHeight + 11)
+        implicitHeight: Math.max(26, rowValue.implicitHeight + 9)
         color: "transparent"
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 1
-            color: root.darkTheme ? "#20303d" : "#dfe7eb"
-        }
 
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 0
             anchors.rightMargin: 0
-            spacing: 10
+            spacing: 12
 
             Label {
                 Layout.preferredWidth: 74
@@ -1731,16 +1736,16 @@ Rectangle {
 
         property bool selected: false
 
-        Layout.preferredWidth: Math.max(74, contentItem.implicitWidth + 24)
-        Layout.preferredHeight: 28
-        implicitHeight: 28
+        Layout.preferredWidth: Math.max(84, contentItem.implicitWidth + 26)
+        Layout.preferredHeight: 30
+        implicitHeight: 30
         padding: 0
         hoverEnabled: true
 
         contentItem: Label {
             text: tabButton.text
             color: tabButton.selected
-                   ? (root.darkTheme ? "#d7f4ff" : "#1f6f9d")
+                   ? Material.foreground
                    : (tabButton.hovered ? Material.foreground : root.secondaryTextColor)
             font.pixelSize: 11
             font.weight: tabButton.selected ? Font.DemiBold : Font.Normal
@@ -1750,19 +1755,92 @@ Rectangle {
         }
 
         background: Rectangle {
+            radius: 4
             color: tabButton.hovered && !tabButton.selected
                    ? (root.darkTheme ? "#172330" : "#e5edf1")
-                   : "transparent"
+                   : tabButton.selected
+                     ? root.runtimePanelColor
+                     : "transparent"
             border.width: 0
 
             Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
+                width: Math.max(18, parent.width - 42)
                 height: 2
+                radius: 1
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
                 color: root.focusColor
                 visible: tabButton.selected
             }
+        }
+    }
+
+    component RuntimeStatusPill: Rectangle {
+        property string text: ""
+        property string tone: "idle"
+
+        Layout.preferredWidth: Math.max(48, statusPillLabel.implicitWidth + 16)
+        Layout.preferredHeight: 20
+        radius: 3
+        color: tone === "error"
+               ? (root.darkTheme ? "#3b1f1f" : "#f7dfdc")
+               : tone === "busy"
+                 ? (root.darkTheme ? "#2d2615" : "#f5ead0")
+                 : tone === "ready"
+                   ? (root.darkTheme ? "#17321f" : "#dbf0df")
+                   : (root.darkTheme ? "#202832" : "#e4ebef")
+        border.width: 0
+
+        Label {
+            id: statusPillLabel
+
+            anchors.centerIn: parent
+            text: parent.text
+            color: parent.tone === "error"
+                   ? root.dangerColor
+                   : parent.tone === "busy"
+                     ? (root.darkTheme ? "#d7ba7d" : "#8a6400")
+                     : parent.tone === "ready"
+                       ? (root.darkTheme ? "#89d185" : "#187c31")
+                       : root.secondaryTextColor
+            font.pixelSize: 10
+            font.weight: Font.DemiBold
+            elide: Text.ElideRight
+        }
+    }
+
+    component RuntimeOutputModeButton: AbstractButton {
+        id: modeButton
+
+        property bool selected: false
+
+        Layout.preferredWidth: Math.max(62, contentItem.implicitWidth + 18)
+        Layout.preferredHeight: 22
+        padding: 0
+        hoverEnabled: true
+
+        contentItem: Label {
+            text: modeButton.text
+            color: modeButton.enabled
+                   ? modeButton.selected
+                     ? Material.foreground
+                     : (modeButton.hovered ? Material.foreground : root.secondaryTextColor)
+                   : root.secondaryTextColor
+            font.pixelSize: 10
+            font.weight: modeButton.selected ? Font.DemiBold : Font.Normal
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        background: Rectangle {
+            radius: 3
+            color: modeButton.enabled && modeButton.selected
+                   ? root.runtimePanelColor
+                   : modeButton.enabled && modeButton.hovered
+                     ? (root.darkTheme ? "#172330" : "#e5edf1")
+                     : "transparent"
+            border.width: 0
         }
     }
 
@@ -2246,10 +2324,6 @@ Rectangle {
         return root.deviceInfoValue("id", root.controller.selectedDeviceId)
     }
 
-    function selectedDeviceSubtitle() {
-        return root.modelNameText()
-    }
-
     function modelNameText() {
         if (!root.hasSelectedDevice) {
             return qsTr("Connect a device with HDC to inspect runtime state.")
@@ -2282,27 +2356,15 @@ Rectangle {
         return match === null ? "" : match[0]
     }
 
-    function systemVersionText() {
-        if (!root.hasSelectedDevice) {
-            return "-"
-        }
-        const model = root.deviceInfoValue("model", "")
-        const softwareVersion = root.deviceInfoValue("softwareVersion", root.deviceInfoValue("system", ""))
-        const version = root.versionNumberFromText(softwareVersion)
-        if (model.length > 0 && version.length > 0) {
-            return model + " " + version
-        }
-        if (softwareVersion.length > 0) {
-            const paren = softwareVersion.indexOf("(")
-            return paren > 0 ? softwareVersion.slice(0, paren).trim() : softwareVersion
-        }
-        return root.deviceInfoValue("ohosFullName", "-")
-    }
-
     function softwareVersionText() {
-        return root.deviceInfoValue("softwareVersion",
-               root.deviceInfoValue("system",
-               root.deviceInfoValue("ohosFullName", "-")))
+        let text = root.deviceInfoValue("softwareVersion",
+                   root.deviceInfoValue("ohosFullName", "-"))
+        const model = root.deviceInfoValue("modelCode", root.deviceInfoValue("model", ""))
+        if (model.length > 0 && text.indexOf(model + " ") === 0) {
+            text = text.slice(model.length + 1).trim()
+        }
+        text = text.replace(/\s*\(/, " (")
+        return text
     }
 
     function harmonyVersionFallbackText() {
@@ -2641,6 +2703,36 @@ Rectangle {
             return
         }
         evidenceTabs.currentIndex = hasUiEvidence ? 0 : (hasCommandEvidence ? 1 : 2)
+    }
+
+    function runtimeStatusTone() {
+        if (root.controller !== null && root.controller.errorMessage.length > 0) {
+            return "error"
+        }
+        if (root.controller !== null && root.controller.busy) {
+            return "busy"
+        }
+        return root.hasSelectedDevice ? "ready" : "idle"
+    }
+
+    function runtimeStatusPillText() {
+        if (root.controller !== null && root.controller.errorMessage.length > 0) {
+            return qsTr("Error")
+        }
+        if (root.controller !== null && root.controller.busy) {
+            return qsTr("Busy")
+        }
+        return root.hasSelectedDevice ? qsTr("Ready") : qsTr("Idle")
+    }
+
+    function consoleOutputText() {
+        if (root.controller === null) {
+            return ""
+        }
+        if (root.consoleOutputMode === "hilog") {
+            return root.controller.hilogText
+        }
+        return root.controller.commandLog
     }
 
     function hilogLevelValue() {
